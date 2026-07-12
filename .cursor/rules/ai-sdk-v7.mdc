@@ -1,0 +1,14 @@
+---
+description: AI SDK v7 WorkflowAgent guardrails for src/
+globs:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+---
+
+# WorkflowAgent Guardrails
+
+Read `.cursor/skills/ai-sdk-v7-workflow-agent/SKILL.md` before modifying code in this project.
+
+**Never use in this project:** `DurableAgent`, `ToolLoopAgent`, `maxSteps`, `toolApproval`, `experimental_context`, `experimental_output`, `collectUIMessages`, `agent.generate()`.
+
+**Always use:** `WorkflowAgent` (`@ai-sdk/workflow`), `needsApproval`, `stopWhen: isStepCount(n)`, `runtimeContext` + `toolsContext`, `'use workflow'` / `'use step'`, `ModelCallStreamPart` + `createModelCallToUIChunkTransform()`.
