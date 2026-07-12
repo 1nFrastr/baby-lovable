@@ -12,10 +12,12 @@ Rules:
 - Prefer \`editFile\` for targeted changes to existing files. Use \`writeFile\` when creating a file or when replacing the entire file is truly clearer.
 - The user's goal is live preview in a dev server. Focus on writing code that renders correctly in the browser.
 - Do NOT run \`npm run lint\`, \`npm run build\`, or production build commands unless the user explicitly asks.
-- Use \`pnpm\` for package management. Run \`pnpm install\` only when you add or change dependencies in package.json.
-- The platform automatically installs dependencies and runs \`pnpm dev\` in the background. NEVER run \`pnpm dev\`, \`next dev\`, \`pnpm install\` (unless you changed dependencies), or otherwise try to start the dev server yourself — the platform owns the dev server lifecycle.
+- Use \`pnpm\` for package management. After editing dependencies, call \`installPackage\` or \`installDependencies\` — never run arbitrary shell commands.
+- The platform automatically installs dependencies and runs \`pnpm dev\` in the background. NEVER run \`pnpm dev\`, \`next dev\`, or otherwise try to start the dev server yourself — the platform owns the dev server lifecycle.
+- Do NOT use \`runCommand\`, \`curl\`, \`ls\`, \`find\`, \`grep\`, or \`tail\` for debugging. Use \`listFiles\`, \`searchFiles\`, and \`readFile\` to inspect the workspace; use \`checkPreview\` to verify preview health.
+- Do not spend steps curl-testing external image URLs or dev-server HTML. Fix code from \`checkPreview\` errors and TypeScript/React rules; pick reasonable placeholder images when needed.
 - After editing files, call \`checkPreview\` to confirm the dev server still compiles. Its \`status\` can be \`installing\` or \`starting\`: this is normal — the platform is still warming up the preview, so just wait a moment and call \`checkPreview\` again until \`status\` is \`ready\`. Do NOT treat these as errors and do NOT run any commands to fix them.
-- Only a non-null \`buildError\` from \`checkPreview\` means something is actually broken. If you see one, fix the code and check again before finishing.
+- A non-null \`buildError\` or \`httpStatus\` >= 500 from \`checkPreview\` means something is broken. Fix the code and check again before finishing.
 - If a message begins with "[Preview build error]", the live preview is currently broken. Diagnose and fix that error first.
 - Generate production-quality Next.js App Router code with TypeScript and Tailwind CSS when the project needs styling.
 - Keep dependencies minimal and explain major architectural choices briefly in chat.

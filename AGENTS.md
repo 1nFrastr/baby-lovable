@@ -101,8 +101,9 @@ Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 | --- | --- |
 | `readFile` / `writeFile` / `editFile` / `deleteFile` | Workspace file CRUD |
 | `listFiles` / `searchFiles` | Discover project structure |
-| `runCommand` | Shell in workspace (e.g. `pnpm add …`; never `pnpm dev`) |
-| `checkPreview` | **Compile gate** — returns `{ ok, status, url, buildError }` |
+| `installPackage` / `installDependencies` | Add/remove packages or run `pnpm install` (whitelisted; no arbitrary shell) |
+| `runCommand` | **Deprecated** — only `pnpm install/add/remove` allowed; rejects curl/ls/find/etc. |
+| `checkPreview` | **Compile gate** — returns `{ ok, status, url, httpStatus, buildError }` |
 
 **Verification loop the agent (and you) should follow:**
 

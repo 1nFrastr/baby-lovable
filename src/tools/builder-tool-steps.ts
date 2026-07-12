@@ -1,4 +1,8 @@
 import type { SandboxMode } from "@/lib/sandbox/types";
+import {
+  buildAllowedShellCommand,
+  validateRunCommand,
+} from "@/lib/sandbox/command-policy";
 
 export const toolContextSchema = {
   sessionId: "string",
@@ -164,6 +168,94 @@ export async function searchFilesStep(
   };
 }
 
+async function restartPreviewAfterInstall(sessionId: string): Promise<void> {
+  const { restartDevServer } = await import("@/lib/sandbox/dev-server");
+  void restartDevServer(sessionId).catch(() => {
+    // Preview restart failures are surfaced through the preview API.
+  });
+}
+
+async function executeAllowedPnpmCommand(
+  context: ToolContext,
+  allowed: ReturnType<typeof validateRunCommand> & { ok: true },
+  cwd?: string,
+  timeout?: number,
+) {
+  const sandbox = await getSandboxFromContext(context);
+  const result = await sandbox.process.executeCommand(
+    allowed.shell,
+    cwd,
+    undefined,
+    timeout,
+  );
+
+  if (result.exitCode === 0 && allowed.allowed.kind === "pnpm-install") {
+    await restartPreviewAfterInstall(context.sessionId);
+  }
+
+  return {
+    command: allowed.shell,
+    cwd: cwd ?? ".",
+    exitCode: result.exitCode,
+    stdout: result.stdout.slice(0, 20_000),
+    stderr: result.stderr.slice(0, 20_000),
+  };
+}
+
+export async function installPackageStep(
+  input: {
+    packages: string[];
+    dev?: boolean;
+    remove?: boolean;
+  },
+  { context }: { context: ToolContext },
+) {
+  "use step";
+
+  const allowed = input.remove
+    ? buildAllowedShellCommand({ kind: "pnpm-remove", packages: input.packages })
+    : buildAllowedShellCommand({
+        kind: "pnpm-add",
+        packages: input.packages,
+        dev: input.dev ?? false,
+      });
+
+  const validation = validateRunCommand(allowed);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: validation.error,
+    };
+  }
+
+  const result = await executeAllowedPnpmCommand(context, validation);
+  return {
+    ok: result.exitCode === 0,
+    ...result,
+  };
+}
+
+export async function installDependenciesStep(
+  _input: Record<string, never>,
+  { context }: { context: ToolContext },
+) {
+  "use step";
+
+  const validation = validateRunCommand("pnpm install");
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: validation.error,
+    };
+  }
+
+  const result = await executeAllowedPnpmCommand(context, validation);
+  return {
+    ok: result.exitCode === 0,
+    ...result,
+  };
+}
+
 export async function runCommandStep(
   input: {
     command: string;
@@ -174,30 +266,28 @@ export async function runCommandStep(
 ) {
   "use step";
 
-  const sandbox = await getSandboxFromContext(context);
-  const result = await sandbox.process.executeCommand(
-    input.command,
+  const validation = validateRunCommand(input.command);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      command: input.command,
+      cwd: input.cwd ?? ".",
+      exitCode: 1,
+      stdout: "",
+      stderr: validation.error,
+    };
+  }
+
+  const result = await executeAllowedPnpmCommand(
+    context,
+    validation,
     input.cwd,
-    undefined,
     input.timeout,
   );
 
-  if (
-    result.exitCode === 0 &&
-    /\bpnpm\s+install\b/.test(input.command)
-  ) {
-    const { restartDevServer } = await import("@/lib/sandbox/dev-server");
-    void restartDevServer(context.sessionId).catch(() => {
-      // Preview restart failures are surfaced through the preview API.
-    });
-  }
-
   return {
-    command: input.command,
-    cwd: input.cwd ?? ".",
-    exitCode: result.exitCode,
-    stdout: result.stdout.slice(0, 20_000),
-    stderr: result.stderr.slice(0, 20_000),
+    ok: result.exitCode === 0,
+    ...result,
   };
 }
 
@@ -215,8 +305,12 @@ export async function checkPreviewStep(
   return {
     status: report.status,
     url: report.url,
+    httpStatus: report.httpStatus,
     buildError: report.buildError,
-    ok: report.buildError === null && report.status === "ready",
+    ok:
+      report.buildError === null &&
+      report.status === "ready" &&
+      (report.httpStatus === undefined || report.httpStatus < 500),
   };
 }
 

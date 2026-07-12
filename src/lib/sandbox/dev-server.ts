@@ -51,6 +51,11 @@ const DEV_LOG_COMPILE_MARKERS = [
   /Module not found/i,
   /⨯ \.\//,
   /Turbopack build failed/i,
+  /Event handlers cannot be passed/i,
+  /Client Component props/i,
+  /You're importing a component that needs/i,
+  /Server Actions must be async/i,
+  /⨯ Error:/,
 ];
 
 function stripAnsi(value: string): string {
@@ -109,6 +114,46 @@ async function readDevLogLength(sessionId: string): Promise<number> {
  * a stale error until the browser tab reloads, which otherwise makes a
  * fixed file look permanently broken.
  */
+async function readLatestDevLogServerError(
+  sessionId: string,
+): Promise<string | null> {
+  let content: string;
+  try {
+    content = await fs.readFile(devLogPath(sessionId), "utf8");
+  } catch {
+    return null;
+  }
+
+  let latestError: string | null = null;
+
+  for (const line of content.split("\n")) {
+    let entry: { source?: string; level?: string; message?: string };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (entry.source !== "Server" || entry.level !== "ERROR" || !entry.message) {
+      continue;
+    }
+
+    const message = entry.message
+      .replace(/^"\[browser\] /, "")
+      .replace(/\\n/g, "\n")
+      .replace(/\\"/g, '"')
+      .trim();
+
+    if (!DEV_LOG_COMPILE_MARKERS.some((marker) => marker.test(message))) {
+      continue;
+    }
+
+    latestError = message.slice(0, 2_000);
+  }
+
+  return latestError;
+}
+
 async function readDevLogCompileError(
   sessionId: string,
   sinceLength = 0,
@@ -157,22 +202,39 @@ async function readDevLogCompileError(
   return latestError;
 }
 
+interface PreviewProbeResult {
+  httpStatus: number | null;
+  buildError: string | null;
+}
+
 async function probePreviewCompile(
   sessionId: string,
   url: string,
-): Promise<string | null> {
+): Promise<PreviewProbeResult> {
   // Snapshot the log first so we only consider errors from the compile that
   // this probe triggers — not stale errors from earlier, already-fixed edits.
   const sinceLength = await readDevLogLength(sessionId);
+  let httpStatus: number | null = null;
 
   try {
-    await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    httpStatus = response.status;
   } catch {
     // A compile error often returns 500 — still triggers Turbopack to log it.
   }
 
   await new Promise((resolve) => setTimeout(resolve, 1_500));
-  return readDevLogCompileError(sessionId, sinceLength);
+
+  let buildError = await readDevLogCompileError(sessionId, sinceLength);
+
+  // When the page returns 5xx but no fresh log line was appended (common for
+  // RSC/runtime errors logged on an earlier compile), fall back to the latest
+  // server error instead of reporting a false negative.
+  if (!buildError && httpStatus !== null && httpStatus >= 500) {
+    buildError = await readLatestDevLogServerError(sessionId);
+  }
+
+  return { httpStatus, buildError };
 }
 
 export function sessionPort(sessionId: string): number {
@@ -526,6 +588,7 @@ export async function restartDevServer(sessionId: string): Promise<PreviewStatus
 export interface PreviewReport {
   status: PreviewStatus["status"];
   url?: string;
+  httpStatus?: number;
   buildError: string | null;
 }
 
@@ -545,8 +608,12 @@ export async function getPreviewReport(sessionId: string): Promise<PreviewReport
   // wholesale, since that resurfaces stale errors from already-fixed edits.
   let buildError = getBuildError(sessionId);
 
+  let httpStatus: number | undefined;
+
   if (resolved.status === "ready") {
-    buildError = await probePreviewCompile(sessionId, resolved.url);
+    const probe = await probePreviewCompile(sessionId, resolved.url);
+    httpStatus = probe.httpStatus ?? undefined;
+    buildError = probe.buildError;
     if (buildError) {
       buildErrors.set(sessionId, buildError);
     } else {
@@ -557,6 +624,7 @@ export async function getPreviewReport(sessionId: string): Promise<PreviewReport
   return {
     status: resolved.status,
     url: resolved.status === "ready" ? resolved.url : undefined,
+    httpStatus,
     buildError,
   };
 }

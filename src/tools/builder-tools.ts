@@ -7,6 +7,8 @@ import {
   checkPreviewStep,
   deleteFileStep,
   editFileStep,
+  installDependenciesStep,
+  installPackageStep,
   listFilesStep,
   readFileStep,
   runCommandStep,
@@ -30,6 +32,8 @@ export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) 
     editFile: context,
     listFiles: context,
     searchFiles: context,
+    installPackage: context,
+    installDependencies: context,
     runCommand: context,
     checkPreview: context,
     deleteFile: context,
@@ -96,11 +100,40 @@ export const builderTools = {
     contextSchema: toolContextSchema,
     execute: searchFilesStep,
   }),
+  installPackage: tool({
+    description:
+      "Add or remove npm packages with pnpm after editing package.json or when the user requests new dependencies.",
+    inputSchema: z.object({
+      packages: z
+        .array(z.string())
+        .min(1)
+        .describe("Package names, e.g. [\"lucide-react\", \"date-fns\"]"),
+      dev: z
+        .boolean()
+        .optional()
+        .describe("Install as devDependencies with pnpm add -D"),
+      remove: z
+        .boolean()
+        .optional()
+        .describe("Remove packages instead of adding them"),
+    }),
+    contextSchema: toolContextSchema,
+    execute: installPackageStep,
+  }),
+  installDependencies: tool({
+    description:
+      "Run pnpm install in the workspace after you change package.json or pnpm-lock.yaml.",
+    inputSchema: z.object({}),
+    contextSchema: toolContextSchema,
+    execute: installDependenciesStep,
+  }),
   runCommand: tool({
     description:
-      "Run a shell command inside the workspace, for example pnpm install or pnpm add <package>.",
+      "Deprecated — prefer installPackage or installDependencies. Only pnpm install/add/remove are allowed; all other shell commands are rejected.",
     inputSchema: z.object({
-      command: z.string().describe("Shell command to execute"),
+      command: z
+        .string()
+        .describe("Must be pnpm install, pnpm add <pkg>, or pnpm remove <pkg>"),
       cwd: z
         .string()
         .optional()
@@ -115,7 +148,7 @@ export const builderTools = {
   }),
   checkPreview: tool({
     description:
-      "Check the live dev-server preview for compile/build errors. Call this after editing files to verify the preview still compiles. Returns { ok, status, url, buildError }.",
+      "Check the live dev-server preview for compile/runtime errors. Call this after editing files to verify the preview still compiles. Returns { ok, status, url, httpStatus, buildError }.",
     inputSchema: z.object({}),
     contextSchema: toolContextSchema,
     execute: checkPreviewStep,
