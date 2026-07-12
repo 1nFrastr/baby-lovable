@@ -1,5 +1,5 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import type { LanguageModelUsage, UIMessage } from "ai";
+import type { LanguageModelUsage, ModelMessage, UIMessage } from "ai";
 
 import { truncate } from "./truncate";
 
@@ -17,7 +17,9 @@ export interface AgentStreamResult {
   }>;
   finishReason: string;
   totalUsage: LanguageModelUsage;
-  messages: unknown[];
+  messages: ModelMessage[];
+  /** Invisible auto-continue rounds used this turn (0 if none). */
+  autoContinueCount?: number;
 }
 
 export interface CreateAgentTraceOptions {
@@ -132,6 +134,18 @@ export function collectIncompleteWarnings(
     warnings.push(
       `agent stopped with finishReason=tool-calls after ${result.steps.length} step(s) — turn may be incomplete`,
     );
+  }
+
+  if (result.finishReason === "length") {
+    if ((result.autoContinueCount ?? 0) > 0) {
+      warnings.push(
+        `agent still hit maxOutputTokens after ${result.autoContinueCount} auto-continue(s) — turn may be incomplete`,
+      );
+    } else {
+      warnings.push(
+        "agent hit maxOutputTokens limit (finishReason=length) — tool calls may be truncated",
+      );
+    }
   }
 
   const hasAssistantText =
@@ -284,7 +298,7 @@ export function createAgentTraceCore({
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
     const usage = result.totalUsage;
     sink.success(
-      `turn complete · steps=${result.steps.length} · finish=${result.finishReason} · ${elapsed}s · tokens(in/out/total)=${usage.inputTokens ?? 0}/${usage.outputTokens ?? 0}/${usage.totalTokens ?? 0}`,
+      `turn complete · steps=${result.steps.length} · finish=${result.finishReason}${result.autoContinueCount ? ` · autoContinues=${result.autoContinueCount}` : ""} · ${elapsed}s · tokens(in/out/total)=${usage.inputTokens ?? 0}/${usage.outputTokens ?? 0}/${usage.totalTokens ?? 0}`,
     );
 
     for (const warning of collectIncompleteWarnings(
@@ -301,6 +315,7 @@ export function createAgentTraceCore({
     closeAssistantBlock,
     createWritable,
     finalizeTurn,
+    logInfo: (message: string) => sink.info(message),
   };
 }
 

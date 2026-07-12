@@ -2,7 +2,8 @@ import { type ModelCallStreamPart } from "@ai-sdk/workflow";
 import { convertToModelMessages, isStepCount, type UIMessage } from "ai";
 import { getWritable } from "workflow";
 
-import { createAgentTrace } from "@/lib/agent/agent-trace";
+import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
+import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { createBuilderAgent } from "./builder-agent";
 
 import {
@@ -43,14 +44,32 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
     channel: "web",
   });
   const startedAt = Date.now();
+  const writable = getWritable<ModelCallStreamPart>();
 
-  const result = await agent.stream({
-    messages: modelMessages,
-    writable: getWritable<ModelCallStreamPart>(),
-    stopWhen: isStepCount(maxSteps),
-    runtimeContext,
-    toolsContext,
-    ...trace.hooks,
+  const result = await runAgentStreamWithAutoContinue({
+    initialMessages: modelMessages,
+    writable,
+    onAutoContinue: (n) => {
+      console.log(
+        formatTraceStdout(
+          sessionId,
+          "INFO",
+          `auto-continue #${n} after finish=length (invisible to user)`,
+        ),
+      );
+    },
+    streamOnce: async ({ messages, preventClose, sendFinish }) => {
+      return agent.stream({
+        messages,
+        writable,
+        stopWhen: isStepCount(maxSteps),
+        runtimeContext,
+        toolsContext,
+        preventClose,
+        sendFinish,
+        ...trace.hooks,
+      });
+    },
   });
 
   const assistantMessage = modelMessagesToAssistantUIMessage(

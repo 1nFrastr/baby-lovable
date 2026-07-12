@@ -7,6 +7,7 @@ import {
 } from "ai";
 
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
+import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
 import type { SandboxMode } from "@/lib/sandbox/types";
@@ -74,14 +75,28 @@ export async function runAgentTurn({
     channel: "cli",
   });
   const startedAt = Date.now();
+  const writable = trace.createWritable();
 
-  const result = await agent.stream({
-    messages: modelMessages,
-    writable: trace.createWritable(),
-    stopWhen: isStepCount(maxSteps),
-    runtimeContext,
-    toolsContext,
-    ...trace.hooks,
+  const result = await runAgentStreamWithAutoContinue({
+    initialMessages: modelMessages,
+    writable,
+    onAutoContinue: (n) => {
+      trace.logInfo(
+        `auto-continue #${n} after finish=length (invisible to user)`,
+      );
+    },
+    streamOnce: async ({ messages, preventClose, sendFinish }) => {
+      return agent.stream({
+        messages,
+        writable,
+        stopWhen: isStepCount(maxSteps),
+        runtimeContext,
+        toolsContext,
+        preventClose,
+        sendFinish,
+        ...trace.hooks,
+      });
+    },
   });
 
   const assistantMessage = modelMessagesToAssistantUIMessage(

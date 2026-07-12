@@ -1,5 +1,6 @@
 import { WorkflowAgent } from "@ai-sdk/workflow";
 
+import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { builderTools, createToolsContext } from "@/tools/builder-tools";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
@@ -11,6 +12,8 @@ Rules:
 - Use the provided tools to inspect, create, edit, and delete files in the workspace.
 - Only modify source files: \`src/**\`, \`public/**\`, and root config files (\`package.json\`, \`tsconfig.json\`, \`next.config.ts\`, \`postcss.config.mjs\`, \`eslint.config.mjs\`, \`.gitignore\`, \`pnpm-lock.yaml\`). Never read, write, edit, delete, or search inside \`.next/\`, \`node_modules/\`, or \`.git/\` — those are managed by the platform. Use \`installPackage\` / \`installDependencies\` for dependencies and \`checkPreview({ restart: true })\` for preview cache issues.
 - Prefer \`editFile\` for targeted changes to existing files. Use \`writeFile\` when creating a file or when replacing the entire file is truly clearer.
+- For non-trivial UIs (calculator, dashboard, multi-section pages), split into \`src/components/**\` and keep \`src/app/page.tsx\` thin — import and compose components there. Do not dump hundreds of lines into a single \`page.tsx\` \`writeFile\`.
+- Prefer several focused files (e.g. \`src/components/calculator/Calculator.tsx\`, \`Display.tsx\`, \`Keypad.tsx\`) over one monolithic page. Each \`writeFile\` should target one small file (roughly ≤150 lines); add more files across steps instead of one huge output.
 - The user's goal is live preview in a dev server. Focus on writing code that renders correctly in the browser.
 - Do NOT run \`npm run lint\`, \`npm run build\`, or production build commands unless the user explicitly asks.
 - Use \`pnpm\` for package management. After editing dependencies, call \`installPackage\` or \`installDependencies\` — never run arbitrary shell commands.
@@ -52,9 +55,11 @@ export function createBuilderAgent(
 ): BuilderAgentBundle {
   const toolsContext = createToolsContext(sessionId, sandboxMode);
   const runtimeContext: BuilderAgentContext = { sessionId, sandboxMode };
+  const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
 
   const agent = new WorkflowAgent({
-    model: process.env.AI_MODEL ?? "minimax/minimax-m3",
+    model: modelId,
+    maxOutputTokens: resolveMaxOutputTokens(modelId),
     instructions: BUILDER_SYSTEM_PROMPT,
     tools: builderTools,
     toolsContext,
