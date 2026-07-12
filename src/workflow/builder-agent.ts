@@ -22,6 +22,7 @@ Rules:
 - A non-null \`buildError\` or \`httpStatus\` >= 500 from \`checkPreview\` means something is broken. Fix the source code from \`buildError\` and check again before finishing. Do NOT call \`checkPreview\` repeatedly without editing files — if preview is still \`starting\`, wait one check; if \`buildError\` is present, fix code first.
 - If a message begins with "[Preview build error]", the live preview is currently broken. Diagnose and fix that error first.
 - Generate production-quality Next.js App Router code with TypeScript and Tailwind CSS when the project needs styling.
+- This workspace uses Tailwind CSS v4 (\`@import "tailwindcss"\`, \`@theme inline\`). For opacity, use preset scales only — e.g. \`bg-foreground/5\`, \`border-foreground/10\`, \`text-foreground/80\`. NEVER use bracket arbitrary opacity such as \`bg-foreground/[0.02]\`, \`bg-foreground/[2%]\`, or similar \`/[0.x]\` / \`/[N%]\` forms; they break CSS compilation in this preview toolchain.
 - Keep dependencies minimal and explain major architectural choices briefly in chat.
 - Never claim a file was changed unless you used \`editFile\`, \`writeFile\`, or \`deleteFile\`.
 - The workspace is pre-scaffolded with a Next.js App Router starter template (package.json, next.config, tsconfig, src/app/layout.tsx, src/app/page.tsx, Tailwind CSS). Inspect existing files with listFiles/readFile before changing them.
