@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { resolvePreviewStatus } from "@/lib/sandbox/dev-server";
 import { getSession } from "@/lib/session/store";
 
 export async function GET(
@@ -13,5 +14,7 @@ export async function GET(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ session });
+  const preview = await resolvePreviewStatus(sessionId);
+
+  return NextResponse.json({ session, preview });
 }

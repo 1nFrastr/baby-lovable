@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
 import {
+  checkPreviewStep,
   deleteFileStep,
   listFilesStep,
   readFileStep,
@@ -28,6 +29,7 @@ export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) 
     listFiles: context,
     searchFiles: context,
     runCommand: context,
+    checkPreview: context,
     deleteFile: context,
   };
 }
@@ -77,7 +79,7 @@ export const builderTools = {
   }),
   runCommand: tool({
     description:
-      "Run a shell command inside the workspace, for example npm install or npm run build.",
+      "Run a shell command inside the workspace, for example pnpm install or pnpm add <package>.",
     inputSchema: z.object({
       command: z.string().describe("Shell command to execute"),
       cwd: z
@@ -91,6 +93,13 @@ export const builderTools = {
     }),
     contextSchema: toolContextSchema,
     execute: runCommandStep,
+  }),
+  checkPreview: tool({
+    description:
+      "Check the live dev-server preview for compile/build errors. Call this after editing files to verify the preview still compiles. Returns { ok, status, url, buildError }.",
+    inputSchema: z.object({}),
+    contextSchema: toolContextSchema,
+    execute: checkPreviewStep,
   }),
   deleteFile: tool({
     description: "Delete a file or directory from the workspace.",

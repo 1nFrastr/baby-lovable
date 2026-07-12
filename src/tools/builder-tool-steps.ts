@@ -95,12 +95,41 @@ export async function runCommandStep(
     input.timeout,
   );
 
+  if (
+    result.exitCode === 0 &&
+    /\bpnpm\s+install\b/.test(input.command)
+  ) {
+    const { restartDevServer } = await import("@/lib/sandbox/dev-server");
+    void restartDevServer(context.sessionId).catch(() => {
+      // Preview restart failures are surfaced through the preview API.
+    });
+  }
+
   return {
     command: input.command,
     cwd: input.cwd ?? ".",
     exitCode: result.exitCode,
     stdout: result.stdout.slice(0, 20_000),
     stderr: result.stderr.slice(0, 20_000),
+  };
+}
+
+export async function checkPreviewStep(
+  _input: Record<string, never>,
+  { context }: { context: ToolContext },
+) {
+  "use step";
+
+  const { getPreviewReport } = await import("@/lib/sandbox/dev-server");
+  // Give a just-triggered recompile a moment to settle before reporting.
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  const report = await getPreviewReport(context.sessionId);
+
+  return {
+    status: report.status,
+    url: report.url,
+    buildError: report.buildError,
+    ok: report.buildError === null && report.status === "ready",
   };
 }
 

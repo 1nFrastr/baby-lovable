@@ -44,6 +44,25 @@ export async function runAgentTurn({
   maxSteps = 30,
 }: RunAgentOptions): Promise<RunAgentResult> {
   const modelMessages = await convertToModelMessages(messages);
+
+  // Warm up the preview (install deps + boot dev server) in the background so
+  // it is ready by the time the agent calls checkPreview — the agent should
+  // never have to run `pnpm install` / `pnpm dev` itself.
+  const { ensurePreviewBootstrap, getPreviewReport } = await import(
+    "@/lib/sandbox/dev-server"
+  );
+  ensurePreviewBootstrap(sessionId);
+
+  // Surface any live dev-server compile error from the previous edits so the
+  // agent starts the turn aware of what is currently broken in preview.
+  const buildError = (await getPreviewReport(sessionId)).buildError;
+  if (buildError) {
+    modelMessages.push({
+      role: "user",
+      content: `[Preview build error] The live dev server currently fails to compile. Fix this before other work:\n\n${buildError}`,
+    });
+  }
+
   const previousModelCount = modelMessages.length;
 
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(

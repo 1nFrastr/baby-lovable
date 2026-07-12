@@ -248,7 +248,21 @@ async function seedWorkspaceFromTemplate(workspaceRoot: string): Promise<void> {
   await fs.mkdir(workspaceRoot, { recursive: true });
   await fs.cp(NEXTJS_STARTER_TEMPLATE, workspaceRoot, {
     recursive: true,
-    filter: (source) => !source.endsWith(".DS_Store"),
+    filter: (source) => {
+      if (source.endsWith(".DS_Store")) {
+        return false;
+      }
+
+      const relative = path.relative(NEXTJS_STARTER_TEMPLATE, source);
+      if (
+        relative === "node_modules" ||
+        relative.startsWith(`node_modules${path.sep}`)
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   });
 }
 

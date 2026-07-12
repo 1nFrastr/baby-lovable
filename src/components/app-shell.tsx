@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Session, SessionSummary } from "@/lib/session/types";
 
 import { Chat } from "./chat";
+import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
 
 export function AppShell() {
@@ -169,11 +170,16 @@ export function AppShell() {
               </button>
             </div>
           ) : (
-            <Chat
-              key={activeSession.id}
-              sessionId={activeSession.id}
-              initialMessages={activeSession.messages}
-            />
+            <div className="flex h-full min-h-0">
+              <div className="min-w-0 flex-1">
+                <Chat
+                  key={activeSession.id}
+                  sessionId={activeSession.id}
+                  initialMessages={activeSession.messages}
+                />
+              </div>
+              <PreviewPanel sessionId={activeSession.id} />
+            </div>
           )}
         </main>
       </div>
