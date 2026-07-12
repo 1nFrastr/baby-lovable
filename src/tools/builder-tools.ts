@@ -6,6 +6,7 @@ import type { SandboxMode } from "@/lib/sandbox/types";
 import {
   checkPreviewStep,
   deleteFileStep,
+  editFileStep,
   listFilesStep,
   readFileStep,
   runCommandStep,
@@ -26,6 +27,7 @@ export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) 
   return {
     readFile: context,
     writeFile: context,
+    editFile: context,
     listFiles: context,
     searchFiles: context,
     runCommand: context,
@@ -51,6 +53,23 @@ export const builderTools = {
     }),
     contextSchema: toolContextSchema,
     execute: writeFileStep,
+  }),
+  editFile: tool({
+    description:
+      "Edit a text file by replacing an exact string. Prefer this for small changes to existing files instead of rewriting the whole file.",
+    inputSchema: z.object({
+      path: z.string().describe("Relative path inside the workspace"),
+      oldString: z
+        .string()
+        .describe("Exact text to find. Include enough context to match only the intended location."),
+      newString: z.string().describe("Replacement text"),
+      replaceAll: z
+        .boolean()
+        .optional()
+        .describe("Replace every occurrence. Defaults to false and requires a unique oldString."),
+    }),
+    contextSchema: toolContextSchema,
+    execute: editFileStep,
   }),
   listFiles: tool({
     description: "List files and directories in a workspace path.",

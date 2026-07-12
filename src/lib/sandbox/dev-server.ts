@@ -1,6 +1,7 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { getWorkspaceRoot } from "./paths";
 
@@ -16,11 +17,12 @@ interface DevServerState {
   sessionId: string;
   port: number;
   process?: ChildProcess;
-  external?: boolean;
   status: "starting" | "ready" | "error";
   url?: string;
   error?: string;
 }
+
+const execFileAsync = promisify(execFile);
 
 const servers = new Map<string, DevServerState>();
 const startingPromises = new Map<string, Promise<PreviewStatus>>();
@@ -79,53 +81,90 @@ export function getDevServerLog(sessionId: string): string {
   return logBuffers.get(sessionId) ?? "";
 }
 
-async function readLatestDevLogError(sessionId: string): Promise<string | null> {
-  const logPath = path.join(
+function devLogPath(sessionId: string): string {
+  return path.join(
     getWorkspaceRoot(sessionId),
     ".next/dev/logs/next-development.log",
   );
+}
 
+/**
+ * Current length of the dev log so a probe can later scan only the lines that
+ * were appended after it. The dev log is append-only, so scanning the whole
+ * file surfaces errors from earlier (already-fixed) compiles.
+ */
+async function readDevLogLength(sessionId: string): Promise<number> {
   try {
-    const content = await fs.readFile(logPath, "utf8");
-    const lines = content.trim().split("\n").reverse();
+    const content = await fs.readFile(devLogPath(sessionId), "utf8");
+    return content.length;
+  } catch {
+    return 0;
+  }
+}
 
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line) as {
-          level?: string;
-          message?: string;
-        };
-
-        if (entry.level !== "ERROR" || !entry.message) {
-          continue;
-        }
-
-        const message = entry.message
-          .replace(/^"\[browser\] /, "")
-          .replace(/\\n/g, "\n")
-          .replace(/\\"/g, '"')
-          .trim();
-
-        if (!DEV_LOG_COMPILE_MARKERS.some((marker) => marker.test(message))) {
-          continue;
-        }
-
-        return message.slice(0, 2_000);
-      } catch {
-        continue;
-      }
-    }
+/**
+ * Find the most recent compile error in the dev log, considering only lines
+ * appended after `sinceLength`. Only `Server`-sourced entries are trusted:
+ * `Browser`-sourced entries are console/overlay replays that keep re-reporting
+ * a stale error until the browser tab reloads, which otherwise makes a
+ * fixed file look permanently broken.
+ */
+async function readDevLogCompileError(
+  sessionId: string,
+  sinceLength = 0,
+): Promise<string | null> {
+  let content: string;
+  try {
+    content = await fs.readFile(devLogPath(sessionId), "utf8");
   } catch {
     return null;
   }
 
-  return null;
+  // If the log was rotated/truncated, fall back to scanning everything new.
+  const offset = sinceLength > content.length ? 0 : sinceLength;
+  const fresh = content.slice(offset).trim();
+  if (!fresh) {
+    return null;
+  }
+
+  let latestError: string | null = null;
+
+  for (const line of fresh.split("\n")) {
+    let entry: { source?: string; level?: string; message?: string };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (entry.source !== "Server" || entry.level !== "ERROR" || !entry.message) {
+      continue;
+    }
+
+    const message = entry.message
+      .replace(/^"\[browser\] /, "")
+      .replace(/\\n/g, "\n")
+      .replace(/\\"/g, '"')
+      .trim();
+
+    if (!DEV_LOG_COMPILE_MARKERS.some((marker) => marker.test(message))) {
+      continue;
+    }
+
+    latestError = message.slice(0, 2_000);
+  }
+
+  return latestError;
 }
 
 async function probePreviewCompile(
   sessionId: string,
   url: string,
 ): Promise<string | null> {
+  // Snapshot the log first so we only consider errors from the compile that
+  // this probe triggers — not stale errors from earlier, already-fixed edits.
+  const sinceLength = await readDevLogLength(sessionId);
+
   try {
     await fetch(url, { signal: AbortSignal.timeout(5_000) });
   } catch {
@@ -133,7 +172,7 @@ async function probePreviewCompile(
   }
 
   await new Promise((resolve) => setTimeout(resolve, 1_500));
-  return (await readLatestDevLogError(sessionId)) ?? getBuildError(sessionId);
+  return readDevLogCompileError(sessionId, sinceLength);
 }
 
 export function sessionPort(sessionId: string): number {
@@ -212,28 +251,76 @@ async function isPortAlive(port: number): Promise<boolean> {
   }
 }
 
-function registerExternalDevServer(sessionId: string, port: number): void {
-  servers.set(sessionId, {
-    sessionId,
-    port,
-    external: true,
-    status: "ready",
-    url: `http://localhost:${port}`,
-  });
+async function getListenerPids(port: number): Promise<number[]> {
+  try {
+    const { stdout } = await execFileAsync("lsof", [
+      `-iTCP:${port}`,
+      "-sTCP:LISTEN",
+      "-t",
+    ]);
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((pid) => Number(pid))
+      .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== process.pid);
+  } catch {
+    return [];
+  }
+}
+
+async function killProcessTree(pid: number, signal: NodeJS.Signals): Promise<void> {
+  try {
+    const { stdout } = await execFileAsync("pgrep", ["-P", String(pid)]);
+    const children = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((child) => Number(child))
+      .filter((child) => Number.isFinite(child) && child > 0);
+
+    await Promise.all(children.map((child) => killProcessTree(child, signal)));
+  } catch {
+    // No child processes.
+  }
+
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Already exited.
+  }
+}
+
+/**
+ * Kill every process listening on `port`. `pnpm dev` spawns `next dev` and
+ * `next-server` grandchildren; killing only the parent leaves orphans that
+ * block the next start with "Failed to start server".
+ */
+async function killPortListeners(port: number): Promise<void> {
+  for (const pid of await getListenerPids(port)) {
+    await killProcessTree(pid, "SIGTERM");
+  }
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if ((await getListenerPids(port)).length === 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  for (const pid of await getListenerPids(port)) {
+    await killProcessTree(pid, "SIGKILL");
+  }
 }
 
 async function resolveActivePreviewUrl(
   sessionId: string,
 ): Promise<{ url: string; port: number } | null> {
-  const status = getPreviewStatus(sessionId);
-  if (status.status === "ready") {
-    return { url: status.url, port: status.port };
-  }
-
-  const port = sessionPort(sessionId);
-  if (await isPortAlive(port)) {
-    registerExternalDevServer(sessionId, port);
-    return { url: `http://localhost:${port}`, port };
+  const state = servers.get(sessionId);
+  if (state?.status === "ready" && state.url) {
+    if (await isPortAlive(state.port)) {
+      return { url: state.url, port: state.port };
+    }
   }
 
   return null;
@@ -286,13 +373,23 @@ export function getPreviewStatus(sessionId: string): PreviewStatus {
 
 export async function stopDevServer(sessionId: string): Promise<void> {
   const state = servers.get(sessionId);
-  if (!state) {
-    return;
+  const port = state?.port ?? sessionPort(sessionId);
+
+  if (state?.process?.pid) {
+    try {
+      // detached spawn makes the child a process-group leader; -pid kills the
+      // whole tree (pnpm → next dev → next-server).
+      process.kill(-state.process.pid, "SIGTERM");
+    } catch {
+      try {
+        state.process.kill("SIGTERM");
+      } catch {
+        // Already exited.
+      }
+    }
   }
 
-  if (!state.external && state.process) {
-    state.process.kill("SIGTERM");
-  }
+  await killPortListeners(port);
 
   servers.delete(sessionId);
   startingPromises.delete(sessionId);
@@ -301,7 +398,10 @@ export async function stopDevServer(sessionId: string): Promise<void> {
 export async function ensureDevServer(sessionId: string): Promise<PreviewStatus> {
   const existing = servers.get(sessionId);
   if (existing?.status === "ready" && existing.url) {
-    return { status: "ready", url: existing.url, port: existing.port };
+    if (await isPortAlive(existing.port)) {
+      return { status: "ready", url: existing.url, port: existing.port };
+    }
+    await stopDevServer(sessionId);
   }
 
   if (existing?.status === "starting") {
@@ -316,15 +416,9 @@ export async function ensureDevServer(sessionId: string): Promise<PreviewStatus>
     return { status: "needs_install" };
   }
 
-  const port = sessionPort(sessionId);
-  if (await isPortAlive(port)) {
-    registerExternalDevServer(sessionId, port);
-    return { status: "ready", url: `http://localhost:${port}`, port };
-  }
-
-  if (existing) {
-    await stopDevServer(sessionId);
-  }
+  // Clear any managed process and orphaned listeners before (re)starting.
+  await stopDevServer(sessionId);
+  await killPortListeners(sessionPort(sessionId));
 
   const promise = startDevServer(sessionId);
   startingPromises.set(sessionId, promise);
@@ -342,6 +436,7 @@ async function startDevServer(sessionId: string): Promise<PreviewStatus> {
 
   const child = spawn("pnpm", ["dev", "--port", String(port)], {
     cwd: workspaceRoot,
+    detached: true,
     env: {
       ...process.env,
       PORT: String(port),
@@ -445,8 +540,10 @@ export async function getPreviewReport(sessionId: string): Promise<PreviewReport
   // panel, so this is what installs deps + boots the dev server on demand.
   const resolved = await resolvePreviewStatus(sessionId);
 
-  let buildError =
-    (await readLatestDevLogError(sessionId)) ?? getBuildError(sessionId);
+  // Default to the in-memory error, which is kept fresh for managed dev servers
+  // (cleared on a successful recompile). Avoid scraping the append-only dev log
+  // wholesale, since that resurfaces stale errors from already-fixed edits.
+  let buildError = getBuildError(sessionId);
 
   if (resolved.status === "ready") {
     buildError = await probePreviewCompile(sessionId, resolved.url);

@@ -238,14 +238,37 @@ async function main(): Promise<void> {
   if (args.prompt) {
     await runTurn(session, args.prompt, args.maxSteps);
     logger.info(`Session saved. Resume with: npm run agent -- -s ${session.id}`);
+    // One-shot mode: the preview bootstrap spawned a long-lived `pnpm dev`
+    // child that keeps the event loop alive. Stop it so the process exits.
+    await shutdownPreview(session.id);
     return;
   }
 
   await interactiveLoop(session, args.maxSteps);
   logger.info(`Session saved. Resume with: npm run agent -- -s ${session.id}`);
+  await shutdownPreview(session.id);
 }
 
-main().catch((error) => {
-  logger.error(error instanceof Error ? error.stack ?? error.message : String(error));
-  process.exit(1);
-});
+/**
+ * Tear down the background dev server started during the turn so the CLI can
+ * exit cleanly instead of hanging on the live child process.
+ */
+async function shutdownPreview(sessionId: string): Promise<void> {
+  try {
+    const { stopDevServer } = await import("@/lib/sandbox/dev-server");
+    await stopDevServer(sessionId);
+  } catch {
+    // Best-effort: never block exit on teardown failures.
+  }
+}
+
+main()
+  .then(() => {
+    // Force exit in case any best-effort background handle (killed dev server,
+    // pending timers) is still keeping the event loop alive.
+    process.exit(0);
+  })
+  .catch((error) => {
+    logger.error(error instanceof Error ? error.stack ?? error.message : String(error));
+    process.exit(1);
+  });
