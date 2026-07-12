@@ -2,11 +2,13 @@ import { type ModelCallStreamPart } from "@ai-sdk/workflow";
 import { convertToModelMessages, isStepCount, type UIMessage } from "ai";
 import { getWritable } from "workflow";
 
+import { createAgentTrace } from "@/lib/agent/agent-trace";
 import { createBuilderAgent } from "./builder-agent";
 
 import {
   getBuildErrorStep,
   getSessionStep,
+  modelMessagesToAssistantUIMessage,
   saveSessionMessagesStep,
 } from "./builder-chat-steps";
 
@@ -34,13 +36,28 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
     sandboxMode,
   );
 
+  const maxSteps = 30;
+  const trace = createAgentTrace({
+    sessionId,
+    maxSteps,
+    channel: "web",
+  });
+  const startedAt = Date.now();
+
   const result = await agent.stream({
     messages: modelMessages,
     writable: getWritable<ModelCallStreamPart>(),
-    stopWhen: isStepCount(30),
+    stopWhen: isStepCount(maxSteps),
     runtimeContext,
     toolsContext,
+    ...trace.hooks,
   });
+
+  const assistantMessage = modelMessagesToAssistantUIMessage(
+    result.messages,
+    previousModelCount,
+  );
+  trace.finalizeTurn(result, startedAt, assistantMessage);
 
   await saveSessionMessagesStep(
     sessionId,

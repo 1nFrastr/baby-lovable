@@ -58,6 +58,11 @@ const DEV_LOG_COMPILE_MARKERS = [
   /⨯ Error:/,
 ];
 
+/** Browser overlay replays tagged in the dev log — not trustworthy compile errors. */
+export function isUnreliableCompileError(message: string): boolean {
+  return /\[browser\]/i.test(message);
+}
+
 function stripAnsi(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/\u001b\[[0-9;]*m/g, "");
@@ -74,7 +79,9 @@ function recordDevOutput(sessionId: string, chunk: string): void {
 
   if (ERROR_MARKERS.some((marker) => marker.test(clean))) {
     const recent = (logBuffers.get(sessionId) ?? "").slice(-3_000).trim();
-    buildErrors.set(sessionId, recent);
+    if (!isUnreliableCompileError(recent)) {
+      buildErrors.set(sessionId, recent);
+    }
   }
 }
 
@@ -148,6 +155,10 @@ async function readLatestDevLogServerError(
       continue;
     }
 
+    if (isUnreliableCompileError(message)) {
+      continue;
+    }
+
     latestError = message.slice(0, 2_000);
   }
 
@@ -196,6 +207,10 @@ async function readDevLogCompileError(
       continue;
     }
 
+    if (isUnreliableCompileError(message)) {
+      continue;
+    }
+
     latestError = message.slice(0, 2_000);
   }
 
@@ -223,7 +238,7 @@ async function probePreviewCompile(
     // A compile error often returns 500 — still triggers Turbopack to log it.
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
 
   let buildError = await readDevLogCompileError(sessionId, sinceLength);
 
@@ -232,6 +247,25 @@ async function probePreviewCompile(
   // server error instead of reporting a false negative.
   if (!buildError && httpStatus !== null && httpStatus >= 500) {
     buildError = await readLatestDevLogServerError(sessionId);
+  }
+
+  const looksTransient =
+    httpStatus !== null &&
+    httpStatus >= 500 &&
+    (buildError === null || isUnreliableCompileError(buildError));
+
+  if (looksTransient) {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    const retryStatus = await fetch(url, { signal: AbortSignal.timeout(5_000) })
+      .then((response) => response.status)
+      .catch(() => httpStatus);
+    httpStatus = retryStatus;
+    const retryError = await readDevLogCompileError(sessionId, sinceLength);
+    if (retryError && !isUnreliableCompileError(retryError)) {
+      buildError = retryError;
+    } else if (retryStatus !== null && retryStatus < 500) {
+      buildError = null;
+    }
   }
 
   return { httpStatus, buildError };
@@ -385,6 +419,26 @@ async function resolveActivePreviewUrl(
     }
   }
 
+  // Adopt an already-listening dev server even when in-memory state was lost or
+  // is still marked "starting" (e.g. after a workflow step restart).
+  const port = sessionPort(sessionId);
+  if (await isPortAlive(port)) {
+    const url = `http://localhost:${port}`;
+    if (state) {
+      state.status = "ready";
+      state.url = url;
+      state.port = port;
+    } else {
+      servers.set(sessionId, {
+        sessionId,
+        port,
+        status: "ready",
+        url,
+      });
+    }
+    return { url, port };
+  }
+
   return null;
 }
 
@@ -396,7 +450,7 @@ async function waitForReady(port: number, timeoutMs = 60_000): Promise<boolean> 
       const response = await fetch(`http://127.0.0.1:${port}`, {
         signal: AbortSignal.timeout(2_000),
       });
-      if (response.ok || response.status < 500) {
+      if (response.status < 600) {
         return true;
       }
     } catch {
@@ -582,6 +636,17 @@ export function ensurePreviewBootstrap(sessionId: string): void {
 
 export async function restartDevServer(sessionId: string): Promise<PreviewStatus> {
   await stopDevServer(sessionId);
+
+  // Safe to clear build output only after the managed dev server is stopped.
+  try {
+    await fs.rm(path.join(getWorkspaceRoot(sessionId), ".next"), {
+      recursive: true,
+      force: true,
+    });
+  } catch {
+    // Best effort — a missing .next is fine.
+  }
+
   return ensureDevServer(sessionId);
 }
 
@@ -592,12 +657,60 @@ export interface PreviewReport {
   buildError: string | null;
 }
 
+export function isTransientPreviewFailure(report: PreviewReport): boolean {
+  if (report.status !== "ready") {
+    return false;
+  }
+
+  if (
+    report.httpStatus !== undefined &&
+    report.httpStatus < 500 &&
+    report.buildError === null
+  ) {
+    return false;
+  }
+
+  if (report.buildError && !isUnreliableCompileError(report.buildError)) {
+    return false;
+  }
+
+  return (
+    (report.httpStatus !== undefined && report.httpStatus >= 500) ||
+    report.buildError !== null
+  );
+}
+
 /**
  * Snapshot of the current preview used to feed dev-server compile errors back
  * to the agent. Waits briefly so a compile triggered by the agent's last edit
  * has a chance to surface before we report.
  */
-export async function getPreviewReport(sessionId: string): Promise<PreviewReport> {
+async function waitForPreviewReady(
+  sessionId: string,
+  timeoutMs = 90_000,
+): Promise<PreviewStatus> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const status = await resolvePreviewStatus(sessionId);
+    if (status.status === "ready" || status.status === "error") {
+      return status;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  return getPreviewStatus(sessionId);
+}
+
+export async function getPreviewReport(
+  sessionId: string,
+  options?: { restart?: boolean },
+): Promise<PreviewReport> {
+  if (options?.restart) {
+    await restartDevServer(sessionId);
+    await waitForPreviewReady(sessionId);
+  }
+
   // Actively resolve/bootstrap the preview instead of passively reporting
   // "stopped". In CLI/headless contexts the frontend never opens the preview
   // panel, so this is what installs deps + boots the dev server on demand.
@@ -614,6 +727,15 @@ export async function getPreviewReport(sessionId: string): Promise<PreviewReport
     const probe = await probePreviewCompile(sessionId, resolved.url);
     httpStatus = probe.httpStatus ?? undefined;
     buildError = probe.buildError;
+    if (
+      !buildError &&
+      httpStatus !== undefined &&
+      httpStatus >= 500
+    ) {
+      buildError =
+        (await readLatestDevLogServerError(sessionId)) ??
+        `Preview returned HTTP ${httpStatus} but no compile error was captured. Inspect source files or call checkPreview with restart: true.`;
+    }
     if (buildError) {
       buildErrors.set(sessionId, buildError);
     } else {

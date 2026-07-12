@@ -1,4 +1,3 @@
-import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import {
   convertToModelMessages,
   isStepCount,
@@ -7,11 +6,10 @@ import {
   type UIMessage,
 } from "ai";
 
+import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
 import type { SandboxMode } from "@/lib/sandbox/types";
-
-import { logger, truncate } from "./logger";
 
 export interface RunAgentOptions {
   sessionId: string;
@@ -70,121 +68,32 @@ export async function runAgentTurn({
     sandboxMode,
   );
 
-  // Shared rendering state between the writable sink and callbacks so that
-  // streamed text and structured event logs don't clobber each other.
-  const render = { assistantOpen: false, reasoningOpen: false };
-
-  const closeAssistantBlock = () => {
-    if (render.assistantOpen || render.reasoningOpen) {
-      logger.assistantEnd();
-      render.assistantOpen = false;
-      render.reasoningOpen = false;
-    }
-  };
-
-  // Sink that receives raw model stream parts for real-time token output.
-  const writable = new WritableStream<ModelCallStreamPart>({
-    write(part) {
-      switch (part.type) {
-        case "text-delta": {
-          if (render.reasoningOpen) {
-            logger.assistantEnd();
-            render.reasoningOpen = false;
-          }
-          if (!render.assistantOpen) {
-            logger.assistantStart();
-            render.assistantOpen = true;
-          }
-          logger.assistantDelta(part.text);
-          break;
-        }
-        case "reasoning-delta": {
-          if (!render.reasoningOpen && !render.assistantOpen) {
-            logger.raw("\n");
-            logger.system("reasoning ▾");
-            render.reasoningOpen = true;
-          }
-          logger.reasoningDelta(part.text);
-          break;
-        }
-        default:
-          break;
-      }
-    },
+  const trace = createCliAgentTrace({
+    sessionId,
+    maxSteps,
+    channel: "cli",
   });
-
   const startedAt = Date.now();
 
   const result = await agent.stream({
     messages: modelMessages,
-    writable,
+    writable: trace.createWritable(),
     stopWhen: isStepCount(maxSteps),
     runtimeContext,
     toolsContext,
-
-    experimental_onStart({ model, messages: startMessages }) {
-      const modelId = typeof model === "string" ? model : model.modelId;
-      logger.info(
-        `agent started · model=${modelId} · contextMessages=${startMessages.length} · maxSteps=${maxSteps}`,
-      );
-    },
-
-    experimental_onStepStart({ stepNumber }) {
-      closeAssistantBlock();
-      logger.step(`step #${stepNumber} → calling model…`);
-    },
-
-    onToolExecutionStart({ toolCall, stepNumber }) {
-      closeAssistantBlock();
-      logger.tool(
-        `[step ${stepNumber}] ${toolCall.toolName}(${truncate(toolCall.input, 400)})`,
-      );
-    },
-
-    onToolExecutionEnd(event) {
-      if (event.success) {
-        logger.toolOk(
-          `${event.toolCall.toolName} ✓ ${event.durationMs}ms · ${truncate(event.output)}`,
-        );
-      } else {
-        logger.toolErr(
-          `${event.toolCall.toolName} ✗ ${event.durationMs}ms · ${truncate(event.error)}`,
-        );
-      }
-    },
-
-    onStepEnd(step) {
-      closeAssistantBlock();
-      const usage = step.usage;
-      const toolCalls = step.toolCalls?.length ?? 0;
-      logger.step(
-        `step #${step.stepNumber} done · finish=${step.finishReason} · toolCalls=${toolCalls} · tokens(in/out)=${usage?.inputTokens ?? 0}/${usage?.outputTokens ?? 0}`,
-      );
-    },
-
-    onError({ error }) {
-      closeAssistantBlock();
-      logger.error(error instanceof Error ? error.stack ?? error.message : String(error));
-    },
+    ...trace.hooks,
   });
-
-  closeAssistantBlock();
-
-  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-  const usage = result.totalUsage;
-  logger.success(
-    `turn complete · steps=${result.steps.length} · finish=${result.finishReason} · ${elapsed}s · tokens(in/out/total)=${usage.inputTokens ?? 0}/${usage.outputTokens ?? 0}/${usage.totalTokens ?? 0}`,
-  );
 
   const assistantMessage = modelMessagesToAssistantUIMessage(
     result.messages,
     previousModelCount,
   );
+  trace.finalizeTurn(result, startedAt, assistantMessage);
 
   return {
     assistantMessage,
     modelMessages: result.messages,
-    usage,
+    usage: result.totalUsage,
     stepCount: result.steps.length,
   };
 }

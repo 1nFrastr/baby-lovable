@@ -28,6 +28,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 └── sessions/
     └── sess_<id>/
         ├── session.json      # title, timestamps, sandboxMode, full UIMessage history
+        ├── agent.log         # CLI per-turn trace file (optional; Web uses stdout)
         └── workspace/        # the generated Next.js app (agent's sandbox)
             ├── src/app/…
             ├── package.json
@@ -35,6 +36,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 ```
 
 - **`session.json`** — durable chat + tool-call history. Inspect it to see exactly what the agent did (tool inputs/outputs, errors, token of conversation).
+- **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
 - **`workspace/`** — the app under construction. Read/edit files here to verify codegen, run commands, or debug compile issues.
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
@@ -93,24 +95,34 @@ npm run dev    # host app at http://localhost:3000
 
 Chat + live preview iframe. Same sessions and workspaces as CLI. Use when you want a human visual pass; **do not require it** for agent verification.
 
+**Web observability:** each chat turn emits a real-time trace to `npm run dev` stdout with the tag `[agent-trace] session=<id>` (e.g. `STEP`, `TOOL`, `DONE`, `WARN`). Filter without touching workflow steps:
+
+```bash
+npm run dev 2>&1 | grep 'agent-trace'
+# or per session:
+npm run dev 2>&1 | grep 'agent-trace.*session=sess_abc123'
+```
+
+Incomplete turns emit `WARN` lines (e.g. no `checkPreview`, `finishReason=tool-calls` with few steps).
+
 ## Builder agent tools & verification loop
 
 Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 
 | Tool | Purpose |
 | --- | --- |
-| `readFile` / `writeFile` / `editFile` / `deleteFile` | Workspace file CRUD |
+| `readFile` / `writeFile` / `editFile` / `deleteFile` | Workspace file CRUD — **source only** (`src/**`, `public/**`, root configs); `.next`, `node_modules`, `.git` are blocked |
 | `listFiles` / `searchFiles` | Discover project structure |
 | `installPackage` / `installDependencies` | Add/remove packages or run `pnpm install` (whitelisted; no arbitrary shell) |
 | `runCommand` | **Deprecated** — only `pnpm install/add/remove` allowed; rejects curl/ls/find/etc. |
-| `checkPreview` | **Compile gate** — returns `{ ok, status, url, httpStatus, buildError }` |
+| `checkPreview` | **Compile gate** — returns `{ ok, status, url, httpStatus, buildError }`; optional `restart: true` restarts the managed dev server (never delete `.next` manually) |
 
 **Verification loop the agent (and you) should follow:**
 
 1. Edit files with tools.
-2. Call `checkPreview` — wait through `installing` / `starting` until `status: "ready"`.
-3. If `buildError` is non-null, fix code and re-check before finishing.
-4. Optionally `curl` the preview URL or read workspace files to assert behavior.
+2. After large edits, let HMR settle briefly, then call `checkPreview` — wait through `installing` / `starting` until `status: "ready"`.
+3. If `buildError` is non-null, fix source code and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
+4. Optionally `curl` the preview URL or read workspace source files to assert behavior.
 
 Preview lifecycle is owned by `src/lib/sandbox/dev-server.ts` — agents must **not** run `pnpm dev` themselves.
 
@@ -122,6 +134,7 @@ When implementing or validating changes to the builder itself:
    `npm run agent -- -p "<representative user prompt>"`
 2. **Read artifacts on disk** (no browser needed):
    - `.baby-lovable/sessions/<id>/session.json` — tool calls, errors, assistant reply
+   - `.baby-lovable/sessions/<id>/agent.log` — CLI step/tool trace (or grep `[agent-trace]` from Web dev stdout)
    - `.baby-lovable/sessions/<id>/workspace/src/**` — generated source
    - `.baby-lovable/sessions/<id>/workspace/.next/dev/logs/next-development.log` — compile details
 3. **Assert preview health** — last `checkPreview` tool output in `session.json` should have `ok: true` and `buildError: null`; or call `GET /api/sessions/<id>/preview` while the host app is running.

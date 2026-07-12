@@ -3,6 +3,24 @@ import {
   buildAllowedShellCommand,
   validateRunCommand,
 } from "@/lib/sandbox/command-policy";
+import {
+  filterListedFiles,
+  isProtectedPath,
+  workspacePathViolation,
+} from "@/lib/sandbox/protected-paths";
+
+function pathGuard(
+  operation: Parameters<typeof workspacePathViolation>[0],
+  path: string,
+  options?: { searchPattern?: string },
+) {
+  const error = workspacePathViolation(operation, path, options);
+  if (!error) {
+    return null;
+  }
+
+  return { ok: false as const, error };
+}
 
 export const toolContextSchema = {
   sessionId: "string",
@@ -25,6 +43,11 @@ export async function readFileStep(
 ) {
   "use step";
 
+  const blocked = pathGuard("read", input.path);
+  if (blocked) {
+    return { ...blocked, path: input.path };
+  }
+
   const sandbox = await getSandboxFromContext(context);
   const content = await sandbox.fs.readTextFile(input.path);
 
@@ -39,6 +62,11 @@ export async function writeFileStep(
   { context }: { context: ToolContext },
 ) {
   "use step";
+
+  const blocked = pathGuard("write", input.path);
+  if (blocked) {
+    return { ...blocked, path: input.path };
+  }
 
   const sandbox = await getSandboxFromContext(context);
   await sandbox.fs.writeTextFile(input.path, input.content);
@@ -60,6 +88,11 @@ export async function editFileStep(
   { context }: { context: ToolContext },
 ) {
   "use step";
+
+  const blocked = pathGuard("edit", input.path);
+  if (blocked) {
+    return { ...blocked, path: input.path };
+  }
 
   const sandbox = await getSandboxFromContext(context);
   const original = await sandbox.fs.readTextFile(input.path);
@@ -143,8 +176,16 @@ export async function listFilesStep(
 ) {
   "use step";
 
+  const targetPath = input.path ?? ".";
+  const blocked = pathGuard("list", targetPath);
+  if (blocked) {
+    return { ...blocked, path: targetPath };
+  }
+
   const sandbox = await getSandboxFromContext(context);
-  const files = await sandbox.fs.listFiles(input.path ?? ".");
+  const files = filterListedFiles(
+    await sandbox.fs.listFiles(input.path ?? "."),
+  );
 
   return {
     path: input.path ?? ".",
@@ -158,8 +199,18 @@ export async function searchFilesStep(
 ) {
   "use step";
 
+  const targetPath = input.path ?? ".";
+  const blocked = pathGuard("search", targetPath, {
+    searchPattern: input.pattern,
+  });
+  if (blocked) {
+    return { ...blocked, path: targetPath, pattern: input.pattern };
+  }
+
   const sandbox = await getSandboxFromContext(context);
-  const files = await sandbox.fs.searchFiles(input.path ?? ".", input.pattern);
+  const files = (
+    await sandbox.fs.searchFiles(input.path ?? ".", input.pattern)
+  ).filter((filePath) => !isProtectedPath(filePath));
 
   return {
     path: input.path ?? ".",
@@ -292,21 +343,52 @@ export async function runCommandStep(
 }
 
 export async function checkPreviewStep(
-  _input: Record<string, never>,
+  input: { restart?: boolean },
   { context }: { context: ToolContext },
 ) {
   "use step";
 
-  const { getPreviewReport } = await import("@/lib/sandbox/dev-server");
-  // Give a just-triggered recompile a moment to settle before reporting.
-  await new Promise((resolve) => setTimeout(resolve, 2_500));
-  const report = await getPreviewReport(context.sessionId);
+  const {
+    getPreviewReport,
+    isTransientPreviewFailure,
+    restartDevServer,
+  } = await import("@/lib/sandbox/dev-server");
+
+  if (input.restart) {
+    await restartDevServer(context.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+  } else {
+    // Give HMR a moment to settle after the agent's last edit.
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+  }
+
+  let report = await getPreviewReport(context.sessionId);
+  let retried = false;
+
+  for (
+    let attempt = 0;
+    attempt < 8 &&
+    (report.status === "starting" || report.status === "installing");
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    report = await getPreviewReport(context.sessionId);
+    retried = true;
+  }
+
+  if (!input.restart && isTransientPreviewFailure(report)) {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    report = await getPreviewReport(context.sessionId);
+    retried = true;
+  }
 
   return {
     status: report.status,
     url: report.url,
     httpStatus: report.httpStatus,
     buildError: report.buildError,
+    retried,
+    restarted: input.restart ?? false,
     ok:
       report.buildError === null &&
       report.status === "ready" &&
@@ -319,6 +401,11 @@ export async function deleteFileStep(
   { context }: { context: ToolContext },
 ) {
   "use step";
+
+  const blocked = pathGuard("delete", input.path);
+  if (blocked) {
+    return { ...blocked, path: input.path };
+  }
 
   const sandbox = await getSandboxFromContext(context);
   await sandbox.fs.deleteFile(input.path, input.recursive ?? false);

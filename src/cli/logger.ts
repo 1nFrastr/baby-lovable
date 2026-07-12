@@ -39,23 +39,7 @@ function prefix(label: string, color: Color): string {
   return `${paint(timestamp(), "gray")} ${paint(label.padEnd(9), color, "bold")}`;
 }
 
-/** Truncate long values so the console stays readable. */
-export function truncate(value: unknown, max = 600): string {
-  let text: string;
-  if (typeof value === "string") {
-    text = value;
-  } else {
-    try {
-      text = JSON.stringify(value);
-    } catch {
-      text = String(value);
-    }
-  }
-  if (text.length <= max) {
-    return text;
-  }
-  return `${text.slice(0, max)}… (${text.length} chars total)`;
-}
+export { truncate } from "@/lib/agent/truncate";
 
 export const logger = {
   banner(lines: string[]): void {

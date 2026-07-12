@@ -42,7 +42,8 @@ export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) 
 
 export const builderTools = {
   readFile: tool({
-    description: "Read a text file from the project workspace.",
+    description:
+      "Read a text file from the project workspace. Cannot read .next, node_modules, or .git.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
     }),
@@ -50,7 +51,8 @@ export const builderTools = {
     execute: readFileStep,
   }),
   writeFile: tool({
-    description: "Create or overwrite a text file in the project workspace.",
+    description:
+      "Create or overwrite a text file in the project workspace. Only src/**, public/**, and root config files are writable.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
       content: z.string().describe("Full file contents to write"),
@@ -60,7 +62,7 @@ export const builderTools = {
   }),
   editFile: tool({
     description:
-      "Edit a text file by replacing an exact string. Prefer this for small changes to existing files instead of rewriting the whole file.",
+      "Edit a text file by replacing an exact string. Prefer this for small changes to existing files instead of rewriting the whole file. Only src/**, public/**, and root config files are editable.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
       oldString: z
@@ -76,7 +78,8 @@ export const builderTools = {
     execute: editFileStep,
   }),
   listFiles: tool({
-    description: "List files and directories in a workspace path.",
+    description:
+      "List files and directories in a workspace path. Managed directories (.next, node_modules, .git) are hidden.",
     inputSchema: z.object({
       path: z
         .string()
@@ -87,7 +90,8 @@ export const builderTools = {
     execute: listFilesStep,
   }),
   searchFiles: tool({
-    description: "Search files in the workspace using a glob pattern.",
+    description:
+      "Search files in the workspace using a glob pattern. Cannot search inside .next, node_modules, or .git.",
     inputSchema: z.object({
       path: z
         .string()
@@ -148,13 +152,21 @@ export const builderTools = {
   }),
   checkPreview: tool({
     description:
-      "Check the live dev-server preview for compile/runtime errors. Call this after editing files to verify the preview still compiles. Returns { ok, status, url, httpStatus, buildError }.",
-    inputSchema: z.object({}),
+      "Check the live dev-server preview for compile/runtime errors. Call this after editing files to verify the preview still compiles. Set restart=true to restart the managed dev server when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
+    inputSchema: z.object({
+      restart: z
+        .boolean()
+        .optional()
+        .describe(
+          "Restart the managed dev server before checking. Use when preview cache is corrupt — never delete .next manually.",
+        ),
+    }),
     contextSchema: toolContextSchema,
     execute: checkPreviewStep,
   }),
   deleteFile: tool({
-    description: "Delete a file or directory from the workspace.",
+    description:
+      "Delete a file or directory from the workspace. Only paths under src/ or public/ can be deleted.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
       recursive: z

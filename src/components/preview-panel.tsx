@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PreviewStatus } from "@/lib/sandbox/dev-server";
 
@@ -8,37 +8,83 @@ interface PreviewPanelProps {
   sessionId: string;
 }
 
+const POLL_MS_READY = 15_000;
+const POLL_MS_ACTIVE = 2_000;
+
+function pollDelay(status: PreviewStatus["status"]): number {
+  return status === "ready" ? POLL_MS_READY : POLL_MS_ACTIVE;
+}
+
 export function PreviewPanel({ sessionId }: PreviewPanelProps) {
   const [preview, setPreview] = useState<PreviewStatus>({ status: "stopped" });
+  const previewRef = useRef(preview);
 
-  const loadPreview = useCallback(async () => {
-    const response = await fetch(`/api/sessions/${sessionId}/preview`);
-    if (!response.ok) {
-      return;
+  useEffect(() => {
+    previewRef.current = preview;
+  }, [preview]);
+
+  const loadPreview = useCallback(async (): Promise<PreviewStatus | null> => {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/preview`);
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = (await response.json()) as { preview: PreviewStatus };
+      setPreview(data.preview);
+      return data.preview;
+    } catch {
+      return null;
     }
-
-    const data = (await response.json()) as { preview: PreviewStatus };
-    setPreview(data.preview);
   }, [sessionId]);
 
   useEffect(() => {
-    void loadPreview();
+    let cancelled = false;
+    let timeoutId = 0;
 
-    const timer = window.setInterval(() => {
-      void loadPreview();
-    }, 2_000);
+    const schedule = (delayMs: number) => {
+      if (cancelled) {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, delayMs);
+    };
 
-    return () => window.clearInterval(timer);
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const next = await loadPreview();
+      if (cancelled) {
+        return;
+      }
+
+      const status = next?.status ?? previewRef.current.status;
+      schedule(pollDelay(status));
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
   }, [loadPreview, sessionId]);
 
   const handleRestart = async () => {
     setPreview({ status: "starting", port: 0 });
-    await fetch(`/api/sessions/${sessionId}/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "restart" }),
-    });
-    await loadPreview();
+    try {
+      await fetch(`/api/sessions/${sessionId}/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restart" }),
+      });
+      await loadPreview();
+    } catch {
+      // next poll will pick up status
+    }
   };
 
   return (
