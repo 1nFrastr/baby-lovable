@@ -1,215 +1,101 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
-import type { SessionDraft } from "@/lib/session/draft-store";
 import {
-  isActiveRunStatus,
-  type Session,
-  type SessionSummary,
-} from "@/lib/session/types";
+  useCreateSessionMutation,
+  useInvalidateSessionDetail,
+  useRefetchSessionOnActivate,
+  useSessionQuery,
+  useSessionsQuery,
+  useSyncSessionSummary,
+} from "@/lib/session/queries";
 
 import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
 import { AuthUserBar } from "./auth-user-bar";
 
-const POLL_ACTIVE_SESSION_MS = 800;
-
-interface AppShellProps {
-  /** When set, bootstrap loads this session (from `/sessions/[sessionId]`). */
-  initialSessionId?: string;
-}
-
-interface SessionResponse {
-  session: Session;
-  draft: SessionDraft | null;
-}
-
-function patchSessionSummary(
-  summaries: SessionSummary[],
-  session: Session,
-): SessionSummary[] {
-  const next: SessionSummary = {
-    id: session.id,
-    userId: session.userId,
-    title: session.title,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    lastRunId: session.lastRunId,
-    runStatus: session.runStatus,
-    sandboxMode: session.sandboxMode,
-    messageCount: session.messages.length,
-  };
-
-  const index = summaries.findIndex((item) => item.id === session.id);
-  if (index === -1) {
-    return [next, ...summaries];
-  }
-
-  return summaries.map((item, itemIndex) =>
-    itemIndex === index ? next : item,
-  );
-}
-
-export function AppShell({ initialSessionId }: AppShellProps) {
+export function AppShell() {
   const router = useRouter();
-  const activeSessionId = initialSessionId ?? null;
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [activeDraft, setActiveDraft] = useState<SessionDraft | null>(null);
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const loadRequestIdRef = useRef(0);
+  const params = useParams();
+  const activeSessionId =
+    typeof params.sessionId === "string" ? params.sessionId : null;
 
-  const loadSessions = useCallback(async () => {
-    const response = await fetch("/api/sessions");
-    if (!response.ok) {
-      throw new Error("Failed to load sessions");
-    }
+  const sessionsQuery = useSessionsQuery();
+  const sessionQuery = useSessionQuery(activeSessionId);
+  const createSessionMutation = useCreateSessionMutation();
+  const invalidateSessionDetail = useInvalidateSessionDetail();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isActivatingSession, setIsActivatingSession] = useState(false);
 
-    const data = (await response.json()) as { sessions: SessionSummary[] };
-    setSessions(data.sessions);
-    return data.sessions;
-  }, []);
+  const sessions = sessionsQuery.data ?? [];
+  const activeSession = sessionQuery.data?.session ?? null;
+  const activeDraft = sessionQuery.data?.draft ?? null;
+  const activeSummary = sessions.find((session) => session.id === activeSessionId);
 
-  const loadSession = useCallback(async (sessionId: string) => {
-    const requestId = ++loadRequestIdRef.current;
+  useRefetchSessionOnActivate(activeSessionId);
+  useSyncSessionSummary(activeSession);
 
-    const response = await fetch(`/api/sessions/${sessionId}`);
-    if (response.status === 404) {
-      throw new Error("Session not found");
-    }
-    if (!response.ok) {
-      throw new Error("Failed to load session");
-    }
-
-    const data = (await response.json()) as SessionResponse;
-    if (requestId !== loadRequestIdRef.current) {
-      return data.session;
-    }
-
-    setActiveSession(data.session);
-    setActiveDraft(data.draft);
-    setSessions((current) => patchSessionSummary(current, data.session));
-    return data.session;
-  }, []);
-
-  const refreshActiveSession = useCallback(async () => {
+  useEffect(() => {
     if (!activeSessionId) {
+      setIsActivatingSession(false);
       return;
     }
 
-    try {
-      await loadSession(activeSessionId);
-    } catch {
-      // Non-fatal — workflow may still be persisting.
-    }
-  }, [activeSessionId, loadSession]);
+    setIsActivatingSession(true);
+  }, [activeSessionId]);
 
+  useEffect(() => {
+    if (!sessionQuery.isFetching) {
+      setIsActivatingSession(false);
+    }
+  }, [sessionQuery.isFetching]);
+
+  const isBootstrapping = sessionsQuery.isPending && sessions.length === 0;
+  const cacheMissingMessages =
+    activeSummary != null &&
+    activeSummary.messageCount > 0 &&
+    (activeSession?.messages.length ?? 0) < activeSummary.messageCount;
   const isSessionReady =
-    activeSessionId != null && activeSession?.id === activeSessionId;
+    activeSessionId != null &&
+    activeSession?.id === activeSessionId &&
+    !cacheMissingMessages &&
+    !(isActivatingSession && sessionQuery.isFetching);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function bootstrap() {
-      try {
-        setLoadError(null);
-        await loadSessions();
-      } catch (error) {
-        if (!cancelled) {
-          setLoadError(
-            error instanceof Error ? error.message : "Failed to bootstrap app",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setIsBootstrapping(false);
-        }
-      }
-    }
-
-    void bootstrap();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadSessions]);
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-
-    let cancelled = false;
-
-    void loadSession(activeSessionId).catch((error) => {
-      if (!cancelled) {
-        setLoadError(
-          error instanceof Error ? error.message : "Failed to load session",
-        );
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSessionId, loadSession]);
-
-  useEffect(() => {
-    if (!activeSessionId || !isSessionReady) {
-      return;
-    }
-
-    if (!isActiveRunStatus(activeSession!.runStatus)) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void refreshActiveSession();
-    }, POLL_ACTIVE_SESSION_MS);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [activeSession, activeSessionId, isSessionReady, refreshActiveSession]);
+  const loadError =
+    actionError ??
+    (sessionsQuery.isError
+      ? sessionsQuery.error instanceof Error
+        ? sessionsQuery.error.message
+        : "Failed to load sessions"
+      : null) ??
+    (sessionQuery.isError
+      ? sessionQuery.error instanceof Error
+        ? sessionQuery.error.message
+        : "Failed to load session"
+      : null);
 
   const handleSelectSession = (sessionId: string) => {
     if (sessionId === activeSessionId) {
       return;
     }
 
-    setLoadError(null);
+    setActionError(null);
     router.push(`/sessions/${sessionId}`);
   };
 
   const handleCreateSession = async () => {
-    setIsCreating(true);
-    setLoadError(null);
+    setActionError(null);
 
     try {
-      const response = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to create session");
-      }
-
-      const data = (await response.json()) as { session: Session };
-      setSessions((current) => patchSessionSummary(current, data.session));
-      router.push(`/sessions/${data.session.id}`);
+      const { session } = await createSessionMutation.mutateAsync();
+      router.push(`/sessions/${session.id}`);
     } catch (error) {
-      setLoadError(
+      setActionError(
         error instanceof Error ? error.message : "Failed to create session",
       );
-    } finally {
-      setIsCreating(false);
     }
   };
 
@@ -235,7 +121,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
           onCreate={() => {
             void handleCreateSession();
           }}
-          isCreating={isCreating}
+          isCreating={createSessionMutation.isPending}
         />
 
         <main className="min-w-0 flex-1">
@@ -270,10 +156,10 @@ export function AppShell({ initialSessionId }: AppShellProps) {
                 onClick={() => {
                   void handleCreateSession();
                 }}
-                disabled={isCreating}
+                disabled={createSessionMutation.isPending}
                 className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {isCreating ? "Creating…" : "New Project"}
+                {createSessionMutation.isPending ? "Creating…" : "New Project"}
               </button>
             </div>
           ) : !isSessionReady ? (
@@ -290,7 +176,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
                   draft={activeDraft?.message ?? null}
                   runStatus={activeSession.runStatus}
                   onSessionRefresh={() => {
-                    void refreshActiveSession();
+                    invalidateSessionDetail(activeSessionId);
                   }}
                 />
               </div>
