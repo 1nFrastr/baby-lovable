@@ -62,6 +62,9 @@ export function formatToolPartLabel(
   return name;
 }
 
+/** Inspection tools — label only; raw content floods the chat. */
+const HIDE_OUTPUT_TOOLS = new Set(["readFile", "listFiles", "searchFiles"]);
+
 /** Compact result line for tool outputs (avoids dumping large JSON). */
 export function formatToolPartOutput(
   part: ToolUIPart | DynamicToolUIPart,
@@ -71,6 +74,10 @@ export function formatToolPartOutput(
   }
 
   const name = getToolName(part);
+  if (HIDE_OUTPUT_TOOLS.has(name)) {
+    return null;
+  }
+
   const output = part.output;
 
   if (name === "testPreview" && output && typeof output === "object") {
