@@ -13,6 +13,7 @@ import {
   readFileStep,
   runCommandStep,
   searchFilesStep,
+  testPreviewStep,
   writeFileStep,
 } from "./builder-tool-steps";
 
@@ -22,6 +23,46 @@ export const toolContextSchema = z.object({
 });
 
 export type ToolContext = z.infer<typeof toolContextSchema>;
+
+/** Playwright steps the Builder Agent authors from the UI it just wrote. */
+export const appTestActionSchema = z.object({
+  action: z
+    .enum([
+      "fill",
+      "click",
+      "press",
+      "hover",
+      "assertVisible",
+      "assertHidden",
+      "wait",
+      "screenshot",
+    ])
+    .describe("Playwright action type"),
+  selector: z
+    .string()
+    .optional()
+    .describe(
+      'Playwright locator WITHOUT backslash escapes. Good: input[placeholder="What needs to be done?"], button:has-text("Add"), input[aria-label=\'New todo\']. Bad: input[aria-label=\\"New todo\\"]. For text asserts prefer the `text` field over :has-text().',
+    ),
+  text: z
+    .string()
+    .optional()
+    .describe(
+      "Preferred for assertVisible/assertHidden (avoids quote escaping in selectors). Supports {{unique}}.",
+    ),
+  value: z
+    .string()
+    .optional()
+    .describe('For fill. Prefer including {{unique}}, e.g. "Test item {{unique}}".'),
+  key: z.string().optional().describe("For press (default Enter)."),
+  ms: z.number().optional().describe("For wait, milliseconds."),
+  name: z.string().optional().describe("Optional step label in the report."),
+  timeoutMs: z.number().optional().describe("Per-step timeout (default 8000)."),
+  continueOnError: z
+    .boolean()
+    .optional()
+    .describe("Continue the script if this step fails."),
+});
 
 export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) {
   const context: ToolContext = { sessionId, sandboxMode };
@@ -36,6 +77,7 @@ export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) 
     installDependencies: context,
     runCommand: context,
     checkPreview: context,
+    testPreview: context,
     deleteFile: context,
   };
 }
@@ -163,6 +205,27 @@ export const builderTools = {
     }),
     contextSchema: toolContextSchema,
     execute: checkPreviewStep,
+  }),
+  testPreview: tool({
+    description:
+      "Short smoke test of the Daytona preview (Cloudflare Browser Run + Playwright). Pass a small `actions` array (prefer 3–5 steps, max 8) for the main happy path only — e.g. fill → submit → assertVisible. Do not script empty-state / delete / filter flows unless the user asked. Requires checkPreview ok. Returns { ok, summary, failedSteps }. On failure, fix once then stop; do not keep re-running long scripts.",
+    inputSchema: z.object({
+      actions: z
+        .array(appTestActionSchema)
+        .min(1)
+        .max(8)
+        .describe(
+          "Short Playwright steps from your UI source. Todo example: fill input[placeholder*=\"What\"] with \"Item {{unique}}\", click button:has-text(\"Add\"), assertVisible with text \"Item {{unique}}\". Never put \\ before quotes in selectors.",
+        ),
+      holdMs: z
+        .number()
+        .optional()
+        .describe(
+          "Ms to wait after Live View is ready before automation (default 0 for agent). Use only if a human needs time to open Live View.",
+        ),
+    }),
+    contextSchema: toolContextSchema,
+    execute: testPreviewStep,
   }),
   deleteFile: tool({
     description:

@@ -217,6 +217,7 @@ export function AppShell() {
                   messages={activeSession.messages}
                   draft={activeDraft?.message ?? null}
                   runStatus={activeSession.runStatus}
+                  sandboxMode={activeSession.sandboxMode}
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                   }}

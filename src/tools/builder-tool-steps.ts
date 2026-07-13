@@ -405,6 +405,84 @@ export async function checkPreviewStep(
   };
 }
 
+export async function testPreviewStep(
+  input: {
+    actions: Array<{
+      action:
+        | "fill"
+        | "click"
+        | "press"
+        | "hover"
+        | "assertVisible"
+        | "assertHidden"
+        | "wait"
+        | "screenshot";
+      selector?: string;
+      text?: string;
+      value?: string;
+      key?: string;
+      ms?: number;
+      name?: string;
+      timeoutMs?: number;
+      continueOnError?: boolean;
+    }>;
+    holdMs?: number;
+  },
+  { context }: { context: ToolContext },
+) {
+  "use step";
+
+  const { parseAppTestActions, runAppTest } = await import("@/lib/browser-run");
+
+  let actions;
+  try {
+    actions = parseAppTestActions(input.actions);
+  } catch (error) {
+    return {
+      ok: false,
+      summary: error instanceof Error ? error.message : String(error),
+      consoleErrorCount: 0,
+      pageErrorCount: 0,
+      stepCount: 0,
+      screenshotCount: 0,
+      usedScriptedActions: false,
+      failedSteps: [] as Array<{ name: string; detail?: string }>,
+      durationMs: 0,
+      liveViewLogged: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const report = await runAppTest({
+    sessionId: context.sessionId,
+    // Prefer short hold in agent turns; humans monitoring via CLI can pass holdMs.
+    holdMs: input.holdMs ?? 0,
+    actions,
+  });
+
+  const failedSteps = report.steps
+    .filter((s) => !s.ok)
+    .slice(0, 8)
+    .map((s) => ({ name: s.name, detail: s.detail }));
+
+  // Short payload for the model — full Live View URL is logged by runAppTest.
+  return {
+    ok: report.ok,
+    summary: report.summary,
+    consoleErrorCount: report.consoleErrors.length,
+    pageErrorCount: report.pageErrors.length,
+    stepCount: report.steps.length,
+    screenshotCount: report.screenshots.length,
+    usedScriptedActions: report.usedScriptedActions ?? false,
+    failedSteps,
+    artifactDir: report.artifactDir,
+    durationMs: report.durationMs,
+    /** Present for CLI grepping via agent-trace; keep short in chat. */
+    liveViewLogged: Boolean(report.liveViewUrl),
+    error: report.error,
+  };
+}
+
 export async function deleteFileStep(
   input: { path: string; recursive?: boolean },
   { context }: { context: ToolContext },

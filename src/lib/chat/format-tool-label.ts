@@ -48,5 +48,44 @@ export function formatToolPartLabel(
     }
   }
 
+  if (name === "testPreview") {
+    const actions =
+      input && typeof input === "object" && "actions" in input
+        ? (input as { actions?: unknown }).actions
+        : undefined;
+    if (Array.isArray(actions) && actions.length > 0) {
+      return `${name} · ${actions.length} step${actions.length === 1 ? "" : "s"}`;
+    }
+    return name;
+  }
+
   return name;
+}
+
+/** Compact result line for tool outputs (avoids dumping large JSON). */
+export function formatToolPartOutput(
+  part: ToolUIPart | DynamicToolUIPart,
+): string | null {
+  if (part.state !== "output-available" || part.output == null) {
+    return null;
+  }
+
+  const name = getToolName(part);
+  const output = part.output;
+
+  if (name === "testPreview" && output && typeof output === "object") {
+    const rec = output as {
+      ok?: boolean;
+      summary?: string;
+      error?: string;
+    };
+    const mark = rec.ok ? "✓" : "✗";
+    const summary = (rec.summary ?? rec.error ?? "").trim();
+    if (summary) {
+      return `${mark} ${summary.slice(0, 160)}`;
+    }
+    return mark;
+  }
+
+  return JSON.stringify(output).slice(0, 120);
 }

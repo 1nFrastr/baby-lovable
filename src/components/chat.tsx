@@ -3,16 +3,23 @@
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
 import { isToolUIPart, type UIMessage } from "ai";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { formatToolPartLabel } from "@/lib/chat/format-tool-label";
+import {
+  formatToolPartLabel,
+  formatToolPartOutput,
+} from "@/lib/chat/format-tool-label";
 import {
   hasAssistantParts,
   mergeDisplayMessages,
 } from "@/lib/chat/merge-messages";
+import type { SandboxMode } from "@/lib/sandbox/types";
 import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
 
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
+
+const APP_TESTING_HINT =
+  "[App Testing] After checkPreview ok, call testPreview once with 3–5 actions only (happy path). Todo: fill → Add → assertVisible with {{unique}}. No empty-state/delete/filter scripts. Retry at most once if failedSteps, then finish.";
 
 interface ChatProps {
   sessionId: string;
@@ -21,6 +28,7 @@ interface ChatProps {
   /** In-flight assistant from draft.json (cache layer); null when idle. */
   draft: UIMessage | null;
   runStatus?: SessionRunStatus;
+  sandboxMode?: SandboxMode;
   onSessionRefresh?: () => void;
 }
 
@@ -29,8 +37,11 @@ export function Chat({
   messages,
   draft,
   runStatus = "idle",
+  sandboxMode = "local",
   onSessionRefresh,
 }: ChatProps) {
+  const [appTestingEnabled, setAppTestingEnabled] = useState(false);
+
   const transport = useMemo(
     () =>
       new WorkflowChatTransport({
@@ -120,17 +131,31 @@ export function Chat({
         return;
       }
 
+      const trimmed = input.value.trim();
+      const text =
+        sandboxMode === "daytona" && appTestingEnabled
+          ? `${trimmed}\n\n${APP_TESTING_HINT}`
+          : trimmed;
+
       stickToBottomRef.current = true;
-      sendMessage({ text: input.value });
+      sendMessage({ text });
       input.value = "";
       onSessionRefresh?.();
     },
-    [isLiveTurn, onSessionRefresh, sendMessage],
+    [
+      appTestingEnabled,
+      isLiveTurn,
+      onSessionRefresh,
+      sandboxMode,
+      sendMessage,
+    ],
   );
 
   const showStreamingIndicator =
     isLiveTurn &&
     !hasAssistantParts(displayMessages[displayMessages.length - 1]);
+
+  const showAppTestingToggle = sandboxMode === "daytona";
 
   return (
     <div className="flex h-full flex-col">
@@ -179,6 +204,7 @@ export function Chat({
                 if (isToolUIPart(part)) {
                   const label = formatToolPartLabel(part);
                   const streamingInput = part.state === "input-streaming";
+                  const outputLine = formatToolPartOutput(part);
 
                   return (
                     <div
@@ -189,9 +215,7 @@ export function Chat({
                       {streamingInput && (
                         <span className="opacity-60"> …</span>
                       )}
-                      {part.state === "output-available" &&
-                        part.output != null &&
-                        ` → ${JSON.stringify(part.output).slice(0, 120)}`}
+                      {outputLine != null ? ` → ${outputLine}` : null}
                     </div>
                   );
                 }
@@ -221,7 +245,22 @@ export function Chat({
         onSubmit={handleSubmit}
         className="border-t border-zinc-200 px-6 py-4 dark:border-zinc-800"
       >
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          {showAppTestingToggle ? (
+            <label
+              className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300"
+              title="When on, asks the agent for a short happy-path testPreview (3–5 steps) after checkPreview"
+            >
+              <input
+                type="checkbox"
+                checked={appTestingEnabled}
+                onChange={(event) => setAppTestingEnabled(event.target.checked)}
+                disabled={isLiveTurn}
+                className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+              />
+              <span className="whitespace-nowrap font-medium">App Testing</span>
+            </label>
+          ) : null}
           <input
             ref={inputRef}
             type="text"

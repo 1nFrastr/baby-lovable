@@ -259,6 +259,12 @@ export function createAgentTraceCore({
         sink.toolOk(
           `${event.toolCall.toolName} ✓ ${event.durationMs}ms · ${truncate(event.output)}`,
         );
+        // testPreview also emits LIVE_VIEW via runAppTest console.info; reinforce for CLI.
+        if (event.toolCall.toolName === "testPreview") {
+          sink.info(
+            "testPreview finished — if Live View was created, look for [app-test] LIVE_VIEW= in earlier logs / app-tests/*/live-view.url",
+          );
+        }
       } else {
         sink.toolErr(
           `${event.toolCall.toolName} ✗ ${event.durationMs}ms · ${truncate(event.error)}`,

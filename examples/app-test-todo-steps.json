@@ -1,0 +1,18 @@
+[
+  {
+    "name": "fill-todo",
+    "action": "fill",
+    "selector": "input[placeholder*=\"What\" i], input[type=\"text\"]",
+    "value": "Scripted item {{unique}}"
+  },
+  {
+    "name": "submit-add",
+    "action": "click",
+    "selector": "button:has-text(\"Add\")"
+  },
+  {
+    "name": "assert-added",
+    "action": "assertVisible",
+    "text": "Scripted item {{unique}}"
+  }
+]
