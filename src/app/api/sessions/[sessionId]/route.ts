@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 
 import { resolvePreviewStatus } from "@/lib/sandbox/dev-server";
 import {
-  getSessionAuthContext,
+  requireSessionAuth,
   SessionAccessDeniedError,
+  UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { readDraft } from "@/lib/session/draft-store";
 import { resolveSessionRunState } from "@/lib/session/run-status";
@@ -15,7 +16,15 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await params;
-  const auth = await getSessionAuthContext(request);
+  let auth;
+  try {
+    auth = await requireSessionAuth(request);
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
 
   try {
     const session = await getSession(sessionId, auth);

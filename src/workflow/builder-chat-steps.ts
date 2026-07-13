@@ -118,7 +118,7 @@ export async function saveSessionMessagesStep(
 
   const draft = await readDraft(sessionId, session.userId);
   const assistantMessage =
-    draft?.runId === session.lastRunId
+    draft && draft.runId === session.lastRunId
       ? draft.message
       : modelMessagesToAssistantUIMessage(modelMessages, previousModelCount);
 

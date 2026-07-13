@@ -5,8 +5,9 @@ import { NextResponse } from "next/server";
 import { getRun } from "workflow/api";
 
 import {
-  getSessionAuthContext,
+  requireSessionAuth,
   SessionAccessDeniedError,
+  UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
 
@@ -15,7 +16,15 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string; runId: string }> },
 ) {
   const { sessionId, runId } = await params;
-  const auth = await getSessionAuthContext(request);
+  let auth;
+  try {
+    auth = await requireSessionAuth(request);
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
 
   try {
     const session = await getSession(sessionId, auth);

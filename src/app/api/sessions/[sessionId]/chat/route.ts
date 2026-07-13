@@ -4,8 +4,9 @@ import { NextResponse } from "next/server";
 import { start } from "workflow/api";
 
 import {
-  getSessionAuthContext,
+  requireSessionAuth,
   SessionAccessDeniedError,
+  UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
 import { mergeClientMessagesWithPersisted } from "@/lib/chat/merge-messages";
@@ -27,7 +28,15 @@ export async function POST(
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await params;
-  const auth = await getSessionAuthContext(request);
+  let auth;
+  try {
+    auth = await requireSessionAuth(request);
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
 
   try {
     const session = await getSession(sessionId, auth);

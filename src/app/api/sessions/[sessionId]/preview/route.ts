@@ -9,17 +9,32 @@ import {
   stopDevServer,
 } from "@/lib/sandbox/dev-server";
 import {
-  getSessionAuthContext,
+  requireSessionAuth,
   SessionAccessDeniedError,
+  UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
+
+async function resolveAuth(request: Request) {
+  try {
+    return await requireSessionAuth(request);
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
+}
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await params;
-  const auth = await getSessionAuthContext(request);
+  const auth = await resolveAuth(request);
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
 
   try {
     const session = await getSession(sessionId, auth);
@@ -43,7 +58,10 @@ export async function POST(
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await params;
-  const auth = await getSessionAuthContext(request);
+  const auth = await resolveAuth(request);
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
 
   try {
     const session = await getSession(sessionId, auth);
@@ -82,7 +100,10 @@ export async function DELETE(
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await params;
-  const auth = await getSessionAuthContext(request);
+  const auth = await resolveAuth(request);
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
 
   try {
     const session = await getSession(sessionId, auth);

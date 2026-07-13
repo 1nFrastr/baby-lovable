@@ -36,6 +36,7 @@ Rules:
 export interface BuilderAgentContext {
   sessionId: string;
   sandboxMode: SandboxMode;
+  [key: string]: string;
 }
 
 export interface BuilderAgentBundle {

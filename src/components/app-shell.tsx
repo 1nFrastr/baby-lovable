@@ -13,6 +13,7 @@ import {
 import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
+import { AuthUserBar } from "./auth-user-bar";
 
 const POLL_ACTIVE_SESSION_MS = 800;
 
@@ -214,13 +215,16 @@ export function AppShell({ initialSessionId }: AppShellProps) {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-          baby-lovable
-        </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          WorkflowAgent runtime for Next.js app generation
-        </p>
+      <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+        <div>
+          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            baby-lovable
+          </h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            WorkflowAgent runtime for Next.js app generation
+          </p>
+        </div>
+        <AuthUserBar />
       </header>
 
       <div className="flex min-h-0 flex-1">

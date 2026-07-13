@@ -1,165 +1,59 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
 import type { UIMessage } from "ai";
 
-import { ensureWorkspace } from "@/lib/sandbox/local-provider";
-import {
-  getSessionRoot,
-  getSessionsRoot,
-  resolveSessionRoot,
-} from "@/lib/sandbox/paths";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { getSessionRoot } from "@/lib/sandbox/paths";
 
 import {
-  assertSessionOwner,
   type SessionAuthContext,
 } from "./auth-context";
+import {
+  createSessionLocal,
+  getSessionLocal,
+  listSessionsLocal,
+  replaceMessagesLocal,
+  updateSessionLocal,
+} from "./store-local";
+import {
+  createSessionSupabase,
+  getSessionSupabase,
+  listSessionsSupabase,
+  replaceMessagesSupabase,
+  updateSessionSupabase,
+} from "./store-supabase";
 import type {
   CreateSessionInput,
   Session,
   SessionSummary,
   UpdateSessionInput,
 } from "./types";
-import { SESSION_SCHEMA_VERSION } from "./types";
-
-function createSessionId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).slice(2, 10);
-  return `sess_${timestamp}${random}`;
-}
-
-function getSessionFilePath(
-  sessionId: string,
-  userId: string | null = null,
-): string {
-  return path.join(resolveSessionRoot(sessionId, userId), "session.json");
-}
-
-async function readSessionFile(
-  sessionId: string,
-  userId: string | null = null,
-): Promise<Session | null> {
-  try {
-    const raw = await fs.readFile(getSessionFilePath(sessionId, userId), "utf8");
-    return JSON.parse(raw) as Session;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function writeSessionFile(session: Session): Promise<void> {
-  const sessionRoot = resolveSessionRoot(session.id, session.userId);
-  await fs.mkdir(sessionRoot, { recursive: true });
-  await ensureWorkspace(session.id, session.userId);
-  await fs.writeFile(
-    getSessionFilePath(session.id, session.userId),
-    JSON.stringify(session, null, 2),
-    "utf8",
-  );
-}
-
-function toSummary(session: Session): SessionSummary {
-  return {
-    id: session.id,
-    userId: session.userId,
-    title: session.title,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    lastRunId: session.lastRunId,
-    runStatus: session.runStatus,
-    sandboxMode: session.sandboxMode,
-    messageCount: session.messages.length,
-  };
-}
-
-function filterByAuth(
-  sessions: Session[],
-  auth: SessionAuthContext,
-): Session[] {
-  return sessions.filter((session) => {
-    if (session.deletedAt) {
-      return false;
-    }
-
-    try {
-      assertSessionOwner(session.userId, auth);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-}
 
 export async function createSession(
   input: CreateSessionInput = {},
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  const now = new Date().toISOString();
-  const userId = input.userId ?? auth.userId;
-
-  const session: Session = {
-    schemaVersion: SESSION_SCHEMA_VERSION,
-    id: createSessionId(),
-    userId,
-    title: input.title ?? "New Project",
-    createdAt: now,
-    updatedAt: now,
-    messages: [],
-    runStatus: "idle",
-    sandboxMode: input.sandboxMode ?? "local",
-    deletedAt: null,
-  };
-
-  await ensureWorkspace(session.id, session.userId);
-  await writeSessionFile(session);
-  return session;
+  if (isSupabaseConfigured()) {
+    return createSessionSupabase(input, auth);
+  }
+  return createSessionLocal(input, auth);
 }
 
 export async function getSession(
   sessionId: string,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session | null> {
-  const session = await readSessionFile(sessionId, auth.userId);
-  if (!session || session.deletedAt) {
-    return null;
+  if (isSupabaseConfigured()) {
+    return getSessionSupabase(sessionId, auth);
   }
-
-  assertSessionOwner(session.userId, auth);
-  return session;
+  return getSessionLocal(sessionId, auth);
 }
 
 export async function listSessions(
   auth: SessionAuthContext = { userId: null },
 ): Promise<SessionSummary[]> {
-  const sessionsRoot = getSessionsRoot(auth.userId);
-
-  try {
-    const entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
-    const sessions = await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => readSessionFile(entry.name, auth.userId)),
-    );
-
-    return filterByAuth(
-      sessions.filter((session): session is Session => session !== null),
-      auth,
-    )
-      .map(toSummary)
-      .sort(
-        (left, right) =>
-          new Date(right.updatedAt).getTime() -
-          new Date(left.updatedAt).getTime(),
-      );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
-    throw error;
+  if (isSupabaseConfigured()) {
+    return listSessionsSupabase(auth);
   }
+  return listSessionsLocal(auth);
 }
 
 export async function updateSession(
@@ -167,28 +61,10 @@ export async function updateSession(
   input: UpdateSessionInput,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  const existing = await getSession(sessionId, auth);
-  if (!existing) {
-    throw new Error(`Session not found: ${sessionId}`);
+  if (isSupabaseConfigured()) {
+    return updateSessionSupabase(sessionId, input, auth);
   }
-
-  const { lastRunId, ...rest } = input;
-
-  const updated: Session = {
-    ...existing,
-    ...rest,
-    schemaVersion: SESSION_SCHEMA_VERSION,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if (lastRunId === null) {
-    delete updated.lastRunId;
-  } else if (lastRunId !== undefined) {
-    updated.lastRunId = lastRunId;
-  }
-
-  await writeSessionFile(updated);
-  return updated;
+  return updateSessionLocal(sessionId, input, auth);
 }
 
 export async function replaceMessages(
@@ -196,7 +72,10 @@ export async function replaceMessages(
   messages: UIMessage[],
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  return updateSession(sessionId, { messages }, auth);
+  if (isSupabaseConfigured()) {
+    return replaceMessagesSupabase(sessionId, messages, auth);
+  }
+  return replaceMessagesLocal(sessionId, messages, auth);
 }
 
 export function deriveSessionTitle(messages: UIMessage[]): string | undefined {

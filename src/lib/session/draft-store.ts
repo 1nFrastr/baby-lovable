@@ -1,75 +1,48 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-import { generateId, type UIMessage } from "ai";
+import {
+  createEmptyDraft,
+  deleteDraftLocal,
+  readDraftLocal,
+  writeDraftLocal,
+  type SessionDraft,
+} from "./draft-store-local";
+import {
+  deleteDraftSupabase,
+  readDraftSupabase,
+  writeDraftSupabase,
+} from "./draft-store-supabase";
 
-import { resolveSessionRoot } from "@/lib/sandbox/paths";
-
-export interface SessionDraft {
-  runId: string;
-  message: UIMessage;
-  updatedAt: string;
-}
-
-function getDraftFilePath(
-  sessionId: string,
-  userId: string | null = null,
-): string {
-  return path.join(resolveSessionRoot(sessionId, userId), "draft.json");
-}
-
-export function createEmptyDraft(runId: string): SessionDraft {
-  return {
-    runId,
-    message: {
-      id: generateId(),
-      role: "assistant",
-      parts: [],
-    },
-    updatedAt: new Date().toISOString(),
-  };
-}
+export type { SessionDraft };
+export { createEmptyDraft };
 
 export async function readDraft(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionDraft | null> {
-  try {
-    const raw = await fs.readFile(getDraftFilePath(sessionId, userId), "utf8");
-    return JSON.parse(raw) as SessionDraft;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-    throw error;
+  if (isSupabaseConfigured()) {
+    return readDraftSupabase(sessionId);
   }
+  return readDraftLocal(sessionId, userId);
 }
 
-/** Atomic overwrite — safe for high-frequency streaming updates. */
 export async function writeDraft(
   sessionId: string,
   draft: SessionDraft,
   userId: string | null = null,
 ): Promise<void> {
-  const filePath = getDraftFilePath(sessionId, userId);
-  const tmpPath = `${filePath}.tmp`;
-  const sessionRoot = resolveSessionRoot(sessionId, userId);
-
-  await fs.mkdir(sessionRoot, { recursive: true });
-  await fs.writeFile(tmpPath, JSON.stringify(draft, null, 2), "utf8");
-  await fs.rename(tmpPath, filePath);
+  if (isSupabaseConfigured()) {
+    return writeDraftSupabase(sessionId, draft, userId);
+  }
+  return writeDraftLocal(sessionId, draft, userId);
 }
 
 export async function deleteDraft(
   sessionId: string,
   userId: string | null = null,
 ): Promise<void> {
-  try {
-    await fs.unlink(getDraftFilePath(sessionId, userId));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
+  if (isSupabaseConfigured()) {
+    return deleteDraftSupabase(sessionId);
   }
+  return deleteDraftLocal(sessionId, userId);
 }

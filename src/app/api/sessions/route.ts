@@ -1,19 +1,35 @@
 import { NextResponse } from "next/server";
 
 import {
-  getSessionAuthContext,
+  requireSessionAuth,
   SessionAccessDeniedError,
+  UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { createSession, listSessions } from "@/lib/session/store";
 
 export async function GET(request: Request) {
-  const auth = await getSessionAuthContext(request);
-  const sessions = await listSessions(auth);
-  return NextResponse.json({ sessions });
+  try {
+    const auth = await requireSessionAuth(request);
+    const sessions = await listSessions(auth);
+    return NextResponse.json({ sessions });
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
-  const auth = await getSessionAuthContext(request);
+  let auth;
+  try {
+    auth = await requireSessionAuth(request);
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
 
   const body = (await request.json().catch(() => ({}))) as {
     title?: string;
