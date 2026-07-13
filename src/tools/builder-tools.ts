@@ -106,7 +106,7 @@ export const builderTools = {
   }),
   installPackage: tool({
     description:
-      "Add or remove npm packages with pnpm after editing package.json or when the user requests new dependencies.",
+      "Add or remove npm packages via the platform package manager after editing package.json or when the user requests new dependencies.",
     inputSchema: z.object({
       packages: z
         .array(z.string())
@@ -115,7 +115,7 @@ export const builderTools = {
       dev: z
         .boolean()
         .optional()
-        .describe("Install as devDependencies with pnpm add -D"),
+        .describe("Install as devDependencies"),
       remove: z
         .boolean()
         .optional()
@@ -126,18 +126,18 @@ export const builderTools = {
   }),
   installDependencies: tool({
     description:
-      "Run pnpm install in the workspace after you change package.json or pnpm-lock.yaml.",
+      "Install workspace dependencies via the platform package manager after you change package.json or the lockfile.",
     inputSchema: z.object({}),
     contextSchema: toolContextSchema,
     execute: installDependenciesStep,
   }),
   runCommand: tool({
     description:
-      "Deprecated — prefer installPackage or installDependencies. Only pnpm install/add/remove are allowed; all other shell commands are rejected.",
+      "Deprecated — prefer installPackage or installDependencies. Only package-manager install/add/remove commands are allowed; all other shell commands are rejected.",
     inputSchema: z.object({
       command: z
         .string()
-        .describe("Must be pnpm install, pnpm add <pkg>, or pnpm remove <pkg>"),
+        .describe("Must be a package-manager install, add, or remove command"),
       cwd: z
         .string()
         .optional()

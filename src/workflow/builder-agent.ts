@@ -1,10 +1,11 @@
 import { WorkflowAgent } from "@ai-sdk/workflow";
 
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { packageManagerPromptLines } from "@/lib/sandbox/package-manager";
 import { builderTools, createToolsContext } from "@/tools/builder-tools";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
-export const BUILDER_SYSTEM_PROMPT = `You are baby-lovable, an expert Next.js app builder.
+const BUILDER_BASE_PROMPT = `You are baby-lovable, an expert Next.js app builder.
 
 Your job is to help the user create and iterate on a self-contained Next.js application inside the current workspace.
 
@@ -16,8 +17,6 @@ Rules:
 - Prefer several focused files (e.g. \`src/components/calculator/Calculator.tsx\`, \`Display.tsx\`, \`Keypad.tsx\`) over one monolithic page. Each \`writeFile\` should target one small file (roughly ≤150 lines); add more files across steps instead of one huge output.
 - The user's goal is live preview in a dev server. Focus on writing code that renders correctly in the browser.
 - Do NOT run \`npm run lint\`, \`npm run build\`, or production build commands unless the user explicitly asks.
-- Use \`pnpm\` for package management. After editing dependencies, call \`installPackage\` or \`installDependencies\` — never run arbitrary shell commands.
-- The platform automatically installs dependencies and runs \`pnpm dev\` in the background. NEVER run \`pnpm dev\`, \`next dev\`, or otherwise try to start the dev server yourself — the platform owns the dev server lifecycle.
 - Do NOT use \`runCommand\`, \`curl\`, \`ls\`, \`find\`, \`grep\`, or \`tail\` for debugging. Use \`listFiles\`, \`searchFiles\`, and \`readFile\` to inspect the workspace; use \`checkPreview\` to verify preview health.
 - Do not spend steps curl-testing external image URLs or dev-server HTML. Fix code from \`checkPreview\` errors and TypeScript/React rules; pick reasonable placeholder images when needed.
 - After editing files, wait for the preview to settle, then call \`checkPreview\` to confirm the dev server still compiles. After large rewrites (e.g. a full \`writeFile\` on \`globals.css\` or \`page.tsx\`), do not call \`checkPreview\` immediately in the same burst — finish your edits first, then check once.
@@ -32,6 +31,11 @@ Rules:
 - Make incremental edits to the starter project instead of recreating the scaffold from scratch. Only add new files or dependencies when the user's request requires them.
 - Paths passed to tools are relative to the workspace root.
 - If a command fails, inspect the output, fix the issue, and retry.`;
+
+function buildSystemPrompt(sandboxMode: SandboxMode): string {
+  const pmLines = packageManagerPromptLines(sandboxMode).map((line) => `- ${line}`);
+  return `${BUILDER_BASE_PROMPT}\n${pmLines.join("\n")}`;
+}
 
 export interface BuilderAgentContext {
   sessionId: string;
@@ -61,7 +65,7 @@ export function createBuilderAgent(
   const agent = new WorkflowAgent({
     model: modelId,
     maxOutputTokens: resolveMaxOutputTokens(modelId),
-    instructions: BUILDER_SYSTEM_PROMPT,
+    instructions: buildSystemPrompt(sandboxMode),
     tools: builderTools,
     toolsContext,
     runtimeContext,

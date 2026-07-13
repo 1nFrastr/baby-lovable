@@ -1,15 +1,29 @@
-import { DaytonaProjectSandbox } from "./daytona-provider";
+import {
+  destroyDaytonaSandbox,
+  getOrCreateDaytonaSandbox,
+} from "./daytona/sandbox-manager";
 import { ensureWorkspace, LocalProjectSandbox } from "./local-provider";
 import type { ProjectSandbox, SandboxMode } from "./types";
+
+export async function getProjectSandbox(
+  sessionId: string,
+  mode: SandboxMode,
+  userId: string | null = null,
+): Promise<ProjectSandbox> {
+  if (mode === "daytona") {
+    return getOrCreateDaytonaSandbox(sessionId);
+  }
+
+  await ensureWorkspace(sessionId, userId);
+  return new LocalProjectSandbox(sessionId);
+}
 
 export async function createSandbox(
   sessionId: string,
   mode: SandboxMode = "local",
+  userId: string | null = null,
 ): Promise<ProjectSandbox> {
-  if (mode === "daytona") {
-    return new DaytonaProjectSandbox(sessionId);
-  }
-
-  await ensureWorkspace(sessionId);
-  return new LocalProjectSandbox(sessionId);
+  return getProjectSandbox(sessionId, mode, userId);
 }
+
+export { destroyDaytonaSandbox };

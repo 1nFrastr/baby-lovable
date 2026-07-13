@@ -4,6 +4,7 @@ import path from "node:path";
 import type { UIMessage } from "ai";
 
 import { ensureWorkspace } from "@/lib/sandbox/local-provider";
+import { getVolumeSubpath } from "@/lib/sandbox/daytona/volume-paths";
 import {
   getSessionsRoot,
   resolveSessionRoot,
@@ -52,7 +53,9 @@ async function readSessionFile(
 async function writeSessionFile(session: Session): Promise<void> {
   const sessionRoot = resolveSessionRoot(session.id, session.userId);
   await fs.mkdir(sessionRoot, { recursive: true });
-  await ensureWorkspace(session.id, session.userId);
+  if (session.sandboxMode === "local") {
+    await ensureWorkspace(session.id, session.userId);
+  }
   await fs.writeFile(
     getSessionFilePath(session.id, session.userId),
     JSON.stringify(session, null, 2),
@@ -112,7 +115,12 @@ export async function createSessionLocal(
     deletedAt: null,
   };
 
-  await ensureWorkspace(session.id, session.userId);
+  if (session.sandboxMode === "daytona") {
+    session.volumeSubpath = getVolumeSubpath(session.id, session.userId);
+  } else {
+    await ensureWorkspace(session.id, session.userId);
+  }
+
   await writeSessionFile(session);
   return session;
 }
@@ -171,7 +179,7 @@ export async function updateSessionLocal(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const { lastRunId, ...rest } = input;
+  const { lastRunId, daytonaSandboxId, ...rest } = input;
 
   const updated: Session = {
     ...existing,
@@ -184,6 +192,12 @@ export async function updateSessionLocal(
     delete updated.lastRunId;
   } else if (lastRunId !== undefined) {
     updated.lastRunId = lastRunId;
+  }
+
+  if (daytonaSandboxId === null) {
+    delete updated.daytonaSandboxId;
+  } else if (daytonaSandboxId !== undefined) {
+    updated.daytonaSandboxId = daytonaSandboxId;
   }
 
   await writeSessionFile(updated);

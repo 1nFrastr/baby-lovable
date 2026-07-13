@@ -47,14 +47,14 @@ export async function runAgentTurn({
   // Warm up the preview (install deps + boot dev server) in the background so
   // it is ready by the time the agent calls checkPreview — the agent should
   // never have to run `pnpm install` / `pnpm dev` itself.
-  const { ensurePreviewBootstrap, getPreviewReport } = await import(
-    "@/lib/sandbox/dev-server"
+  const { ensurePreviewBootstrap, getCachedPreviewBuildError } = await import(
+    "@/lib/sandbox/preview"
   );
   ensurePreviewBootstrap(sessionId);
 
-  // Surface any live dev-server compile error from the previous edits so the
-  // agent starts the turn aware of what is currently broken in preview.
-  const buildError = (await getPreviewReport(sessionId)).buildError;
+  // Non-blocking: only inject a previously captured compile error. Preview
+  // install/dev-server continues in the background while the agent runs.
+  const buildError = await getCachedPreviewBuildError(sessionId);
   if (buildError) {
     modelMessages.push({
       role: "user",

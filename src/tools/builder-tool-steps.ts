@@ -33,8 +33,8 @@ export type ToolContext = {
 };
 
 async function getSandboxFromContext(context: ToolContext) {
-  const { createSandbox } = await import("@/lib/sandbox/factory");
-  return createSandbox(context.sessionId, context.sandboxMode);
+  const { getProjectSandbox } = await import("@/lib/sandbox/factory");
+  return getProjectSandbox(context.sessionId, context.sandboxMode);
 }
 
 export async function readFileStep(
@@ -219,10 +219,10 @@ export async function searchFilesStep(
   };
 }
 
-async function restartPreviewAfterInstall(sessionId: string): Promise<void> {
-  const { restartDevServer } = await import("@/lib/sandbox/dev-server");
-  void restartDevServer(sessionId).catch(() => {
-    // Preview restart failures are surfaced through the preview API.
+async function restartPreviewAfterInstall(context: ToolContext): Promise<void> {
+  const { restartDevServer } = await import("@/lib/sandbox/preview");
+  void restartDevServer(context.sessionId).catch(() => {
+    // Preview restart failures are surfaced through checkPreview.
   });
 }
 
@@ -240,8 +240,8 @@ async function executeAllowedPnpmCommand(
     timeout,
   );
 
-  if (result.exitCode === 0 && allowed.allowed.kind === "pnpm-install") {
-    await restartPreviewAfterInstall(context.sessionId);
+  if (result.exitCode === 0 && allowed.allowed.kind === "pkg-install") {
+    await restartPreviewAfterInstall(context);
   }
 
   return {
@@ -264,14 +264,20 @@ export async function installPackageStep(
   "use step";
 
   const allowed = input.remove
-    ? buildAllowedShellCommand({ kind: "pnpm-remove", packages: input.packages })
-    : buildAllowedShellCommand({
-        kind: "pnpm-add",
-        packages: input.packages,
-        dev: input.dev ?? false,
-      });
+    ? buildAllowedShellCommand(
+        { kind: "pkg-remove", packages: input.packages },
+        context.sandboxMode,
+      )
+    : buildAllowedShellCommand(
+        {
+          kind: "pkg-add",
+          packages: input.packages,
+          dev: input.dev ?? false,
+        },
+        context.sandboxMode,
+      );
 
-  const validation = validateRunCommand(allowed);
+  const validation = validateRunCommand(allowed, context.sandboxMode);
   if (!validation.ok) {
     return {
       ok: false,
@@ -292,7 +298,10 @@ export async function installDependenciesStep(
 ) {
   "use step";
 
-  const validation = validateRunCommand("pnpm install");
+  const pm = (await import("@/lib/sandbox/package-manager")).resolvePackageManager(
+    context.sandboxMode,
+  );
+  const validation = validateRunCommand(pm.install, context.sandboxMode);
   if (!validation.ok) {
     return {
       ok: false,
@@ -317,7 +326,7 @@ export async function runCommandStep(
 ) {
   "use step";
 
-  const validation = validateRunCommand(input.command);
+  const validation = validateRunCommand(input.command, context.sandboxMode);
   if (!validation.ok) {
     return {
       ok: false,
@@ -352,7 +361,7 @@ export async function checkPreviewStep(
     getPreviewReport,
     isTransientPreviewFailure,
     restartDevServer,
-  } = await import("@/lib/sandbox/dev-server");
+  } = await import("@/lib/sandbox/preview");
 
   if (input.restart) {
     await restartDevServer(context.sessionId);

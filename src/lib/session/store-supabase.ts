@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 
 import { ensureWorkspace } from "@/lib/sandbox/local-provider";
+import { getVolumeSubpath } from "@/lib/sandbox/daytona/volume-paths";
 import { getDevUserId } from "@/lib/supabase/config";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -36,6 +37,9 @@ interface SessionRow {
   run_status: SessionRunStatus;
   sandbox_mode: SandboxMode;
   git_remote: string | null;
+  volume_subpath: string | null;
+  daytona_sandbox_id: string | null;
+  last_commit_sha: string | null;
   deleted_at: string | null;
 }
 
@@ -58,6 +62,15 @@ function rowToSession(row: SessionRow): Session {
   }
   if (row.git_remote) {
     session.gitRemote = row.git_remote;
+  }
+  if (row.volume_subpath) {
+    session.volumeSubpath = row.volume_subpath;
+  }
+  if (row.daytona_sandbox_id) {
+    session.daytonaSandboxId = row.daytona_sandbox_id;
+  }
+  if (row.last_commit_sha) {
+    session.lastCommitSha = row.last_commit_sha;
   }
 
   return session;
@@ -91,6 +104,9 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     run_status: session.runStatus,
     sandbox_mode: session.sandboxMode,
     git_remote: session.gitRemote ?? null,
+    volume_subpath: session.volumeSubpath ?? null,
+    daytona_sandbox_id: session.daytonaSandboxId ?? null,
+    last_commit_sha: session.lastCommitSha ?? null,
     deleted_at: session.deletedAt ?? null,
   };
 }
@@ -127,6 +143,10 @@ export async function createSessionSupabase(
     deletedAt: null,
   };
 
+  if (session.sandboxMode === "daytona") {
+    session.volumeSubpath = getVolumeSubpath(session.id, userId);
+  }
+
   const { error } = await supabase.from("sessions").insert({
     ...sessionToRow(session),
     created_at: now,
@@ -136,7 +156,10 @@ export async function createSessionSupabase(
     throw new Error(`Failed to create session: ${error.message}`);
   }
 
-  await ensureWorkspace(session.id, null);
+  if (session.sandboxMode === "local") {
+    await ensureWorkspace(session.id, userId);
+  }
+
   return session;
 }
 
@@ -195,7 +218,7 @@ export async function updateSessionSupabase(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const { lastRunId, ...rest } = input;
+  const { lastRunId, daytonaSandboxId, ...rest } = input;
 
   const updated: Session = {
     ...existing,
@@ -208,6 +231,12 @@ export async function updateSessionSupabase(
     delete updated.lastRunId;
   } else if (lastRunId !== undefined) {
     updated.lastRunId = lastRunId;
+  }
+
+  if (daytonaSandboxId === null) {
+    delete updated.daytonaSandboxId;
+  } else if (daytonaSandboxId !== undefined) {
+    updated.daytonaSandboxId = daytonaSandboxId;
   }
 
   const supabase = getSupabaseAdminClient();
@@ -224,6 +253,9 @@ export async function updateSessionSupabase(
       run_status: row.run_status,
       sandbox_mode: row.sandbox_mode,
       git_remote: row.git_remote,
+      volume_subpath: row.volume_subpath,
+      daytona_sandbox_id: row.daytona_sandbox_id,
+      last_commit_sha: row.last_commit_sha,
       deleted_at: row.deleted_at,
     })
     .eq("id", sessionId);

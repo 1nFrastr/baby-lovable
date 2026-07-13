@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { getWorkspaceRoot } from "./paths";
+import { resolvePackageManager } from "./package-manager";
 
 export type PreviewStatus =
   | { status: "installing" }
@@ -299,9 +300,11 @@ async function hasPackageJson(sessionId: string): Promise<boolean> {
   }
 }
 
-function runPnpmInstall(workspaceRoot: string): Promise<boolean> {
+function runPackageInstall(workspaceRoot: string): Promise<boolean> {
+  const pm = resolvePackageManager("local");
+  const [binary, ...args] = pm.install.split(" ");
   return new Promise((resolve) => {
-    const child = spawn("pnpm", ["install"], {
+    const child = spawn(binary, args, {
       cwd: workspaceRoot,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -326,7 +329,7 @@ export async function ensureDependencies(sessionId: string): Promise<boolean> {
   }
 
   const workspaceRoot = getWorkspaceRoot(sessionId);
-  const promise = runPnpmInstall(workspaceRoot);
+  const promise = runPackageInstall(workspaceRoot);
   installingPromises.set(sessionId, promise);
 
   try {
@@ -549,8 +552,11 @@ export async function ensureDevServer(sessionId: string): Promise<PreviewStatus>
 async function startDevServer(sessionId: string): Promise<PreviewStatus> {
   const workspaceRoot = getWorkspaceRoot(sessionId);
   const port = sessionPort(sessionId);
+  const pm = resolvePackageManager("local");
+  const devParts = pm.dev(port).split(" ");
+  const [binary, ...args] = devParts;
 
-  const child = spawn("pnpm", ["dev", "--port", String(port)], {
+  const child = spawn(binary, args, {
     cwd: workspaceRoot,
     detached: true,
     env: {

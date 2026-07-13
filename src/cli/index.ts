@@ -19,6 +19,7 @@ import {
   updateSession,
 } from "@/lib/session/store";
 import { getWorkspaceRoot } from "@/lib/sandbox/paths";
+import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import type { Session } from "@/lib/session/types";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
@@ -133,6 +134,15 @@ function requireGatewayKey(): void {
   }
 }
 
+function requireDaytonaKey(sandboxMode: SandboxMode): void {
+  if (sandboxMode === "daytona" && !isDaytonaConfigured()) {
+    logger.error(
+      "Missing DAYTONA_API_KEY. Set it in .env.local for --sandbox daytona.",
+    );
+    process.exit(1);
+  }
+}
+
 async function resolveSession(args: CliArgs): Promise<Session> {
   if (args.sessionId) {
     const existing = await getSession(args.sessionId);
@@ -184,7 +194,62 @@ async function runTurn(
   }
 
   session.messages = mergedMessages;
+
+  await commitTurnWorkspace(session, mergedMessages);
+
   return mergedMessages;
+}
+
+async function commitTurnWorkspace(
+  session: Session,
+  messages: UIMessage[],
+): Promise<void> {
+  const { getProjectSandbox } = await import("@/lib/sandbox/factory");
+  const { commitWorkspaceTurn, buildTurnCommitInput } = await import(
+    "@/lib/sandbox/workspace-git"
+  );
+
+  let sandbox;
+  try {
+    sandbox = await getProjectSandbox(session.id, session.sandboxMode);
+  } catch (error) {
+    logger.warn(
+      `Sandbox unavailable for post-turn checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  try {
+    const result = await commitWorkspaceTurn(
+      sandbox,
+      buildTurnCommitInput(session, messages),
+    );
+    if (result.sha) {
+      await updateSession(session.id, { lastCommitSha: result.sha });
+    } else if (result.skippedReason) {
+      logger.warn(`Workspace git skipped: ${result.skippedReason}`);
+    }
+  } catch (error) {
+    logger.warn(
+      `Git commit failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (session.sandboxMode === "daytona") {
+    try {
+      const { persistDaytonaWorkspaceToVolume } = await import(
+        "@/lib/sandbox/daytona/volume-sync"
+      );
+      const synced = await persistDaytonaWorkspaceToVolume(sandbox);
+      if (synced) {
+        logger.info("Volume sync: source persisted to volume");
+      }
+    } catch (error) {
+      logger.warn(
+        `Volume sync failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 }
 
 async function interactiveLoop(
@@ -241,8 +306,17 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (!args.sessionId) {
+    requireDaytonaKey(args.sandboxMode);
+  }
+
   const session = await resolveSession(args);
-  const workspace = path.relative(process.cwd(), getWorkspaceRoot(session.id));
+  requireDaytonaKey(session.sandboxMode);
+
+  const workspace =
+    session.sandboxMode === "daytona"
+      ? `daytona:workspace + persist:${session.volumeSubpath ?? session.id}`
+      : path.relative(process.cwd(), getWorkspaceRoot(session.id));
 
   logger.banner([
     `baby-lovable agent · CLI`,
@@ -257,23 +331,43 @@ async function main(): Promise<void> {
     logger.info(`Session saved. Resume with: npm run agent -- -s ${session.id}`);
     // One-shot mode: the preview bootstrap spawned a long-lived `pnpm dev`
     // child that keeps the event loop alive. Stop it so the process exits.
-    await shutdownPreview(session.id);
+    await shutdownPreview(session);
     return;
   }
 
   await interactiveLoop(session, args.maxSteps);
   logger.info(`Session saved. Resume with: npm run agent -- -s ${session.id}`);
-  await shutdownPreview(session.id);
+  await shutdownPreview(session);
 }
 
 /**
- * Tear down the background dev server started during the turn so the CLI can
- * exit cleanly instead of hanging on the live child process.
+ * Tear down preview resources so the CLI can exit cleanly.
+ *
+ * Local mode stops the host `pnpm dev` child (otherwise the event loop hangs).
+ * Daytona mode intentionally keeps the remote sandbox + dev server alive so the
+ * preview URL remains reachable after one-shot runs.
  */
-async function shutdownPreview(sessionId: string): Promise<void> {
+async function shutdownPreview(session: Session): Promise<void> {
+  if (session.sandboxMode === "daytona") {
+    try {
+      const { getDaytonaPreviewStatus } = await import(
+        "@/lib/sandbox/dev-server-daytona"
+      );
+      const status = getDaytonaPreviewStatus(session.id);
+      if (status.status === "ready" && status.url) {
+        logger.info(`Daytona sandbox kept — preview: ${status.url}`);
+      } else {
+        logger.info("Daytona sandbox kept (preview may still be starting)");
+      }
+    } catch {
+      logger.info("Daytona sandbox kept");
+    }
+    return;
+  }
+
   try {
-    const { stopDevServer } = await import("@/lib/sandbox/dev-server");
-    await stopDevServer(sessionId);
+    const { stopDevServer } = await import("@/lib/sandbox/preview");
+    await stopDevServer(session.id);
   } catch {
     // Best-effort: never block exit on teardown failures.
   }

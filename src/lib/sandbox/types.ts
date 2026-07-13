@@ -36,12 +36,20 @@ export interface SandboxProcessRunner {
   ): Promise<ExecuteResult>;
 }
 
+/** Git operations within a workspace — shell for local, Daytona SDK for remote. */
+export interface SandboxGitRunner {
+  ensureRepo(): Promise<{ ok: true } | { ok: false; reason: string }>;
+  hasChanges(): Promise<boolean>;
+  commitAll(message: string): Promise<import("./git-runner").CommitTurnResult>;
+}
+
 export interface ProjectSandbox {
   readonly id: string;
   readonly description: string;
   readonly rootDir: string;
   fs: SandboxFileSystem;
   process: SandboxProcessRunner;
+  git: SandboxGitRunner;
 }
 
 export class NotImplementedError extends Error {

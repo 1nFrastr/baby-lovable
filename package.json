@@ -9,12 +9,16 @@
     "lint": "eslint --cache --cache-location .eslintcache src scripts templates/nextjs-starter",
     "agent": "tsx src/cli/index.ts",
     "cleanup-previews": "tsx scripts/cleanup-preview-servers.ts",
+    "test:daytona-fs": "tsx src/cli/test-daytona-fs.ts",
+    "test:daytona-volume-sync": "tsx src/cli/test-daytona-volume-sync.ts",
+    "test:daytona-git": "tsx src/cli/test-daytona-git.ts",
     "workflow:web": "workflow web"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.11",
     "@ai-sdk/react": "^4.0.23",
     "@ai-sdk/workflow": "^1.0.22",
+    "@daytona/sdk": "^0.196.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.2",
     "@tanstack/react-query": "^5.101.2",

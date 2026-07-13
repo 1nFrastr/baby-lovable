@@ -1,11 +1,25 @@
-export type AllowedCommand =
-  | { kind: "pnpm-install" }
-  | { kind: "pnpm-add"; packages: string[]; dev: boolean }
-  | { kind: "pnpm-remove"; packages: string[] };
+import type { SandboxMode } from "./types";
+import { resolvePackageManager } from "./package-manager";
 
-const PNPM_INSTALL_RE = /^pnpm\s+install(?:\s|$)/;
-const PNPM_ADD_RE = /^pnpm\s+add(?:\s+(-D|--save-dev))?\s+([\s\S]+)$/;
-const PNPM_REMOVE_RE = /^pnpm\s+remove\s+([\s\S]+)$/;
+export type AllowedCommand =
+  | { kind: "pkg-install" }
+  | { kind: "pkg-add"; packages: string[]; dev: boolean }
+  | { kind: "pkg-remove"; packages: string[] };
+
+const INSTALL_RES: Record<"pnpm" | "npm", RegExp> = {
+  pnpm: /^pnpm\s+install\s*$/,
+  npm: /^npm\s+install\s*$/,
+};
+
+const ADD_RES: Record<"pnpm" | "npm", RegExp> = {
+  pnpm: /^pnpm\s+add(?:\s+(-D|--save-dev))?\s+([\s\S]+)$/,
+  npm: /^npm\s+install(?:\s+(-D|--save-dev))?\s+([\s\S]+)$/,
+};
+
+const REMOVE_RES: Record<"pnpm" | "npm", RegExp> = {
+  pnpm: /^pnpm\s+remove\s+([\s\S]+)$/,
+  npm: /^npm\s+uninstall\s+([\s\S]+)$/,
+};
 
 function splitPackageNames(segment: string): string[] {
   return segment
@@ -15,62 +29,74 @@ function splitPackageNames(segment: string): string[] {
     .filter(Boolean);
 }
 
-/**
- * Parse a workspace shell command into a supported package-manager action.
- * Returns null when the command is not on the allowlist.
- */
-export function parseAllowedCommand(command: string): AllowedCommand | null {
+function parseWithManager(command: string, pm: "pnpm" | "npm"): AllowedCommand | null {
   const trimmed = command.trim();
   if (!trimmed) {
     return null;
   }
 
-  if (PNPM_INSTALL_RE.test(trimmed)) {
-    return { kind: "pnpm-install" };
+  if (INSTALL_RES[pm].test(trimmed)) {
+    return { kind: "pkg-install" };
   }
 
-  const addMatch = trimmed.match(PNPM_ADD_RE);
+  const addMatch = trimmed.match(ADD_RES[pm]);
   if (addMatch) {
     const packages = splitPackageNames(addMatch[2] ?? "");
     if (packages.length === 0) {
       return null;
     }
     return {
-      kind: "pnpm-add",
+      kind: "pkg-add",
       packages,
       dev: Boolean(addMatch[1]),
     };
   }
 
-  const removeMatch = trimmed.match(PNPM_REMOVE_RE);
+  const removeMatch = trimmed.match(REMOVE_RES[pm]);
   if (removeMatch) {
     const packages = splitPackageNames(removeMatch[1] ?? "");
     if (packages.length === 0) {
       return null;
     }
-    return { kind: "pnpm-remove", packages };
+    return { kind: "pkg-remove", packages };
   }
 
   return null;
 }
 
-export function buildAllowedShellCommand(command: AllowedCommand): string {
+/**
+ * Parse a workspace shell command into a supported package-manager action.
+ * Accepts both pnpm and npm spellings from the model.
+ */
+export function parseAllowedCommand(command: string): AllowedCommand | null {
+  return (
+    parseWithManager(command, "pnpm") ?? parseWithManager(command, "npm")
+  );
+}
+
+export function buildAllowedShellCommand(
+  command: AllowedCommand,
+  sandboxMode: SandboxMode = "local",
+): string {
+  const pm = resolvePackageManager(sandboxMode);
+
   switch (command.kind) {
-    case "pnpm-install":
-      return "pnpm install";
-    case "pnpm-add":
-      return command.dev
-        ? `pnpm add -D ${command.packages.join(" ")}`
-        : `pnpm add ${command.packages.join(" ")}`;
-    case "pnpm-remove":
-      return `pnpm remove ${command.packages.join(" ")}`;
+    case "pkg-install":
+      return pm.install;
+    case "pkg-add":
+      return pm.add(command.packages, command.dev);
+    case "pkg-remove":
+      return pm.remove(command.packages);
   }
 }
 
 export const DISALLOWED_COMMAND_HINT =
-  "Only package-manager commands are allowed. Use listFiles/searchFiles/readFile for inspection, checkPreview for preview health, and installPackage/installDependencies for dependencies. Never run curl, ls, find, grep, tail, or pnpm dev.";
+  "Only package-manager commands are allowed. Use listFiles/searchFiles/readFile for inspection, checkPreview for preview health, and installPackage/installDependencies for dependencies. Never run curl, ls, find, grep, tail, or dev server commands.";
 
-export function validateRunCommand(command: string):
+export function validateRunCommand(
+  command: string,
+  sandboxMode: SandboxMode = "local",
+):
   | { ok: true; allowed: AllowedCommand; shell: string }
   | { ok: false; error: string } {
   const allowed = parseAllowedCommand(command);
@@ -81,6 +107,9 @@ export function validateRunCommand(command: string):
   return {
     ok: true,
     allowed,
-    shell: buildAllowedShellCommand(allowed),
+    shell: buildAllowedShellCommand(allowed, sandboxMode),
   };
 }
+
+/** @deprecated Use pkg-* kinds — kept for transitional call sites. */
+export type LegacyAllowedCommand = AllowedCommand;
