@@ -216,3 +216,22 @@ export async function persistDaytonaWorkspaceToVolume(
 
   return count > 0;
 }
+
+/**
+ * Copy durable volume source into a local (non-FUSE) directory for export/staging.
+ * Returns the number of files copied, or 0 if volume has no project.
+ */
+export async function stageVolumeSourceToPath(
+  sandbox: ProjectSandbox,
+  destinationDir: string,
+): Promise<number> {
+  const daytona = asDaytonaSandbox(sandbox);
+  if (!daytona) return 0;
+  if (!(await volumeHasSource(sandbox))) return 0;
+
+  return syncDirectory(
+    daytona.sdkSandbox.fs,
+    DAYTONA_VOLUME_MOUNT,
+    destinationDir,
+  );
+}

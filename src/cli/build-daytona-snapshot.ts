@@ -5,6 +5,7 @@
  *   npm run build:daytona-snapshot
  *   npm run build:daytona-snapshot -- --force
  *   npm run build:daytona-snapshot -- --name my-snapshot
+ *   npm run build:daytona-snapshot -- --name my-snapshot --cpu 1 --memory 1 --disk 3
  */
 import { config as loadEnv } from "dotenv";
 
@@ -22,21 +23,53 @@ import {
 } from "@/lib/sandbox/daytona/snapshot-image";
 import type { Daytona } from "@daytona/sdk";
 
-function parseArgs(argv: string[]): { force: boolean; name: string } {
-  let force = false;
-  let name = getDaytonaSnapshotName() ?? DAYTONA_DEFAULT_SNAPSHOT;
+interface BuildArgs {
+  force: boolean;
+  name: string;
+  cpu: number;
+  memory: number;
+  disk: number;
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+function parseArgs(argv: string[]): BuildArgs {
+  const args: BuildArgs = {
+    force: false,
+    name: getDaytonaSnapshotName() ?? DAYTONA_DEFAULT_SNAPSHOT,
+    // Lean defaults — Tier 1 org disk is only 30GiB total.
+    cpu: 1,
+    memory: 1,
+    disk: 3,
+  };
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--force" || arg === "-f") {
-      force = true;
+      args.force = true;
       continue;
     }
     if ((arg === "--name" || arg === "-n") && argv[i + 1]) {
-      name = argv[++i]!;
+      args.name = argv[++i]!;
+      continue;
+    }
+    if (arg === "--cpu" && argv[i + 1]) {
+      args.cpu = parsePositiveInt(argv[++i], args.cpu);
+      continue;
+    }
+    if (arg === "--memory" && argv[i + 1]) {
+      args.memory = parsePositiveInt(argv[++i], args.memory);
+      continue;
+    }
+    if (arg === "--disk" && argv[i + 1]) {
+      args.disk = parsePositiveInt(argv[++i], args.disk);
       continue;
     }
   }
-  return { force, name };
+  return args;
 }
 
 async function getSnapshotOrNull(daytona: Daytona, name: string) {
@@ -69,7 +102,7 @@ async function main(): Promise<void> {
     throw new Error("DAYTONA_API_KEY (or DAYTONA_JWT_TOKEN) is required");
   }
 
-  const { force, name } = parseArgs(process.argv.slice(2));
+  const { force, name, cpu, memory, disk } = parseArgs(process.argv.slice(2));
   const daytona = getDaytonaClient();
 
   const existing = await getSnapshotOrNull(daytona, name);
@@ -85,18 +118,16 @@ async function main(): Promise<void> {
     await waitUntilSnapshotGone(daytona, name);
   }
 
-  console.log(`Building snapshot "${name}" from ${DAYTONA_STARTER_BASE_IMAGE}…`);
+  console.log(
+    `Building snapshot "${name}" from ${DAYTONA_STARTER_BASE_IMAGE} (cpu=${cpu} memory=${memory}GiB disk=${disk}GiB)…`,
+  );
   const image = buildStarterSnapshotImage();
 
   const snapshot = await daytona.snapshot.create(
     {
       name,
       image,
-      resources: {
-        cpu: 2,
-        memory: 4,
-        disk: 8,
-      },
+      resources: { cpu, memory, disk },
     },
     {
       onLogs: (chunk) => process.stdout.write(chunk),
@@ -107,7 +138,8 @@ async function main(): Promise<void> {
   console.log(
     `\nSnapshot ready: ${snapshot.name} (state=${snapshot.state}, id=${snapshot.id})`,
   );
-  console.log(`Set DAYTONA_SNAPSHOT=${snapshot.name} (default already matches).`);
+  console.log(`Resources: ${cpu} vCPU / ${memory} GiB / ${disk} GiB`);
+  console.log(`Set DAYTONA_SNAPSHOT=${snapshot.name} (or rely on default).`);
 }
 
 main().catch((error) => {

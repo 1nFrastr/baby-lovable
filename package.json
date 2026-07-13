@@ -13,6 +13,7 @@
     "test:daytona-fs": "tsx src/cli/test-daytona-fs.ts",
     "test:daytona-volume-sync": "tsx src/cli/test-daytona-volume-sync.ts",
     "test:daytona-git": "tsx src/cli/test-daytona-git.ts",
+    "test:daytona-export": "tsx src/cli/test-daytona-export.ts",
     "workflow:web": "workflow web"
   },
   "dependencies": {

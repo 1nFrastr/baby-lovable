@@ -54,7 +54,7 @@ export interface ProjectSandbox {
 
 export class NotImplementedError extends Error {
   constructor(feature: string) {
-    super(`${feature} is not implemented yet. Daytona sandbox integration is reserved for a future release.`);
+    super(`${feature} is not implemented yet.`);
     this.name = "NotImplementedError";
   }
 }

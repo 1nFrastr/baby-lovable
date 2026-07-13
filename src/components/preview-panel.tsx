@@ -22,6 +22,8 @@ export function PreviewPanel({
   sandboxMode = "local",
 }: PreviewPanelProps) {
   const [preview, setPreview] = useState<PreviewStatus>({ status: "stopped" });
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const previewRef = useRef(preview);
 
   useEffect(() => {
@@ -92,9 +94,43 @@ export function PreviewPanel({
     }
   };
 
+  const handleExport = async () => {
+    setExportError(null);
+    setExporting(true);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/export`);
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(data?.error ?? `Export failed (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? `${sessionId}-workspace.zip`;
+
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      setExportError(
+        error instanceof Error ? error.message : "Export failed",
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -111,31 +147,50 @@ export function PreviewPanel({
             </span>
           </div>
           <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-            {preview.status === "ready"
-              ? preview.url
-              : preview.status === "starting"
-                ? sandboxMode === "daytona"
-                  ? "Starting Daytona preview…"
-                  : "Starting dev server…"
-                : preview.status === "installing"
-                ? "Installing dependencies…"
-                : preview.status === "needs_install"
-                  ? "Project not ready"
-                  : preview.status === "error"
-                    ? preview.error
-                    : "Preview not started"}
+            {exportError
+              ? exportError
+              : preview.status === "ready"
+                ? preview.url
+                : preview.status === "starting"
+                  ? sandboxMode === "daytona"
+                    ? "Starting Daytona preview…"
+                    : "Starting dev server…"
+                  : preview.status === "installing"
+                    ? "Installing dependencies…"
+                    : preview.status === "needs_install"
+                      ? "Project not ready"
+                      : preview.status === "error"
+                        ? preview.error
+                        : "Preview not started"}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            void handleRestart();
-          }}
-          className="shrink-0 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-        >
-          Restart
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void handleExport();
+            }}
+            disabled={exporting || sandboxMode === "local"}
+            title={
+              sandboxMode === "local"
+                ? "Local export is not implemented yet"
+                : "Download workspace as git archive zip"
+            }
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            {exporting ? "Exporting…" : "Export"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void handleRestart();
+            }}
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Restart
+          </button>
+        </div>
       </div>
 
       <div className="relative min-h-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
