@@ -1,17 +1,25 @@
 import type { PreviewStatus } from "./dev-server";
 import {
+  ensureDevServer as ensureLocalDevServer,
   ensurePreviewBootstrap as ensureLocalPreviewBootstrap,
   getPreviewReport as getLocalPreviewReport,
+  getPreviewStatus as getLocalPreviewStatus,
+  hasNodeModules as hasLocalNodeModules,
   isTransientPreviewFailure as isLocalTransientPreviewFailure,
+  resolvePreviewStatus as resolveLocalPreviewStatus,
   restartDevServer as restartLocalDevServer,
   stopDevServer as stopLocalDevServer,
   type PreviewReport,
 } from "./dev-server";
 import {
   destroyDaytonaPreview,
+  ensureDaytonaDevServer,
   ensureDaytonaPreviewBootstrap,
   getDaytonaBuildError,
   getDaytonaPreviewReport,
+  getDaytonaPreviewStatus,
+  hasDaytonaNodeModules,
+  resolveDaytonaPreviewStatus,
 } from "./dev-server-daytona";
 import { getSession } from "@/lib/session/store";
 import { getBuildError as getLocalBuildError } from "./dev-server";
@@ -55,6 +63,43 @@ export async function getPreviewReport(
     return getDaytonaPreviewReport(sessionId, options);
   }
   return getLocalPreviewReport(sessionId, options);
+}
+
+export async function resolvePreviewStatus(
+  sessionId: string,
+): Promise<PreviewStatus> {
+  const mode = await sandboxModeFor(sessionId);
+  if (mode === "daytona") {
+    // Web UI polls this endpoint — do not block on remote install/dev boot.
+    return resolveDaytonaPreviewStatus(sessionId, { wait: false });
+  }
+  return resolveLocalPreviewStatus(sessionId);
+}
+
+export async function ensureDevServer(sessionId: string): Promise<PreviewStatus> {
+  const mode = await sandboxModeFor(sessionId);
+  if (mode === "daytona") {
+    return ensureDaytonaDevServer(sessionId);
+  }
+  return ensureLocalDevServer(sessionId);
+}
+
+export async function hasNodeModules(sessionId: string): Promise<boolean> {
+  const mode = await sandboxModeFor(sessionId);
+  if (mode === "daytona") {
+    return hasDaytonaNodeModules(sessionId);
+  }
+  return hasLocalNodeModules(sessionId);
+}
+
+export async function getPreviewStatus(
+  sessionId: string,
+): Promise<PreviewStatus> {
+  const mode = await sandboxModeFor(sessionId);
+  if (mode === "daytona") {
+    return getDaytonaPreviewStatus(sessionId);
+  }
+  return getLocalPreviewStatus(sessionId);
 }
 
 export async function restartDevServer(sessionId: string): Promise<PreviewStatus> {

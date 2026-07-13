@@ -23,12 +23,20 @@ const DEV_LOG_COMPILE_MARKERS = [
 
 interface DaytonaPreviewState {
   status: PreviewStatus["status"];
+  /** Standard preview URL — requires `x-daytona-preview-token` for fetch. */
   url?: string;
   token?: string;
+  /** Signed preview URL for browser/iframe (token embedded; no custom headers). */
+  embedUrl?: string;
+  /** Epoch ms when embedUrl should be refreshed. */
+  embedUrlExpiresAt?: number;
   port: number;
   error?: string;
   devSessionId: string;
 }
+
+const SIGNED_PREVIEW_TTL_SECONDS = 3600;
+const SIGNED_PREVIEW_REFRESH_BUFFER_MS = 5 * 60_000;
 
 const daytonaStates = new Map<string, DaytonaPreviewState>();
 const daytonaBootstrapPromises = new Map<string, Promise<void>>();
@@ -86,13 +94,48 @@ async function readRemoteDevLog(sessionId: string): Promise<string> {
   }
 }
 
-async function hasRemoteNodeModules(sessionId: string): Promise<boolean> {
+export async function hasDaytonaNodeModules(sessionId: string): Promise<boolean> {
   const sandbox = await getOrCreateDaytonaSandbox(sessionId);
   try {
     await sandbox.fs.getFileDetails("node_modules/next/package.json");
     return true;
   } catch {
     return false;
+  }
+}
+
+async function hasRemoteNodeModules(sessionId: string): Promise<boolean> {
+  return hasDaytonaNodeModules(sessionId);
+}
+
+async function ensureSignedEmbedUrl(
+  sessionId: string,
+  state: DaytonaPreviewState,
+): Promise<string | undefined> {
+  if (
+    state.embedUrl &&
+    state.embedUrlExpiresAt &&
+    Date.now() < state.embedUrlExpiresAt - SIGNED_PREVIEW_REFRESH_BUFFER_MS
+  ) {
+    return state.embedUrl;
+  }
+
+  const sdkSandbox = getManagedDaytonaSdkSandbox(sessionId);
+  if (!sdkSandbox) {
+    return state.embedUrl;
+  }
+
+  try {
+    const signed = await sdkSandbox.getSignedPreviewUrl(
+      state.port,
+      SIGNED_PREVIEW_TTL_SECONDS,
+    );
+    state.embedUrl = signed.url;
+    state.embedUrlExpiresAt = Date.now() + SIGNED_PREVIEW_TTL_SECONDS * 1000;
+    daytonaStates.set(sessionId, state);
+    return signed.url;
+  } catch {
+    return state.embedUrl ?? state.url;
   }
 }
 
@@ -178,15 +221,30 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
       });
 
       if (probe.status < 600) {
+        let embedUrl: string | undefined;
+        let embedUrlExpiresAt: number | undefined;
+        try {
+          const signed = await sdkSandbox.getSignedPreviewUrl(
+            port,
+            SIGNED_PREVIEW_TTL_SECONDS,
+          );
+          embedUrl = signed.url;
+          embedUrlExpiresAt = Date.now() + SIGNED_PREVIEW_TTL_SECONDS * 1000;
+        } catch {
+          // Fall back to standard URL; Web iframe may need a later refresh.
+        }
+
         daytonaStates.set(sessionId, {
           status: "ready",
           url: preview.url,
           token: preview.token,
+          embedUrl,
+          embedUrlExpiresAt,
           port,
           devSessionId,
         });
         logDaytonaBootstrap(sessionId, "preview", `ready ${preview.url}`);
-        return { status: "ready", url: preview.url, port };
+        return { status: "ready", url: embedUrl ?? preview.url, port };
       }
     } catch {
       // Dev server still warming up.
@@ -324,8 +382,12 @@ export function getDaytonaPreviewStatus(sessionId: string): PreviewStatus {
     return { status: "stopped" };
   }
 
-  if (state.status === "ready" && state.url) {
-    return { status: "ready", url: state.url, port: state.port };
+  if (state.status === "ready" && (state.embedUrl || state.url)) {
+    return {
+      status: "ready",
+      url: state.embedUrl ?? state.url!,
+      port: state.port,
+    };
   }
 
   if (state.status === "starting") {
@@ -347,44 +409,107 @@ export function getDaytonaPreviewStatus(sessionId: string): PreviewStatus {
   return { status: "stopped" };
 }
 
+async function withFreshEmbedUrl(
+  sessionId: string,
+  status: PreviewStatus,
+): Promise<PreviewStatus> {
+  if (status.status !== "ready") {
+    return status;
+  }
+
+  const state = daytonaStates.get(sessionId);
+  if (!state || state.status !== "ready") {
+    return status;
+  }
+
+  const embedUrl = await ensureSignedEmbedUrl(sessionId, state);
+  if (!embedUrl) {
+    return status;
+  }
+
+  return { status: "ready", url: embedUrl, port: state.port };
+}
+
 export async function resolveDaytonaPreviewStatus(
   sessionId: string,
+  options?: { wait?: boolean },
 ): Promise<PreviewStatus> {
+  const wait = options?.wait ?? true;
   let current = getDaytonaPreviewStatus(sessionId);
+
+  if (current.status === "ready") {
+    return withFreshEmbedUrl(sessionId, current);
+  }
+
+  if (current.status === "error") {
+    return current;
+  }
 
   if (current.status === "stopped" || current.status === "needs_install") {
     if (await hasRemotePackageJson(sessionId)) {
       kickOffDaytonaBootstrap(sessionId);
+      current = getDaytonaPreviewStatus(sessionId);
+      if (!wait) {
+        if (
+          current.status === "stopped" ||
+          current.status === "needs_install"
+        ) {
+          return { status: "starting", port: getDevPort() };
+        }
+        return current;
+      }
     } else {
       return { status: "needs_install" };
     }
   }
 
-  if (
+  const bootstrapping =
     daytonaBootstrapPromises.has(sessionId) ||
     current.status === "installing" ||
-    current.status === "starting"
-  ) {
+    current.status === "starting";
+
+  if (bootstrapping) {
+    if (!wait) {
+      return current.status === "stopped"
+        ? { status: "starting", port: getDevPort() }
+        : current;
+    }
     await waitForDaytonaBootstrap(sessionId);
     current = getDaytonaPreviewStatus(sessionId);
     if (current.status !== "stopped") {
-      return current;
+      return withFreshEmbedUrl(sessionId, current);
     }
   }
 
   if (await hasRemoteNodeModules(sessionId)) {
     kickOffDaytonaBootstrap(sessionId);
+    if (!wait) {
+      const next = getDaytonaPreviewStatus(sessionId);
+      return next.status === "stopped"
+        ? { status: "starting", port: getDevPort() }
+        : next;
+    }
     await waitForDaytonaBootstrap(sessionId);
-    return getDaytonaPreviewStatus(sessionId);
+    return withFreshEmbedUrl(sessionId, getDaytonaPreviewStatus(sessionId));
   }
 
   if (await hasRemotePackageJson(sessionId)) {
     kickOffDaytonaBootstrap(sessionId);
+    if (!wait) {
+      return { status: "installing" };
+    }
     await waitForDaytonaBootstrap(sessionId);
-    return getDaytonaPreviewStatus(sessionId);
+    return withFreshEmbedUrl(sessionId, getDaytonaPreviewStatus(sessionId));
   }
 
   return { status: "needs_install" };
+}
+
+export async function ensureDaytonaDevServer(
+  sessionId: string,
+): Promise<PreviewStatus> {
+  ensureDaytonaPreviewBootstrap(sessionId);
+  return resolveDaytonaPreviewStatus(sessionId, { wait: false });
 }
 
 export interface DaytonaPreviewReport {
@@ -413,8 +538,10 @@ export async function getDaytonaPreviewReport(
 
   if (resolved.status === "ready" && resolved.url) {
     const state = daytonaStates.get(sessionId);
+    // Probe with the standard preview URL + token (not the signed embed URL).
+    const probeUrl = state?.url ?? resolved.url;
     try {
-      const response = await fetch(resolved.url, {
+      const response = await fetch(probeUrl, {
         headers: state?.token
           ? { "x-daytona-preview-token": state.token }
           : undefined,

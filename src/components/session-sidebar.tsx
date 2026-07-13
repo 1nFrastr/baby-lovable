@@ -1,5 +1,6 @@
 "use client";
 
+import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionSummary } from "@/lib/session/types";
 import { isActiveRunStatus } from "@/lib/session/types";
 
@@ -9,6 +10,9 @@ interface SessionSidebarProps {
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   isCreating?: boolean;
+  sandboxMode: SandboxMode;
+  onSandboxModeChange: (mode: SandboxMode) => void;
+  daytonaAvailable: boolean;
 }
 
 function formatRelativeTime(value: string): string {
@@ -27,6 +31,9 @@ export function SessionSidebar({
   onSelect,
   onCreate,
   isCreating = false,
+  sandboxMode,
+  onSandboxModeChange,
+  daytonaAvailable,
 }: SessionSidebarProps) {
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
@@ -49,6 +56,32 @@ export function SessionSidebar({
             {isCreating ? "Creating…" : "+ New"}
           </button>
         </div>
+        {daytonaAvailable ? (
+          <div className="mt-3 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onSandboxModeChange("local")}
+              className={`rounded-md px-2 py-0.5 text-[11px] ${
+                sandboxMode === "local"
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
+              }`}
+            >
+              Local
+            </button>
+            <button
+              type="button"
+              onClick={() => onSandboxModeChange("daytona")}
+              className={`rounded-md px-2 py-0.5 text-[11px] ${
+                sandboxMode === "daytona"
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
+              }`}
+            >
+              Daytona
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -74,12 +107,23 @@ export function SessionSidebar({
                       : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
                   }`}
                 >
-                  <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    {session.title}
-                    {isActiveRunStatus(session.runStatus) ? (
-                      <span className="ml-2 inline-block h-2 w-2 rounded-full bg-blue-500 align-middle" />
-                    ) : null}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      {session.title}
+                      {isActiveRunStatus(session.runStatus) ? (
+                        <span className="ml-2 inline-block h-2 w-2 rounded-full bg-blue-500 align-middle" />
+                      ) : null}
+                    </p>
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                        session.sandboxMode === "daytona"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                      }`}
+                    >
+                      {session.sandboxMode === "daytona" ? "daytona" : "local"}
+                    </span>
+                  </div>
                   <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
                     {session.id}
                   </p>

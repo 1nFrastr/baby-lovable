@@ -7,7 +7,7 @@ import {
   restartDevServer,
   resolvePreviewStatus,
   stopDevServer,
-} from "@/lib/sandbox/dev-server";
+} from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
@@ -44,7 +44,10 @@ export async function GET(
     }
 
     const preview = await resolvePreviewStatus(sessionId);
-    return NextResponse.json({ preview });
+    return NextResponse.json({
+      preview,
+      sandboxMode: session.sandboxMode,
+    });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -74,11 +77,16 @@ export async function POST(
       action?: "start" | "restart";
     };
 
-    const hasDeps = await hasNodeModules(sessionId);
-    if (!hasDeps) {
-      return NextResponse.json({
-        preview: { status: "needs_install" as const },
-      });
+    // Local: require node_modules before start (bootstrap installs via GET poll).
+    // Daytona: ensureDevServer/restart handles remote install during bootstrap.
+    if (session.sandboxMode === "local") {
+      const hasDeps = await hasNodeModules(sessionId);
+      if (!hasDeps) {
+        return NextResponse.json({
+          preview: { status: "needs_install" as const },
+          sandboxMode: session.sandboxMode,
+        });
+      }
     }
 
     const preview =
@@ -86,7 +94,10 @@ export async function POST(
         ? await restartDevServer(sessionId)
         : await ensureDevServer(sessionId);
 
-    return NextResponse.json({ preview });
+    return NextResponse.json({
+      preview,
+      sandboxMode: session.sandboxMode,
+    });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -113,7 +124,11 @@ export async function DELETE(
     }
 
     await stopDevServer(sessionId);
-    return NextResponse.json({ preview: getPreviewStatus(sessionId) });
+    const preview = await getPreviewStatus(sessionId);
+    return NextResponse.json({
+      preview,
+      sandboxMode: session.sandboxMode,
+    });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

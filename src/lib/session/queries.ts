@@ -8,6 +8,7 @@ import {
 import { useEffect } from "react";
 
 import type { SessionDraft } from "@/lib/session/draft-store";
+import type { SandboxMode } from "@/lib/sandbox/types";
 import {
   isActiveRunStatus,
   type Session,
@@ -26,6 +27,11 @@ export const sessionKeys = {
 export interface SessionDetailData {
   session: Session;
   draft: SessionDraft | null;
+}
+
+export interface SessionsListData {
+  sessions: SessionSummary[];
+  features: { daytona: boolean };
 }
 
 function sessionToSummary(session: Session): SessionSummary {
@@ -57,14 +63,20 @@ export function patchSessionSummary(
   );
 }
 
-async function fetchSessions(): Promise<SessionSummary[]> {
+async function fetchSessions(): Promise<SessionsListData> {
   const response = await fetch("/api/sessions");
   if (!response.ok) {
     throw new Error("Failed to load sessions");
   }
 
-  const data = (await response.json()) as { sessions: SessionSummary[] };
-  return data.sessions;
+  const data = (await response.json()) as {
+    sessions: SessionSummary[];
+    features?: { daytona?: boolean };
+  };
+  return {
+    sessions: data.sessions,
+    features: { daytona: Boolean(data.features?.daytona) },
+  };
 }
 
 async function fetchSessionDetail(
@@ -125,15 +137,20 @@ export function useCreateSessionMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input?: { sandboxMode?: SandboxMode }) => {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          sandboxMode: input?.sandboxMode ?? "local",
+        }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to create session");
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(data?.error ?? "Failed to create session");
       }
 
       return (await response.json()) as { session: Session };
@@ -143,9 +160,18 @@ export function useCreateSessionMutation() {
         session,
         draft: null,
       });
-      queryClient.setQueryData<SessionSummary[]>(sessionKeys.lists(), (current) =>
-        current ? patchSessionSummary(current, session) : [sessionToSummary(session)],
-      );
+      queryClient.setQueryData<SessionsListData>(sessionKeys.lists(), (current) => {
+        if (!current) {
+          return {
+            sessions: [sessionToSummary(session)],
+            features: { daytona: session.sandboxMode === "daytona" },
+          };
+        }
+        return {
+          ...current,
+          sessions: patchSessionSummary(current.sessions, session),
+        };
+      });
     },
   });
 }
@@ -169,8 +195,13 @@ export function useSyncSessionSummary(session: Session | null) {
       return;
     }
 
-    queryClient.setQueryData<SessionSummary[]>(sessionKeys.lists(), (current) =>
-      current ? patchSessionSummary(current, session) : current,
+    queryClient.setQueryData<SessionsListData>(sessionKeys.lists(), (current) =>
+      current
+        ? {
+            ...current,
+            sessions: patchSessionSummary(current.sessions, session),
+          }
+        : current,
     );
   }, [
     queryClient,

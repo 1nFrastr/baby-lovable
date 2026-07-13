@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import type { SandboxMode } from "@/lib/sandbox/types";
 import {
   useCreateSessionMutation,
   useInvalidateSessionDetail,
@@ -29,14 +30,22 @@ export function AppShell() {
   const invalidateSessionDetail = useInvalidateSessionDetail();
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActivatingSession, setIsActivatingSession] = useState(false);
+  const [sandboxMode, setSandboxMode] = useState<SandboxMode>("local");
 
-  const sessions = sessionsQuery.data ?? [];
+  const sessions = sessionsQuery.data?.sessions ?? [];
+  const daytonaAvailable = sessionsQuery.data?.features.daytona ?? false;
   const activeSession = sessionQuery.data?.session ?? null;
   const activeDraft = sessionQuery.data?.draft ?? null;
   const activeSummary = sessions.find((session) => session.id === activeSessionId);
 
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
+
+  useEffect(() => {
+    if (!daytonaAvailable && sandboxMode === "daytona") {
+      setSandboxMode("local");
+    }
+  }, [daytonaAvailable, sandboxMode]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -86,11 +95,13 @@ export function AppShell() {
     router.push(`/sessions/${sessionId}`);
   };
 
-  const handleCreateSession = async () => {
+  const handleCreateSession = async (mode: SandboxMode = sandboxMode) => {
     setActionError(null);
 
     try {
-      const { session } = await createSessionMutation.mutateAsync();
+      const { session } = await createSessionMutation.mutateAsync({
+        sandboxMode: mode,
+      });
       router.push(`/sessions/${session.id}`);
     } catch (error) {
       setActionError(
@@ -122,6 +133,9 @@ export function AppShell() {
             void handleCreateSession();
           }}
           isCreating={createSessionMutation.isPending}
+          sandboxMode={sandboxMode}
+          onSandboxModeChange={setSandboxMode}
+          daytonaAvailable={daytonaAvailable}
         />
 
         <main className="min-w-0 flex-1">
@@ -148,9 +162,37 @@ export function AppShell() {
                 创建第一个项目会话
               </p>
               <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
-                baby-lovable 会在本地 `.baby-lovable/sessions/` 目录中从
-                Next.js starter 模板初始化项目，并持久化你的修改。
+                {sandboxMode === "daytona"
+                  ? "Daytona 模式会在远程沙箱中从 Next.js starter 模板初始化项目，并同步到持久化 Volume。"
+                  : "baby-lovable 会在本地 `.baby-lovable/sessions/` 目录中从 Next.js starter 模板初始化项目，并持久化你的修改。"}
               </p>
+              {daytonaAvailable ? (
+                <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span>Sandbox:</span>
+                  <button
+                    type="button"
+                    onClick={() => setSandboxMode("local")}
+                    className={`rounded-lg px-2.5 py-1 ${
+                      sandboxMode === "local"
+                        ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                        : "border border-zinc-300 dark:border-zinc-700"
+                    }`}
+                  >
+                    Local
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSandboxMode("daytona")}
+                    className={`rounded-lg px-2.5 py-1 ${
+                      sandboxMode === "daytona"
+                        ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                        : "border border-zinc-300 dark:border-zinc-700"
+                    }`}
+                  >
+                    Daytona
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -180,7 +222,11 @@ export function AppShell() {
                   }}
                 />
               </div>
-              <PreviewPanel key={activeSessionId} sessionId={activeSessionId} />
+              <PreviewPanel
+                key={activeSessionId}
+                sessionId={activeSessionId}
+                sandboxMode={activeSession.sandboxMode}
+              />
             </div>
           )}
         </main>

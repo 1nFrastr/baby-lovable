@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { resolvePreviewStatus } from "@/lib/sandbox/dev-server";
+import { resolvePreviewStatus } from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
