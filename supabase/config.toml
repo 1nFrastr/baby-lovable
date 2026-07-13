@@ -156,11 +156,13 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://localhost:3000"
+site_url = "https://baby-lovable-freddyx.vercel.app"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = [
   "http://localhost:3000/**",
   "http://localhost:3000/auth/callback",
+  "https://baby-lovable-freddyx.vercel.app/**",
+  "https://baby-lovable-freddyx.vercel.app/auth/callback",
   "https://baby-lovable.vercel.app/**",
   "https://baby-lovable.vercel.app/auth/callback",
   "https://*-baby-lovable*.vercel.app/**",
