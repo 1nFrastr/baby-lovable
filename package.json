@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "agent": "tsx src/cli/index.ts"
+    "agent": "tsx src/cli/index.ts",
+    "cleanup-previews": "tsx scripts/cleanup-preview-servers.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.11",

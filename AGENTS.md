@@ -126,6 +126,20 @@ Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 
 Preview lifecycle is owned by `src/lib/sandbox/dev-server.ts` — agents must **not** run `pnpm dev` themselves.
 
+### Orphan preview servers (CPU / heat)
+
+Each session boots its own `pnpm dev` → `next dev` → `next-server` under `.baby-lovable/sessions/<id>/workspace/`. Processes are spawned **detached** so they can survive host restarts; if the host app's in-memory tracker is lost, old previews become **orphans** and keep consuming CPU (multiple instances stack linearly).
+
+**Clean up orphans** (does not stop the host `npm run dev`):
+
+```bash
+npm run cleanup-previews              # kill all session preview dev servers
+npm run cleanup-previews -- --dry-run # list what would be killed
+npm run cleanup-previews -- --keep sess_abc123  # keep one active session
+```
+
+Run this when the machine heats up, after long agent runs, or before starting fresh testing. CLI one-shot (`-p`) tears down its session preview on exit; Web UI sessions do not auto-stop until cleanup or explicit `DELETE /api/sessions/<id>/preview`.
+
 ## AI agent playbook — full-chain test without manual UI
 
 When implementing or validating changes to the builder itself:
@@ -152,6 +166,7 @@ For host-app code changes (not generated apps), also run `npm run lint` and `npm
 | `src/workflow/builder-chat.ts` | Durable web workflow (`'use workflow'`) |
 | `src/lib/session/store.ts` | Session CRUD + `session.json` persistence |
 | `src/lib/sandbox/` | Local/Daytona sandbox, paths, dev-server |
+| `scripts/cleanup-preview-servers.ts` | Kill orphaned session preview `next dev` processes |
 | `src/tools/` | Builder tools and `'use step'` implementations |
 | `templates/nextjs-starter/` | Workspace scaffold copied per session |
 | `src/app/api/sessions/` | REST: chat stream, preview status |
