@@ -1,5 +1,39 @@
 import type { UIMessage } from "ai";
 
+function lastMessage(messages: UIMessage[]): UIMessage | undefined {
+  return messages[messages.length - 1];
+}
+
+/**
+ * useChat keeps the SSE assistant id; the server persists draft.json's id after
+ * the workflow completes. Skip the extra client-only assistant when persisted
+ * already ended with an assistant for that turn.
+ */
+function shouldSkipStaleClientAssistant(
+  ordered: UIMessage[],
+  message: UIMessage,
+): boolean {
+  return (
+    message.role === "assistant" && lastMessage(ordered)?.role === "assistant"
+  );
+}
+
+/** Remove back-to-back assistant rows (stale SSE id + saved draft id). */
+export function dedupeConsecutiveAssistants(
+  messages: UIMessage[],
+): UIMessage[] {
+  const ordered: UIMessage[] = [];
+
+  for (const message of messages) {
+    if (shouldSkipStaleClientAssistant(ordered, message)) {
+      continue;
+    }
+    ordered.push(message);
+  }
+
+  return ordered;
+}
+
 /**
  * Merge client thread with server-persisted history.
  * Client may omit completed assistant messages between turns; server wins for
@@ -10,7 +44,7 @@ export function mergeClientMessagesWithPersisted(
   client: UIMessage[],
 ): UIMessage[] {
   if (client.length === 0) {
-    return persisted;
+    return dedupeConsecutiveAssistants(persisted);
   }
 
   const byId = new Map(persisted.map((message) => [message.id, message]));
@@ -28,13 +62,19 @@ export function mergeClientMessagesWithPersisted(
   }
 
   for (const message of client) {
-    if (!seen.has(message.id)) {
-      ordered.push(message);
-      seen.add(message.id);
+    if (seen.has(message.id)) {
+      continue;
     }
+
+    if (shouldSkipStaleClientAssistant(ordered, message)) {
+      continue;
+    }
+
+    ordered.push(message);
+    seen.add(message.id);
   }
 
-  return ordered;
+  return dedupeConsecutiveAssistants(ordered);
 }
 
 /**
@@ -49,7 +89,7 @@ export function mergeDisplayMessages(
   isLiveTurn: boolean,
 ): UIMessage[] {
   if (!isLiveTurn) {
-    return persisted;
+    return dedupeConsecutiveAssistants(persisted);
   }
 
   const byId = new Map(persisted.map((message) => [message.id, message]));
@@ -57,6 +97,18 @@ export function mergeDisplayMessages(
 
   for (const message of chatMessages) {
     if (byId.has(message.id)) {
+      byId.set(message.id, message);
+      continue;
+    }
+
+    const lastId = orderedIds.at(-1);
+    const lastMessageInThread = lastId ? byId.get(lastId) : undefined;
+
+    if (
+      message.role === "assistant" &&
+      lastMessageInThread?.role === "assistant"
+    ) {
+      orderedIds[orderedIds.length - 1] = message.id;
       byId.set(message.id, message);
       continue;
     }
@@ -81,7 +133,7 @@ export function mergeDisplayMessages(
     }
   }
 
-  return result;
+  return dedupeConsecutiveAssistants(result);
 }
 
 export function hasAssistantParts(message: UIMessage | undefined): boolean {

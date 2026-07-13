@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import {
   hasAssistantParts,
-  mergeClientMessagesWithPersisted,
   mergeDisplayMessages,
 } from "@/lib/chat/merge-messages";
 import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
@@ -87,9 +86,9 @@ export function Chat({
     }
     lastSyncedPersistedRef.current = fingerprint;
 
-    setMessages((current) =>
-      mergeClientMessagesWithPersisted(messages, current),
-    );
+    // Persisted history is authoritative between turns; merging would keep a
+    // stale SSE assistant id alongside the saved draft id.
+    setMessages(messages);
   }, [isLiveTurn, messages, setMessages]);
 
   const handleScroll = useCallback(() => {
