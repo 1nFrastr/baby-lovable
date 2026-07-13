@@ -51,6 +51,33 @@ function getDevPort(): number {
   return getDaytonaDevPort();
 }
 
+/** Map Daytona SDK failures to a short UI-facing message. */
+export function formatDaytonaBootstrapError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (/disk limit exceeded/i.test(raw) || /Total disk limit/i.test(raw)) {
+    return "Daytona 磁盘配额已满（上限 30GiB）。请联系作者清理闲置 Sandbox 后再试。";
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0
+    ? trimmed.slice(0, 500)
+    : "Daytona 预览启动失败，请稍后重试或联系作者。";
+}
+
+function setDaytonaPreviewError(sessionId: string, error: unknown): void {
+  const message = formatDaytonaBootstrapError(error);
+  logDaytonaBootstrap(
+    sessionId,
+    "preview",
+    `bootstrap failed: ${message.slice(0, 200)}`,
+  );
+  daytonaStates.set(sessionId, {
+    status: "error",
+    port: getDevPort(),
+    devSessionId: `preview-${sessionId}`,
+    error: message,
+  });
+}
+
 function recordDaytonaOutput(sessionId: string, chunk: string): void {
   const buffer = (daytonaDevLogs.get(sessionId) ?? "") + chunk;
   daytonaDevLogs.set(sessionId, buffer.slice(-12_000));
@@ -333,9 +360,13 @@ function kickOffDaytonaBootstrap(sessionId: string): void {
   }
 
   logDaytonaBootstrap(sessionId, "preview", "background bootstrap queued");
-  const promise = bootstrapDaytonaPreview(sessionId).finally(() => {
-    daytonaBootstrapPromises.delete(sessionId);
-  });
+  const promise = bootstrapDaytonaPreview(sessionId)
+    .catch((error) => {
+      setDaytonaPreviewError(sessionId, error);
+    })
+    .finally(() => {
+      daytonaBootstrapPromises.delete(sessionId);
+    });
   daytonaBootstrapPromises.set(sessionId, promise);
 }
 
@@ -366,14 +397,22 @@ export async function restartDaytonaDevServer(
 ): Promise<PreviewStatus> {
   await stopDaytonaDevServer(sessionId);
 
-  const sandbox = await getOrCreateDaytonaSandbox(sessionId);
   try {
-    await sandbox.process.executeCommand("rm -rf .next", ".", undefined, 60);
-  } catch {
-    // Best effort cache clear on local workspace.
-  }
+    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+    try {
+      await sandbox.process.executeCommand("rm -rf .next", ".", undefined, 60);
+    } catch {
+      // Best effort cache clear on local workspace.
+    }
 
-  return startRemoteDevServer(sessionId);
+    return await startRemoteDevServer(sessionId);
+  } catch (error) {
+    setDaytonaPreviewError(sessionId, error);
+    return {
+      status: "error",
+      error: formatDaytonaBootstrapError(error),
+    };
+  }
 }
 
 export function getDaytonaPreviewStatus(sessionId: string): PreviewStatus {

@@ -208,7 +208,7 @@ export const builderTools = {
   }),
   testPreview: tool({
     description:
-      "Short smoke test of the Daytona preview (Cloudflare Browser Run + Playwright). Pass a small `actions` array (prefer 3–5 steps, max 8) for the main happy path only — e.g. fill → submit → assertVisible. Do not script empty-state / delete / filter flows unless the user asked. Requires checkPreview ok. Returns { ok, summary, failedSteps }. On failure, fix once then stop; do not keep re-running long scripts.",
+      "Optional UI smoke test (Daytona + Browser Run). Call ONLY when the user explicitly asks to test/verify the preview in the browser — not after every checkPreview. Pass a small `actions` array (prefer 3–5 steps, max 8) for the main happy path — e.g. fill → submit → assertVisible. Do not script empty-state / delete / filter flows unless the user asked. Requires checkPreview ok. Returns { ok, summary, failedSteps }. On failure, fix once then stop.",
     inputSchema: z.object({
       actions: z
         .array(appTestActionSchema)
@@ -221,7 +221,7 @@ export const builderTools = {
         .number()
         .optional()
         .describe(
-          "Ms to wait after Live View is ready before automation (default 2000 so the UI PiP can open). Increase if a human needs more time.",
+          "Ms to wait after Live View is ready before automation (default 5000 so the UI PiP can open on Vercel). Increase if a human needs more time.",
         ),
     }),
     contextSchema: toolContextSchema,

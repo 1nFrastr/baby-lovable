@@ -52,8 +52,12 @@ async function writeRemoteStatus(
       REMOTE_STATUS_PATH,
       `${JSON.stringify(status)}\n`,
     );
-  } catch {
+  } catch (error) {
     // Best effort — memory still helps same-process polls.
+    console.warn(
+      `[app-test] failed to write Daytona status for ${sessionId}:`,
+      error instanceof Error ? error.message : error,
+    );
   }
 }
 
@@ -81,22 +85,60 @@ async function readRemoteStatus(
   }
 }
 
+/**
+ * Prefer Daytona FS (cross-isolate) over in-memory cache.
+ * Never short-circuit on a stale "running" cache — that hid liveViewUrl
+ * updates written by the workflow step on another Vercel instance.
+ */
+function mergeAppTestStatus(
+  cached: AppTestLatestStatus | undefined,
+  remote: AppTestLatestStatus | null,
+): AppTestLatestStatus {
+  if (!remote && !cached) {
+    return { status: "idle" };
+  }
+  if (!remote) {
+    return cached!;
+  }
+  if (!cached) {
+    return remote;
+  }
+
+  // Same-process finish beat a lagging remote write.
+  if (
+    (cached.status === "done" || cached.status === "error") &&
+    remote.status === "running" &&
+    cached.runId &&
+    cached.runId === remote.runId
+  ) {
+    return {
+      ...remote,
+      ...cached,
+      liveViewUrl: cached.liveViewUrl ?? remote.liveViewUrl,
+    };
+  }
+
+  return {
+    ...cached,
+    ...remote,
+    liveViewUrl: remote.liveViewUrl ?? cached.liveViewUrl,
+  };
+}
+
 export async function readLatestAppTestStatus(
   sessionId: string,
   userId: UserId = null,
 ): Promise<AppTestLatestStatus> {
-  const cached = latestStatusBySession.get(statusCacheKey(sessionId, userId));
-  if (cached && (cached.status === "running" || cached.liveViewUrl)) {
-    return cached;
-  }
+  const key = statusCacheKey(sessionId, userId);
+  const cached = latestStatusBySession.get(key);
 
+  // Always refresh Daytona FS while polling — a Vercel API isolate must not
+  // stick on a stale in-memory "running" without liveViewUrl (or a stale
+  // "done" after a new run starts on another isolate).
   const remote = await readRemoteStatus(sessionId);
-  if (remote) {
-    latestStatusBySession.set(statusCacheKey(sessionId, userId), remote);
-    return remote;
-  }
-
-  return cached ?? { status: "idle" };
+  const merged = mergeAppTestStatus(cached, remote);
+  latestStatusBySession.set(key, merged);
+  return merged;
 }
 
 /**

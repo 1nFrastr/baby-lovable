@@ -29,9 +29,46 @@ interface PreviewPanelProps {
 const POLL_MS_READY = 15_000;
 const POLL_MS_ACTIVE = 2_000;
 const APP_TEST_POLL_MS = 1_500;
+const APP_TEST_POLL_MS_RUNNING = 800;
+/** Keep PiP visible briefly after the run ends so the final frame is usable. */
+const PIP_HOLD_AFTER_DONE_MS = 10_000;
 
 function pollDelay(status: PreviewStatus["status"]): number {
   return status === "ready" ? POLL_MS_READY : POLL_MS_ACTIVE;
+}
+
+function mergeChatAndPolledAppTest(
+  polled: AppTestLatestStatus,
+  chat: AppTestLatestStatus | null,
+): AppTestLatestStatus {
+  if (!chat?.liveViewUrl && chat?.status !== "running") {
+    return polled;
+  }
+
+  const liveViewUrl = chat.liveViewUrl ?? polled.liveViewUrl;
+  // Prefer poll for mid-run Live View; chat only has the URL after the
+  // durable step returns. Don't let a late "done" chat result + stale
+  // "running" poll keep the Testing badge stuck forever — once chat is
+  // terminal and poll has no newer running signal with a URL, settle.
+  const chatTerminal = chat.status === "done" || chat.status === "error";
+  const pollRunning = polled.status === "running";
+  const status: AppTestLatestStatus["status"] =
+    chat.status === "running" || (pollRunning && !chatTerminal)
+      ? "running"
+      : chatTerminal
+        ? chat.status!
+        : (polled.status ?? chat.status ?? "idle");
+
+  return {
+    ...polled,
+    ...chat,
+    liveViewUrl,
+    status,
+    runId: chat.runId ?? polled.runId,
+    summary: chat.summary ?? polled.summary,
+    ok: chat.ok ?? polled.ok,
+    error: chat.error ?? polled.error,
+  };
 }
 
 export function PreviewPanel({
@@ -45,23 +82,15 @@ export function PreviewPanel({
   const [polledAppTest, setPolledAppTest] = useState<AppTestLatestStatus>({
     status: "idle",
   });
-  const [appTestStarting, setAppTestStarting] = useState(false);
-  const [appTestError, setAppTestError] = useState<string | null>(null);
   const [pipDismissed, setPipDismissed] = useState(false);
+  const [pipHoldUntil, setPipHoldUntil] = useState(0);
+  const [pipHoldTick, setPipHoldTick] = useState(0);
   const previewRef = useRef(preview);
+  const appTestPollBusyRef = useRef(false);
 
-  const appTest: AppTestLatestStatus =
-    chatAppTest?.liveViewUrl || chatAppTest?.status === "running"
-      ? {
-          ...polledAppTest,
-          ...chatAppTest,
-          liveViewUrl: chatAppTest.liveViewUrl ?? polledAppTest.liveViewUrl,
-          status:
-            chatAppTest.status === "running" || polledAppTest.status === "running"
-              ? "running"
-              : (chatAppTest.status ?? polledAppTest.status),
-        }
-      : polledAppTest;
+  const appTest = mergeChatAndPolledAppTest(polledAppTest, chatAppTest);
+  appTestPollBusyRef.current =
+    appTest.status === "running" || chatAppTest?.status === "running";
 
   useEffect(() => {
     previewRef.current = preview;
@@ -70,6 +99,25 @@ export function PreviewPanel({
   useEffect(() => {
     setPipDismissed(false);
   }, [appTest.runId, appTest.liveViewUrl]);
+
+  useEffect(() => {
+    if (
+      (appTest.status === "done" || appTest.status === "error") &&
+      appTest.liveViewUrl
+    ) {
+      setPipHoldUntil(Date.now() + PIP_HOLD_AFTER_DONE_MS);
+    }
+  }, [appTest.status, appTest.liveViewUrl, appTest.runId]);
+
+  useEffect(() => {
+    if (pipHoldUntil <= Date.now()) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setPipHoldTick((n) => n + 1);
+    }, pipHoldUntil - Date.now() + 50);
+    return () => window.clearTimeout(timeoutId);
+  }, [pipHoldUntil, pipHoldTick]);
 
   const loadPreview = useCallback(async (): Promise<PreviewStatus | null> => {
     try {
@@ -110,12 +158,6 @@ export function PreviewPanel({
         error: data.error,
         usedScriptedActions: data.usedScriptedActions,
       });
-      if (data.status === "running") {
-        setAppTestStarting(false);
-      }
-      if (data.status === "done" || data.status === "error") {
-        setAppTestStarting(false);
-      }
     } catch {
       // next poll
     }
@@ -174,7 +216,9 @@ export function PreviewPanel({
       }
       timeoutId = window.setTimeout(() => {
         void tick();
-      }, APP_TEST_POLL_MS);
+      }, appTestPollBusyRef.current
+        ? APP_TEST_POLL_MS_RUNNING
+        : APP_TEST_POLL_MS);
     };
 
     void tick();
@@ -233,47 +277,12 @@ export function PreviewPanel({
     }
   };
 
-  const handleRunAppTest = async () => {
-    setAppTestError(null);
-    setAppTestStarting(true);
-    setPipDismissed(false);
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/app-test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdMs: 8_000 }),
-      });
-      const data = (await response.json().catch(() => null)) as {
-        error?: string;
-        runId?: string;
-        status?: string;
-      } | null;
-      if (!response.ok) {
-        throw new Error(data?.error ?? `App test failed (${response.status})`);
-      }
-      setPolledAppTest((prev) => ({
-        ...prev,
-        status: "running",
-        runId: data?.runId ?? prev.runId,
-        summary: undefined,
-        ok: undefined,
-        error: undefined,
-      }));
-      await loadAppTest();
-    } catch (error) {
-      setAppTestStarting(false);
-      setAppTestError(
-        error instanceof Error ? error.message : "Failed to start app test",
-      );
-    }
-  };
-
-  const appTestBusy =
-    appTestStarting || appTest.status === "running";
+  const appTestBusy = appTest.status === "running";
+  const pipHoldActive = pipHoldUntil > Date.now();
   const showPip =
     sandboxMode === "daytona" &&
     Boolean(appTest.liveViewUrl) &&
-    appTest.status === "running" &&
+    (appTest.status === "running" || pipHoldActive) &&
     !pipDismissed;
   const lastSummary =
     appTest.status === "done" || appTest.status === "error"
@@ -303,47 +312,34 @@ export function PreviewPanel({
               </span>
             ) : null}
           </div>
-          <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+          <p
+            className={`text-xs dark:text-zinc-400 ${
+              preview.status === "error"
+                ? "whitespace-normal text-red-600 dark:text-red-400"
+                : "truncate text-zinc-500"
+            }`}
+          >
             {exportError
               ? exportError
-              : appTestError
-                ? appTestError
-                : lastSummary
-                  ? `App test: ${lastSummary}`
-                  : preview.status === "ready"
-                    ? preview.url
-                    : preview.status === "starting"
-                      ? sandboxMode === "daytona"
-                        ? "Starting Daytona preview…"
-                        : "Starting dev server…"
-                      : preview.status === "installing"
-                        ? "Installing dependencies…"
-                        : preview.status === "needs_install"
-                          ? "Project not ready"
-                          : preview.status === "error"
-                            ? preview.error
-                            : "Preview not started"}
+              : lastSummary
+                ? `App test: ${lastSummary}`
+                : preview.status === "ready"
+                  ? preview.url
+                  : preview.status === "starting"
+                    ? sandboxMode === "daytona"
+                      ? "Starting Daytona preview…"
+                      : "Starting dev server…"
+                    : preview.status === "installing"
+                      ? "Installing dependencies…"
+                      : preview.status === "needs_install"
+                        ? "Project not ready"
+                        : preview.status === "error"
+                          ? preview.error
+                          : "Preview not started"}
           </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {sandboxMode === "daytona" ? (
-            <button
-              type="button"
-              onClick={() => {
-                void handleRunAppTest();
-              }}
-              disabled={appTestBusy || preview.status !== "ready"}
-              title={
-                preview.status !== "ready"
-                  ? "Preview must be ready before app test"
-                  : "Run Cloudflare Browser Run smoke test"
-              }
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              {appTestBusy ? "Testing…" : "Run App Test"}
-            </button>
-          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -407,7 +403,15 @@ export function PreviewPanel({
                 <p className="font-medium text-red-600 dark:text-red-400">
                   预览启动失败
                 </p>
-                <p>{preview.error}</p>
+                <p className="max-w-md whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
+                  {preview.error}
+                </p>
+                {preview.error?.includes("联系作者") ? (
+                  <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
+                    这是平台侧 Daytona 资源限制，需要作者在控制台清理闲置
+                    Sandbox 或升级配额后，再点 Restart 重试。
+                  </p>
+                ) : null}
               </>
             ) : (
               <>

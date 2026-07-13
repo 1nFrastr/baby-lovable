@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
 import { isToolUIPart, type UIMessage } from "ai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import {
   formatToolPartLabel,
@@ -14,13 +14,13 @@ import {
   hasAssistantParts,
   mergeDisplayMessages,
 } from "@/lib/chat/merge-messages";
-import type { SandboxMode } from "@/lib/sandbox/types";
 import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
+import type { SandboxMode } from "@/lib/sandbox/types";
 
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
 
-const APP_TESTING_HINT =
-  "[App Testing] After checkPreview ok, call testPreview once with 3–5 actions only (happy path). Todo: fill → Add → assertVisible with {{unique}}. No empty-state/delete/filter scripts. Retry at most once if failedSteps, then finish.";
+/** Sent when the user clicks Auto Test in the composer. */
+const APP_TEST_USER_PROMPT = "帮我测试一下应用的主要功能";
 
 interface ChatProps {
   sessionId: string;
@@ -46,8 +46,6 @@ export function Chat({
   onSessionRefresh,
   onAppTestStatus,
 }: ChatProps) {
-  const [appTestingEnabled, setAppTestingEnabled] = useState(false);
-
   const transport = useMemo(
     () =>
       new WorkflowChatTransport({
@@ -145,30 +143,35 @@ export function Chat({
       }
 
       const trimmed = input.value.trim();
-      const text =
-        sandboxMode === "daytona" && appTestingEnabled
-          ? `${trimmed}\n\n${APP_TESTING_HINT}`
-          : trimmed;
-
       stickToBottomRef.current = true;
-      sendMessage({ text });
+      void sendMessage({ text: trimmed });
       input.value = "";
       onSessionRefresh?.();
     },
-    [
-      appTestingEnabled,
-      isLiveTurn,
-      onSessionRefresh,
-      sandboxMode,
-      sendMessage,
-    ],
+    [isLiveTurn, onSessionRefresh, sendMessage],
   );
+
+  const handleRunAppTest = useCallback(() => {
+    if (isLiveTurn) {
+      return;
+    }
+    stickToBottomRef.current = true;
+    void sendMessage({ text: APP_TEST_USER_PROMPT });
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+    onSessionRefresh?.();
+  }, [isLiveTurn, onSessionRefresh, sendMessage]);
 
   const showStreamingIndicator =
     isLiveTurn &&
     !hasAssistantParts(displayMessages[displayMessages.length - 1]);
 
-  const showAppTestingToggle = sandboxMode === "daytona";
+  // After the first completed turn only; hide while a turn is in flight.
+  const showAppTestButton =
+    sandboxMode === "daytona" &&
+    !isLiveTurn &&
+    displayMessages.some((message) => message.role === "assistant");
 
   return (
     <div className="flex h-full flex-col">
@@ -183,75 +186,89 @@ export function Chat({
         </p>
       </div>
 
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="flex-1 space-y-4 overflow-y-auto px-6 py-4"
-      >
-        {displayMessages.length === 0 && (
-          <div className="mt-20 text-center text-zinc-400 dark:text-zinc-500">
-            <p className="mb-2 text-lg">描述你想构建的 Next.js 应用</p>
-            <p className="text-sm">
-              例如：「创建一个待办事项应用,支持添加、完成和删除任务」
-            </p>
-          </div>
-        )}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="h-full space-y-4 overflow-y-auto px-6 py-4"
+        >
+          {displayMessages.length === 0 && (
+            <div className="mt-20 text-center text-zinc-400 dark:text-zinc-500">
+              <p className="mb-2 text-lg">描述你想构建的 Next.js 应用</p>
+              <p className="text-sm">
+                例如：「创建一个待办事项应用,支持添加、完成和删除任务」
+              </p>
+            </div>
+          )}
 
-        {displayMessages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+          {displayMessages.map((message) => (
             <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                message.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-              }`}
+              key={message.id}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {message.parts.map((part, index) => {
-                if (part.type === "text") {
-                  return <p key={index}>{part.text}</p>;
-                }
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                  message.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                }`}
+              >
+                {message.parts.map((part, index) => {
+                  if (part.type === "text") {
+                    return <p key={index}>{part.text}</p>;
+                  }
 
-                if (isToolUIPart(part)) {
-                  const label = formatToolPartLabel(part);
-                  const streamingInput = part.state === "input-streaming";
-                  const outputLine = formatToolPartOutput(part);
+                  if (isToolUIPart(part)) {
+                    const label = formatToolPartLabel(part);
+                    const streamingInput = part.state === "input-streaming";
+                    const outputLine = formatToolPartOutput(part);
 
-                  return (
-                    <div
-                      key={index}
-                      className="mt-1 font-mono text-xs opacity-70"
-                    >
-                      {label}
-                      {streamingInput && (
-                        <span className="opacity-60"> …</span>
-                      )}
-                      {outputLine != null ? ` → ${outputLine}` : null}
-                    </div>
-                  );
-                }
+                    return (
+                      <div
+                        key={index}
+                        className="mt-1 font-mono text-xs opacity-70"
+                      >
+                        {label}
+                        {streamingInput && (
+                          <span className="opacity-60"> …</span>
+                        )}
+                        {outputLine != null ? ` → ${outputLine}` : null}
+                      </div>
+                    );
+                  }
 
-                return null;
-              })}
+                  return null;
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {showStreamingIndicator && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl bg-zinc-100 px-4 py-2.5 dark:bg-zinc-800">
-              <span className="inline-flex gap-1">
-                <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" />
-                <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.1s]" />
-                <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.2s]" />
-              </span>
+          {showStreamingIndicator && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl bg-zinc-100 px-4 py-2.5 dark:bg-zinc-800">
+                <span className="inline-flex gap-1">
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.1s]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.2s]" />
+                </span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        <div ref={bottomRef} />
+          <div ref={bottomRef} />
+        </div>
+
+        {showAppTestButton ? (
+          <button
+            type="button"
+            onClick={handleRunAppTest}
+            disabled={isLiveTurn}
+            title="发送一条消息，让 agent 自动跑一遍主流程测试"
+            className="absolute bottom-4 right-4 z-10 rounded-full border border-zinc-200 bg-white/95 px-3.5 py-2 text-xs font-medium text-zinc-700 shadow-md backdrop-blur transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            Auto Test
+          </button>
+        ) : null}
       </div>
 
       <form
@@ -259,21 +276,6 @@ export function Chat({
         className="border-t border-zinc-200 px-6 py-4 dark:border-zinc-800"
       >
         <div className="flex items-center gap-3">
-          {showAppTestingToggle ? (
-            <label
-              className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300"
-              title="When on, asks the agent for a short happy-path testPreview (3–5 steps) after checkPreview"
-            >
-              <input
-                type="checkbox"
-                checked={appTestingEnabled}
-                onChange={(event) => setAppTestingEnabled(event.target.checked)}
-                disabled={isLiveTurn}
-                className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span className="whitespace-nowrap font-medium">App Testing</span>
-            </label>
-          ) : null}
           <input
             ref={inputRef}
             type="text"

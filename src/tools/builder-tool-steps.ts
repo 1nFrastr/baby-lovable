@@ -456,8 +456,9 @@ export async function testPreviewStep(
 
   const report = await runAppTest({
     sessionId: context.sessionId,
-    // Default hold so Web UI can poll Live View URL (Daytona-backed status).
-    holdMs: input.holdMs ?? 2_000,
+    // Hold after Live View is ready so the Web UI poller (Daytona FS) can
+    // pick up liveViewUrl before automation finishes — critical on Vercel.
+    holdMs: input.holdMs ?? 5_000,
     actions,
   });
 
