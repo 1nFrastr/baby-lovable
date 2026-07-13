@@ -2,9 +2,10 @@
 
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
-import { getToolName, isToolUIPart, type UIMessage } from "ai";
+import { isToolUIPart, type UIMessage } from "ai";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import { formatToolPartLabel } from "@/lib/chat/format-tool-label";
 import {
   hasAssistantParts,
   mergeDisplayMessages,
@@ -176,13 +177,18 @@ export function Chat({
                 }
 
                 if (isToolUIPart(part)) {
-                  const toolName = getToolName(part);
+                  const label = formatToolPartLabel(part);
+                  const streamingInput = part.state === "input-streaming";
+
                   return (
                     <div
                       key={index}
                       className="mt-1 font-mono text-xs opacity-70"
                     >
-                      {toolName}
+                      {label}
+                      {streamingInput && (
+                        <span className="opacity-60"> …</span>
+                      )}
                       {part.state === "output-available" &&
                         part.output != null &&
                         ` → ${JSON.stringify(part.output).slice(0, 120)}`}
