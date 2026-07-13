@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import {
   browserRunConfigured,
-  isAppTestRunning,
   parseAppTestActions,
   readLatestAppTestStatus,
   startBackgroundAppTest,
@@ -42,17 +41,9 @@ export async function GET(
     }
 
     const latest = await readLatestAppTestStatus(sessionId, session.userId);
-    const running = isAppTestRunning(sessionId);
 
     return NextResponse.json({
       ...latest,
-      // Prefer live lock over stale file if process restarted mid-run.
-      status:
-        running && latest.status !== "running"
-          ? "running"
-          : running
-            ? "running"
-            : latest.status,
       browserRunConfigured: browserRunConfigured(),
       sandboxMode: session.sandboxMode,
     });

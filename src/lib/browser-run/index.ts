@@ -3,6 +3,9 @@ export {
   getBrowserRunConfig,
   requireBrowserRunConfig,
   shouldPersistAppTestArtifacts,
+  simulateServerlessMemoryLoss,
+  simulatePreviewColdIsolate,
+  appTestStatusWriteDelayMs,
 } from "./config";
 export { createBrowserRunSession, toTabLiveViewUrl } from "./client";
 export { runAppTest, APP_TEST_LIVE_VIEW_LOG_PREFIX } from "./run-app-test";
@@ -18,11 +21,12 @@ export {
   startBackgroundAppTest,
   writeLatestAppTestStatus,
 } from "./run-status";
-export type { AppTestLatestStatus, AppTestRunStatus } from "./run-status";
 export type {
   AppTestAction,
   AppTestActionType,
+  AppTestLatestStatus,
   AppTestReport,
+  AppTestRunStatus,
   AppTestStep,
   RunAppTestOptions,
 } from "./types";

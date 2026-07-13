@@ -456,7 +456,7 @@ export async function testPreviewStep(
 
   const report = await runAppTest({
     sessionId: context.sessionId,
-    // Hold after Live View is ready so the Web UI poller (Daytona FS) can
+    // Hold after Live View is ready so the Web UI poller (durable store) can
     // pick up liveViewUrl before automation finishes — critical on Vercel.
     holdMs: input.holdMs ?? 5_000,
     actions,

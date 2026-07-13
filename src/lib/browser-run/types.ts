@@ -60,6 +60,22 @@ export interface AppTestReport {
   usedScriptedActions?: boolean;
 }
 
+export type AppTestRunStatus = "idle" | "running" | "done" | "error";
+
+/** Published for Web UI PiP pollers (memory + durable store). */
+export interface AppTestLatestStatus {
+  status: AppTestRunStatus;
+  runId?: string;
+  liveViewUrl?: string;
+  ok?: boolean;
+  summary?: string;
+  artifactDir?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  usedScriptedActions?: boolean;
+}
+
 export interface RunAppTestOptions {
   sessionId: string;
   /** Wait after Live View URL is ready so a human can open the monitor. Default 12000. */

@@ -1,159 +1,86 @@
 import type { UserId } from "@/lib/session/types";
 
-import type { AppTestAction, AppTestReport } from "./types";
+import { appTestStatusWriteDelayMs } from "./config";
+import type {
+  AppTestAction,
+  AppTestLatestStatus,
+  AppTestReport,
+  AppTestRunStatus,
+} from "./types";
 
-export type AppTestRunStatus = "idle" | "running" | "done" | "error";
-
-export interface AppTestLatestStatus {
-  status: AppTestRunStatus;
-  runId?: string;
-  liveViewUrl?: string;
-  ok?: boolean;
-  summary?: string;
-  artifactDir?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  error?: string;
-  usedScriptedActions?: boolean;
-}
-
-/** Shared across Vercel isolates via Daytona sandbox FS (app test requires daytona). */
-const REMOTE_STATUS_PATH = ".runtime/app-test-latest-status.json";
+export type { AppTestLatestStatus, AppTestRunStatus };
 
 const runningBySession = new Map<string, Promise<AppTestReport>>();
 const runLocks = new Set<string>();
-/** Same-process fast path (local next dev / sticky instance). */
-const latestStatusBySession = new Map<string, AppTestLatestStatus>();
 
-function statusCacheKey(sessionId: string, userId: UserId = null): string {
-  return `${userId ?? "_"}:${sessionId}`;
-}
-
-async function writeRemoteStatus(
+async function writeDurableStatus(
   sessionId: string,
   status: AppTestLatestStatus,
+  userId: UserId = null,
 ): Promise<void> {
+  const delayMs = appTestStatusWriteDelayMs();
+  if (delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
   try {
-    const { getSession } = await import("@/lib/session/store");
-    const session = await getSession(sessionId);
-    if (!session || session.sandboxMode !== "daytona") {
-      return;
-    }
-    const { getOrCreateDaytonaSandbox } = await import(
-      "@/lib/sandbox/daytona/sandbox-manager"
+    const { writeAppTestStatusStore } = await import(
+      "@/lib/session/app-test-status-store"
     );
-    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
-    try {
-      await sandbox.fs.createFolder(".runtime");
-    } catch {
-      // exists
-    }
-    await sandbox.fs.writeTextFile(
-      REMOTE_STATUS_PATH,
-      `${JSON.stringify(status)}\n`,
-    );
+    await writeAppTestStatusStore(sessionId, status, userId);
   } catch (error) {
-    // Best effort — memory still helps same-process polls.
     console.warn(
-      `[app-test] failed to write Daytona status for ${sessionId}:`,
+      `[app-test] failed to write durable status for ${sessionId}:`,
       error instanceof Error ? error.message : error,
     );
   }
 }
 
-async function readRemoteStatus(
+async function readDurableStatus(
   sessionId: string,
+  userId: UserId = null,
 ): Promise<AppTestLatestStatus | null> {
   try {
-    const { getSession } = await import("@/lib/session/store");
-    const session = await getSession(sessionId);
-    if (!session || session.sandboxMode !== "daytona") {
-      return null;
-    }
-    const { getOrCreateDaytonaSandbox } = await import(
-      "@/lib/sandbox/daytona/sandbox-manager"
+    const { readAppTestStatusStore } = await import(
+      "@/lib/session/app-test-status-store"
     );
-    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
-    const raw = await sandbox.fs.readTextFile(REMOTE_STATUS_PATH);
-    const parsed = JSON.parse(raw) as AppTestLatestStatus;
-    if (!parsed || typeof parsed !== "object" || !parsed.status) {
-      return null;
-    }
-    return parsed;
-  } catch {
+    return await readAppTestStatusStore(sessionId, userId);
+  } catch (error) {
+    console.warn(
+      `[app-test] failed to read durable status for ${sessionId}:`,
+      error instanceof Error ? error.message : error,
+    );
     return null;
   }
 }
 
 /**
- * Prefer Daytona FS (cross-isolate) over in-memory cache.
- * Never short-circuit on a stale "running" cache — that hid liveViewUrl
- * updates written by the workflow step on another Vercel instance.
+ * Read Live View / run status for the Web UI poller.
+ * Always durable store only (session file / Supabase) — same path local + Vercel.
  */
-function mergeAppTestStatus(
-  cached: AppTestLatestStatus | undefined,
-  remote: AppTestLatestStatus | null,
-): AppTestLatestStatus {
-  if (!remote && !cached) {
-    return { status: "idle" };
-  }
-  if (!remote) {
-    return cached!;
-  }
-  if (!cached) {
-    return remote;
-  }
-
-  // Same-process finish beat a lagging remote write.
-  if (
-    (cached.status === "done" || cached.status === "error") &&
-    remote.status === "running" &&
-    cached.runId &&
-    cached.runId === remote.runId
-  ) {
-    return {
-      ...remote,
-      ...cached,
-      liveViewUrl: cached.liveViewUrl ?? remote.liveViewUrl,
-    };
-  }
-
-  return {
-    ...cached,
-    ...remote,
-    liveViewUrl: remote.liveViewUrl ?? cached.liveViewUrl,
-  };
-}
-
 export async function readLatestAppTestStatus(
   sessionId: string,
   userId: UserId = null,
 ): Promise<AppTestLatestStatus> {
-  const key = statusCacheKey(sessionId, userId);
-  const cached = latestStatusBySession.get(key);
-
-  // Always refresh Daytona FS while polling — a Vercel API isolate must not
-  // stick on a stale in-memory "running" without liveViewUrl (or a stale
-  // "done" after a new run starts on another isolate).
-  const remote = await readRemoteStatus(sessionId);
-  const merged = mergeAppTestStatus(cached, remote);
-  latestStatusBySession.set(key, merged);
-  return merged;
+  return (await readDurableStatus(sessionId, userId)) ?? { status: "idle" };
 }
 
 /**
  * Publish Live View / run status for the Web UI poller.
- * Memory (same process) + Daytona FS (serverless / cross-instance).
+ * Durable store only so local next dev matches Vercel multi-isolate timing.
  */
 export async function writeLatestAppTestStatus(
   sessionId: string,
   status: AppTestLatestStatus,
   userId: UserId = null,
 ): Promise<void> {
-  latestStatusBySession.set(statusCacheKey(sessionId, userId), status);
-  await writeRemoteStatus(sessionId, status);
+  await writeDurableStatus(sessionId, status, userId);
 }
 
+/**
+ * In-process lock for same-isolate POST/agent overlap only.
+ * Not visible across Vercel isolates — UI status must come from durable store.
+ */
 export function isAppTestRunning(sessionId: string): boolean {
   return runLocks.has(sessionId) || runningBySession.has(sessionId);
 }

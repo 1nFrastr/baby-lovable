@@ -47,6 +47,24 @@ export function getDaytonaBuildError(sessionId: string): string | null {
   return daytonaBuildErrors.get(sessionId) ?? null;
 }
 
+/**
+ * Drop in-process preview Maps so the next resolve behaves like a cold isolate.
+ * Does not stop the remote `pnpm dev` or touch volume persistence.
+ */
+export function clearDaytonaPreviewMemory(sessionId?: string): void {
+  if (sessionId) {
+    daytonaStates.delete(sessionId);
+    daytonaBootstrapPromises.delete(sessionId);
+    daytonaBuildErrors.delete(sessionId);
+    daytonaDevLogs.delete(sessionId);
+    return;
+  }
+  daytonaStates.clear();
+  daytonaBootstrapPromises.clear();
+  daytonaBuildErrors.clear();
+  daytonaDevLogs.clear();
+}
+
 function getDevPort(): number {
   return getDaytonaDevPort();
 }
@@ -474,6 +492,19 @@ export async function resolveDaytonaPreviewStatus(
   options?: { wait?: boolean },
 ): Promise<PreviewStatus> {
   const wait = options?.wait ?? true;
+
+  // Local diagnostic: forget in-memory preview URL like a new Vercel isolate.
+  try {
+    const { simulatePreviewColdIsolate } = await import(
+      "@/lib/browser-run/config"
+    );
+    if (simulatePreviewColdIsolate()) {
+      clearDaytonaPreviewMemory(sessionId);
+    }
+  } catch {
+    // config is always available in host app; ignore if tree-shaken oddly
+  }
+
   let current = getDaytonaPreviewStatus(sessionId);
 
   if (current.status === "ready") {
