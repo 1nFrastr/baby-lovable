@@ -1,6 +1,5 @@
 "use client";
 
-import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionSummary } from "@/lib/session/types";
 import { isActiveRunStatus } from "@/lib/session/types";
 
@@ -10,9 +9,6 @@ interface SessionSidebarProps {
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   isCreating?: boolean;
-  sandboxMode: SandboxMode;
-  onSandboxModeChange: (mode: SandboxMode) => void;
-  daytonaAvailable: boolean;
 }
 
 function formatRelativeTime(value: string): string {
@@ -31,9 +27,6 @@ export function SessionSidebar({
   onSelect,
   onCreate,
   isCreating = false,
-  sandboxMode,
-  onSandboxModeChange,
-  daytonaAvailable,
 }: SessionSidebarProps) {
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
@@ -56,32 +49,6 @@ export function SessionSidebar({
             {isCreating ? "Creating…" : "+ New"}
           </button>
         </div>
-        {daytonaAvailable ? (
-          <div className="mt-3 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => onSandboxModeChange("local")}
-              className={`rounded-md px-2 py-0.5 text-[11px] ${
-                sandboxMode === "local"
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
-              }`}
-            >
-              Local
-            </button>
-            <button
-              type="button"
-              onClick={() => onSandboxModeChange("daytona")}
-              className={`rounded-md px-2 py-0.5 text-[11px] ${
-                sandboxMode === "daytona"
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
-              }`}
-            >
-              Daytona
-            </button>
-          </div>
-        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">

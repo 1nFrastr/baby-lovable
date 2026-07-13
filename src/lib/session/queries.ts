@@ -15,6 +15,11 @@ import {
   type SessionSummary,
 } from "@/lib/session/types";
 
+export type SessionsFeatures = {
+  daytona: boolean;
+  sandboxMode: SandboxMode;
+};
+
 const POLL_ACTIVE_SESSION_MS = 800;
 
 export const sessionKeys = {
@@ -31,7 +36,7 @@ export interface SessionDetailData {
 
 export interface SessionsListData {
   sessions: SessionSummary[];
-  features: { daytona: boolean };
+  features: SessionsFeatures;
 }
 
 function sessionToSummary(session: Session): SessionSummary {
@@ -71,11 +76,15 @@ async function fetchSessions(): Promise<SessionsListData> {
 
   const data = (await response.json()) as {
     sessions: SessionSummary[];
-    features?: { daytona?: boolean };
+    features?: { daytona?: boolean; sandboxMode?: SandboxMode };
   };
   return {
     sessions: data.sessions,
-    features: { daytona: Boolean(data.features?.daytona) },
+    features: {
+      daytona: Boolean(data.features?.daytona),
+      sandboxMode:
+        data.features?.sandboxMode === "daytona" ? "daytona" : "local",
+    },
   };
 }
 
@@ -137,13 +146,11 @@ export function useCreateSessionMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input?: { sandboxMode?: SandboxMode }) => {
+    mutationFn: async () => {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sandboxMode: input?.sandboxMode ?? "local",
-        }),
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) {
@@ -164,7 +171,10 @@ export function useCreateSessionMutation() {
         if (!current) {
           return {
             sessions: [sessionToSummary(session)],
-            features: { daytona: session.sandboxMode === "daytona" },
+            features: {
+              daytona: session.sandboxMode === "daytona",
+              sandboxMode: session.sandboxMode,
+            },
           };
         }
         return {

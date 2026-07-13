@@ -239,7 +239,9 @@ export async function closeAgentWritableStep(
 
   const writer = writable.getWriter();
   try {
-    await writer.write({ type: "finish" });
+    await writer.write({
+      type: "finish",
+    } as unknown as import("@ai-sdk/workflow").ModelCallStreamPart);
   } finally {
     writer.releaseLock();
   }

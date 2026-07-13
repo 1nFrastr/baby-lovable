@@ -22,6 +22,7 @@ import { getWorkspaceRoot } from "@/lib/sandbox/paths";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import type { Session } from "@/lib/session/types";
 import type { SandboxMode } from "@/lib/sandbox/types";
+import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 
 import { logger } from "./logger";
 import { runAgentTurn } from "./run-agent";
@@ -39,7 +40,7 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
-    sandboxMode: "local",
+    sandboxMode: getDefaultSandboxMode(),
     maxSteps: 30,
     list: false,
     help: false,
@@ -98,7 +99,7 @@ function printHelp(): void {
       `Options:\n` +
       `  -p, --prompt <text>    Run a single prompt then exit (one-shot mode)\n` +
       `  -s, --session <id>     Reuse an existing session (keeps history + workspace)\n` +
-      `      --sandbox <mode>   Sandbox mode: local (default) | daytona\n` +
+      `      --sandbox <mode>   Sandbox mode: local | daytona (default: BABY_LOVABLE_SANDBOX_MODE or local)\n` +
       `      --max-steps <n>    Max agent steps per turn (default: 30)\n` +
       `  -l, --list             List existing sessions and exit\n` +
       `  -h, --help             Show this help\n` +

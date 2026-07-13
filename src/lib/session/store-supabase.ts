@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { SESSION_SCHEMA_VERSION } from "./types";
 import type { SandboxMode } from "@/lib/sandbox/types";
+import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 
 function createSessionId(): string {
   const timestamp = Date.now().toString(36);
@@ -139,7 +140,7 @@ export async function createSessionSupabase(
     updatedAt: now,
     messages: [],
     runStatus: "idle",
-    sandboxMode: input.sandboxMode ?? "local",
+    sandboxMode: input.sandboxMode ?? getDefaultSandboxMode(),
     deletedAt: null,
   };
 

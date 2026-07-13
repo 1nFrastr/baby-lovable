@@ -1,5 +1,22 @@
 export type SandboxMode = "local" | "daytona";
 
+/** Parse a sandbox mode string; returns null if invalid. */
+export function parseSandboxMode(value: unknown): SandboxMode | null {
+  if (value === "local" || value === "daytona") {
+    return value;
+  }
+  return null;
+}
+
+/**
+ * Default sandbox for new sessions — from `BABY_LOVABLE_SANDBOX_MODE`.
+ * Values: `local` (default) | `daytona`. Not selectable in the web UI.
+ */
+export function getDefaultSandboxMode(): SandboxMode {
+  const raw = process.env.BABY_LOVABLE_SANDBOX_MODE?.trim().toLowerCase();
+  return parseSandboxMode(raw) ?? "local";
+}
+
 export interface FileInfo {
   name: string;
   path: string;

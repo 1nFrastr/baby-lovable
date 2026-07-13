@@ -9,6 +9,7 @@ import {
   getSessionsRoot,
   resolveSessionRoot,
 } from "@/lib/sandbox/paths";
+import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 
 import {
   assertSessionOwner,
@@ -111,7 +112,7 @@ export async function createSessionLocal(
     updatedAt: now,
     messages: [],
     runStatus: "idle",
-    sandboxMode: input.sandboxMode ?? "local",
+    sandboxMode: input.sandboxMode ?? getDefaultSandboxMode(),
     deletedAt: null,
   };
 
