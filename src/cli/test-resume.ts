@@ -1,22 +1,6 @@
-import {
-  parseJsonEventStream,
-  uiMessageChunkSchema,
-  generateId,
-  type UIMessage,
-  type UIMessageChunk,
-} from "ai";
+import { generateId, type UIMessage } from "ai";
 
-import {
-  applyResumeStreamLikeUseChat,
-  claimResumeLock,
-  countAssistantMessages,
-  findDuplicateMessageIds,
-  normalizeChatMessages,
-  releaseResumeLock,
-  runMultiStartResumeNormalization,
-  runTextBeforeToolsMergeTest,
-  simulateStrictModeResumeClaims,
-} from "@/lib/chat/resume-messages";
+import { readDraft } from "@/lib/session/draft-store";
 import type { Session } from "@/lib/session/types";
 
 import { logger } from "./logger";
@@ -66,17 +50,22 @@ async function createSessionViaApi(baseUrl: string): Promise<Session> {
   return data.session;
 }
 
-async function fetchSession(
+async function fetchSessionWithDraft(
   baseUrl: string,
   sessionId: string,
-): Promise<Session> {
+): Promise<{
+  session: Session;
+  draft: { runId: string; message: UIMessage } | null;
+}> {
   const response = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch session ${sessionId}: ${response.status}`);
   }
 
-  const data = (await response.json()) as { session: Session };
-  return data.session;
+  return (await response.json()) as {
+    session: Session;
+    draft: { runId: string; message: UIMessage } | null;
+  };
 }
 
 async function startChatTurn(
@@ -120,135 +109,57 @@ async function startChatTurn(
   return runId;
 }
 
-async function waitForActiveRun(
+async function waitForDraftWithContent(
   baseUrl: string,
   sessionId: string,
-  expectedRunId: string,
   timeoutMs: number,
-): Promise<void> {
+): Promise<{ runId: string; message: UIMessage; partCount: number } | null> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const session = await fetchSession(baseUrl, sessionId);
-    if (
-      session.lastRunId === expectedRunId &&
-      (session.runStatus === "running" || session.runStatus === "pending")
-    ) {
-      return;
+    const { draft } = await fetchSessionWithDraft(baseUrl, sessionId);
+    if (draft && draft.message.parts.length > 0) {
+      return {
+        runId: draft.runId,
+        message: draft.message,
+        partCount: draft.message.parts.length,
+      };
     }
     await sleep(250);
   }
 
-  throw new Error(`Timed out waiting for ${sessionId} to enter running state`);
-}
-
-async function* readUiChunksFromResponse(
-  body: ReadableStream<Uint8Array>,
-): AsyncGenerator<UIMessageChunk> {
-  const chunkStream = parseJsonEventStream({
-    stream: body,
-    schema: uiMessageChunkSchema,
-  });
-  const reader = chunkStream.getReader();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (!value.success) {
-        throw value.error;
-      }
-      yield value.value;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-async function collectResumeStream(
-  body: ReadableStream<Uint8Array>,
-  baseMessages: UIMessage[],
-): Promise<{ messages: UIMessage[]; chunkCount: number }> {
-  let chunkCount = 0;
-  const chunks: UIMessageChunk[] = [];
-
-  for await (const chunk of readUiChunksFromResponse(body)) {
-    chunkCount++;
-    chunks.push(chunk);
-    if (chunk.type === "finish") {
-      break;
-    }
-  }
-
-  const stream = new ReadableStream<UIMessageChunk>({
-    start(controller) {
-      for (const chunk of chunks) {
-        controller.enqueue(chunk);
-      }
-      controller.close();
-    },
-  });
-
-  const messages = await applyResumeStreamLikeUseChat(baseMessages, stream);
-  return { messages, chunkCount };
-}
-
-async function resumeWithStartIndex(
-  baseUrl: string,
-  sessionId: string,
-  runId: string,
-  startIndex: number,
-  baseMessages: UIMessage[],
-): Promise<{
-  messages: UIMessage[];
-  tailIndex: number | null;
-  chunkCount: number;
-}> {
-  const response = await fetch(
-    `${baseUrl}/api/sessions/${sessionId}/chat/${encodeURIComponent(runId)}/stream?startIndex=${startIndex}`,
-  );
-
-  if (!response.ok || !response.body) {
-    throw new Error(`Resume GET failed: ${response.status}`);
-  }
-
-  const tailHeader = response.headers.get("x-workflow-stream-tail-index");
-  const tailIndex =
-    tailHeader != null && tailHeader !== "" ? Number(tailHeader) : null;
-
-  const { messages, chunkCount } = await collectResumeStream(
-    response.body,
-    baseMessages,
-  );
-
-  return { messages, tailIndex, chunkCount };
+  return null;
 }
 
 async function waitForTerminalRun(
   baseUrl: string,
   sessionId: string,
   timeoutMs: number,
-): Promise<void> {
+): Promise<Session> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const session = await fetchSession(baseUrl, sessionId);
+    const { session } = await fetchSessionWithDraft(baseUrl, sessionId);
     if (
       session.runStatus === "completed" ||
       session.runStatus === "failed" ||
       session.runStatus === "idle"
     ) {
-      return;
+      return session;
     }
     await sleep(500);
   }
+
+  throw new Error(`Timed out waiting for ${sessionId} to finish`);
+}
+
+function countTextParts(message: UIMessage): number {
+  return message.parts.filter((part) => part.type === "text").length;
 }
 
 /**
- * Headless resume test — hits the real HTTP stream endpoints (requires
- * `npm run dev`) and asserts a single assistant message after reconnect.
+ * Headless draft-resume test — simulates refresh by reading draft.json via API
+ * while the workflow is still running (requires `npm run dev`).
  */
 export async function runResumeStreamTest(options?: {
   baseUrl?: string;
@@ -269,96 +180,66 @@ export async function runResumeStreamTest(options?: {
     role: "user",
     parts: [{ type: "text", text: prompt }],
   };
-  const thread = [userMessage];
 
   const runId = await startChatTurn(
     baseUrl,
     session.id,
-    thread,
+    [userMessage],
     PARTIAL_READ_MS,
   );
-  details.push(`started chat run ${runId}, consumed ${PARTIAL_READ_MS}ms`);
+  details.push(
+    `started chat run ${runId}, consumed stream ${PARTIAL_READ_MS}ms then aborted (simulated refresh)`,
+  );
 
-  await waitForActiveRun(baseUrl, session.id, runId, 10_000);
-  details.push("session persisted running state");
+  const midDraft = await waitForDraftWithContent(baseUrl, session.id, 15_000);
+  details.push(
+    midDraft
+      ? `mid-run draft via API: runId=${midDraft.runId}, parts=${midDraft.partCount}, textParts=${countTextParts(midDraft.message)}`
+      : "mid-run draft via API: none",
+  );
 
-  const persisted = await fetchSession(baseUrl, session.id);
-  const baseMessages = persisted.messages;
-  details.push(`base thread has ${baseMessages.length} message(s) before resume`);
+  const onDiskDraft = await readDraft(session.id);
+  details.push(
+    onDiskDraft
+      ? `draft.json on disk: parts=${onDiskDraft.message.parts.length}, runId=${onDiskDraft.runId}`
+      : "draft.json on disk: missing",
+  );
 
-  const single = await resumeWithStartIndex(
+  const finished = await waitForTerminalRun(
     baseUrl,
     session.id,
-    runId,
-    0,
-    baseMessages,
-  );
-  const singleNormalized = normalizeChatMessages(single.messages);
-  details.push(
-    `single resume: tailIndex=${single.tailIndex ?? "null"}, chunks=${single.chunkCount}, assistants=${countAssistantMessages(single.messages)} → normalized=${countAssistantMessages(singleNormalized)}`,
-  );
-
-  const strictMode = simulateStrictModeResumeClaims(session.id, runId);
-  details.push(
-    `strict-mode lock: first=${strictMode.first}, second=${strictMode.second}`,
-  );
-
-  const multiStart = await runMultiStartResumeNormalization();
-  details.push(
-    `synthetic multi-start stream: raw assistants=${multiStart.rawAssistants}, normalized=${multiStart.normalizedAssistants}, mergedText=${multiStart.mergedText ?? "null"}`,
-  );
-
-  const textBeforeTools = runTextBeforeToolsMergeTest();
-  details.push(
-    `text-before-tools merge: ok=${textBeforeTools.ok}, intro=${textBeforeTools.introText ?? "null"}`,
-  );
-
-  const parallel = await Promise.all([
-    resumeWithStartIndex(baseUrl, session.id, runId, 0, baseMessages),
-    resumeWithStartIndex(baseUrl, session.id, runId, 0, baseMessages),
-  ]);
-  const parallelRawAssistants = parallel.map((item) =>
-    countAssistantMessages(item.messages),
-  );
-  const parallelNormalized = parallel.map((item) =>
-    countAssistantMessages(normalizeChatMessages(item.messages)),
+    WORKFLOW_TIMEOUT_MS,
   );
   details.push(
-    `parallel resume like Strict Mode: raw assistants=${parallelRawAssistants.join(", ")}, normalized=${parallelNormalized.join(", ")}`,
+    `workflow finished: runStatus=${finished.runStatus}, messages=${finished.messages.length}`,
   );
 
-  const duplicateIds = findDuplicateMessageIds(single.messages);
-  const normalizedDuplicateIds = findDuplicateMessageIds(singleNormalized);
-  const assistantCount = countAssistantMessages(singleNormalized);
-  const userCount = singleNormalized.filter((message) => message.role === "user")
+  const afterComplete = await readDraft(session.id);
+  details.push(
+    afterComplete ? "FAIL: draft.json still present after complete" : "draft.json deleted after complete",
+  );
+
+  const assistant = finished.messages.find((message) => message.role === "assistant");
+  const userCount = finished.messages.filter((message) => message.role === "user")
     .length;
 
   const ok =
-    strictMode.first &&
-    !strictMode.second &&
+    Boolean(midDraft) &&
+    midDraft!.runId === runId &&
+    midDraft!.partCount > 0 &&
+    Boolean(onDiskDraft) &&
     userCount === 1 &&
-    assistantCount === 1 &&
-    normalizedDuplicateIds.length === 0 &&
-    single.chunkCount > 0 &&
-    single.tailIndex != null &&
-    multiStart.rawAssistants > 1 &&
-    multiStart.normalizedAssistants === 1 &&
-    multiStart.mergedText === "我来帮你创建" &&
-    textBeforeTools.ok;
+    Boolean(assistant) &&
+    finished.runStatus === "completed" &&
+    afterComplete == null;
 
   if (!ok) {
     details.push(
-      `FAIL: user=${userCount}, assistant=${assistantCount}, rawDupes=${duplicateIds.join(",") || "none"}, normalizedDupes=${normalizedDuplicateIds.join(",") || "none"}`,
+      `FAIL: midDraft=${Boolean(midDraft)}, user=${userCount}, assistant=${Boolean(assistant)}, draftCleared=${afterComplete == null}`,
     );
   } else {
-    details.push(
-      "PASS: strict lock blocks double resume; multi-start stream normalizes to one assistant",
-    );
+    details.push("PASS: draft materialized mid-run and cleared after persist");
   }
-
-  await waitForTerminalRun(baseUrl, session.id, WORKFLOW_TIMEOUT_MS).catch(() => {
-    details.push("workflow still running after test window (non-fatal)");
-  });
 
   return {
     ok,
@@ -375,12 +256,12 @@ export async function printResumeTestResult(result: ResumeTestResult): Promise<v
 
   if (result.ok) {
     logger.info(
-      `Resume test passed · session=${result.sessionId} · run=${result.runId}`,
+      `Draft resume test passed · session=${result.sessionId} · run=${result.runId}`,
     );
     return;
   }
 
   logger.error(
-    `Resume test failed · session=${result.sessionId} · run=${result.runId}`,
+    `Draft resume test failed · session=${result.sessionId} · run=${result.runId}`,
   );
 }

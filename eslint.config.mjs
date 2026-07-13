@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Runtime session data + per-session workspace build output (.next, node_modules).
+    ".baby-lovable/**",
+    // Workflow DevKit build artifacts (generated route handlers).
+    "src/app/.well-known/workflow/**",
   ]),
 ]);
 

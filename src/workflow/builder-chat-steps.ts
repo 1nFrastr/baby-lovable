@@ -107,6 +107,7 @@ export async function saveSessionMessagesStep(
 ) {
   "use step";
 
+  const { readDraft, deleteDraft } = await import("@/lib/session/draft-store");
   const { deriveSessionTitle, getSession, replaceMessages, updateSession } =
     await import("@/lib/session/store");
 
@@ -115,10 +116,11 @@ export async function saveSessionMessagesStep(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const assistantMessage = modelMessagesToAssistantUIMessage(
-    modelMessages,
-    previousModelCount,
-  );
+  const draft = await readDraft(sessionId, session.userId);
+  const assistantMessage =
+    draft?.runId === session.lastRunId
+      ? draft.message
+      : modelMessagesToAssistantUIMessage(modelMessages, previousModelCount);
 
   const mergedMessages = assistantMessage
     ? [...uiMessages, assistantMessage]
@@ -138,6 +140,7 @@ export async function saveSessionMessagesStep(
     runStatus: "completed",
     lastRunId: null,
   });
+  await deleteDraft(sessionId, session.userId);
 
   return { messageCount: mergedMessages.length };
 }
@@ -145,11 +148,17 @@ export async function saveSessionMessagesStep(
 export async function markSessionRunFailedStep(sessionId: string) {
   "use step";
 
-  const { updateSession } = await import("@/lib/session/store");
+  const { deleteDraft } = await import("@/lib/session/draft-store");
+  const { getSession, updateSession } = await import("@/lib/session/store");
+
+  const session = await getSession(sessionId);
   await updateSession(sessionId, {
     runStatus: "failed",
     lastRunId: null,
   });
+  if (session) {
+    await deleteDraft(sessionId, session.userId);
+  }
 }
 
 /** Close the agent writable stream — must run as a step inside workflows. */

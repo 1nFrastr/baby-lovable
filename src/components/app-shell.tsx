@@ -3,15 +3,27 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import type { Session, SessionSummary } from "@/lib/session/types";
+import type { SessionDraft } from "@/lib/session/draft-store";
+import {
+  isActiveRunStatus,
+  type Session,
+  type SessionSummary,
+} from "@/lib/session/types";
 
 import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
 
+const POLL_INTERVAL_MS = 400;
+
 interface AppShellProps {
   /** When set, bootstrap loads this session (from `/sessions/[sessionId]`). */
   initialSessionId?: string;
+}
+
+interface SessionResponse {
+  session: Session;
+  draft: SessionDraft | null;
 }
 
 export function AppShell({ initialSessionId }: AppShellProps) {
@@ -21,6 +33,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
     initialSessionId ?? null,
   );
   const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [activeDraft, setActiveDraft] = useState<SessionDraft | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -45,8 +58,9 @@ export function AppShell({ initialSessionId }: AppShellProps) {
       throw new Error("Failed to load session");
     }
 
-    const data = (await response.json()) as { session: Session };
+    const data = (await response.json()) as SessionResponse;
     setActiveSession(data.session);
+    setActiveDraft(data.draft);
     return data.session;
   }, []);
 
@@ -59,7 +73,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
       await loadSession(activeSessionId);
       await loadSessions();
     } catch {
-      // Non-fatal — stream may have ended before persistence catches up.
+      // Non-fatal — workflow may still be persisting.
     }
   }, [activeSessionId, loadSession, loadSessions]);
 
@@ -98,6 +112,20 @@ export function AppShell({ initialSessionId }: AppShellProps) {
     };
   }, [initialSessionId, loadSession, loadSessions]);
 
+  useEffect(() => {
+    if (!activeSession || !isActiveRunStatus(activeSession.runStatus)) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshActiveSession();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeSession, refreshActiveSession]);
+
   const handleSelectSession = async (sessionId: string) => {
     setActiveSessionId(sessionId);
     setLoadError(null);
@@ -132,6 +160,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
       setSessions(nextSessions);
       setActiveSessionId(data.session.id);
       setActiveSession(data.session);
+      setActiveDraft(null);
       router.push(`/sessions/${data.session.id}`);
     } catch (error) {
       setLoadError(
@@ -210,8 +239,8 @@ export function AppShell({ initialSessionId }: AppShellProps) {
                 <Chat
                   key={activeSession.id}
                   sessionId={activeSession.id}
-                  initialMessages={activeSession.messages}
-                  lastRunId={activeSession.lastRunId}
+                  messages={activeSession.messages}
+                  draft={activeDraft?.message ?? null}
                   runStatus={activeSession.runStatus}
                   onSessionRefresh={() => {
                     void refreshActiveSession();

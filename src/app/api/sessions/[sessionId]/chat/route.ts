@@ -7,6 +7,12 @@ import {
   getSessionAuthContext,
   SessionAccessDeniedError,
 } from "@/lib/session/auth-context";
+import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
+import {
+  createEmptyDraft,
+  deleteDraft,
+  writeDraft,
+} from "@/lib/session/draft-store";
 import {
   deriveSessionTitle,
   getSession,
@@ -44,6 +50,8 @@ export async function POST(
       await updateSession(sessionId, { title }, auth);
     }
 
+    await deleteDraft(sessionId, auth.userId);
+
     const run = await start(builderChat, [sessionId, messages]);
     await updateSession(
       sessionId,
@@ -52,6 +60,22 @@ export async function POST(
         runStatus: "running",
       },
       auth,
+    );
+
+    await writeDraft(
+      sessionId,
+      createEmptyDraft(run.runId),
+      auth.userId,
+    );
+
+    // Detached — survives client disconnect; overwrites draft.json as chunks arrive.
+    void materializeDraftFromRun(sessionId, run.runId, auth.userId).catch(
+      (error) => {
+        console.error(
+          `[chat] draft materializer failed session=${sessionId} run=${run.runId}:`,
+          error,
+        );
+      },
     );
 
     return createUIMessageStreamResponse({
