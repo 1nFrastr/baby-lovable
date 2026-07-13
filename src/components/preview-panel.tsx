@@ -350,11 +350,6 @@ export function PreviewPanel({
     pipOpen &&
     (appTest.status === "running" || pipHoldActive) &&
     !pipDismissed;
-  const lastSummary =
-    appTest.status === "done" || appTest.status === "error"
-      ? appTest.summary ?? appTest.error
-      : null;
-
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
@@ -380,28 +375,26 @@ export function PreviewPanel({
           </div>
           <p
             className={`text-xs dark:text-zinc-400 ${
-              preview.status === "error"
+              preview.status === "error" || exportError
                 ? "whitespace-normal text-red-600 dark:text-red-400"
                 : "truncate text-zinc-500"
             }`}
           >
-            {exportError
-              ? exportError
-              : lastSummary
-                ? `App test: ${lastSummary}`
-                : preview.status === "ready"
-                  ? preview.url
-                  : preview.status === "starting"
-                    ? sandboxMode === "daytona"
-                      ? "Starting Daytona preview…"
-                      : "Starting dev server…"
-                    : preview.status === "installing"
-                      ? "Installing dependencies…"
-                      : preview.status === "needs_install"
-                        ? "Project not ready"
-                        : preview.status === "error"
-                          ? preview.error
-                          : "Preview not started"}
+            {preview.status === "ready"
+              ? preview.url
+              : exportError
+                ? exportError
+                : preview.status === "starting"
+                  ? sandboxMode === "daytona"
+                    ? "Starting Daytona preview…"
+                    : "Starting dev server…"
+                  : preview.status === "installing"
+                    ? "Installing dependencies…"
+                    : preview.status === "needs_install"
+                      ? "Project not ready"
+                      : preview.status === "error"
+                        ? preview.error
+                        : "Preview not started"}
           </p>
         </div>
 
