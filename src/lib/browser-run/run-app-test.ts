@@ -11,7 +11,10 @@ import {
   writeReportJson,
 } from "./artifacts";
 import { createBrowserRunSession } from "./client";
-import { requireBrowserRunConfig } from "./config";
+import {
+  requireBrowserRunConfig,
+  shouldPersistAppTestArtifacts,
+} from "./config";
 import {
   exerciseGenericClicks,
   exerciseListFormFlow,
@@ -181,13 +184,19 @@ export async function runAppTest(
   }
 
   const previewUrl = preview.url;
-  const artifactDir = resolveAppTestArtifactDir(
-    options.sessionId,
-    runId,
-    session.userId,
-    options.artifactDir,
-  );
-  await ensureArtifactDir(artifactDir);
+  const persistArtifacts =
+    Boolean(options.artifactDir) || shouldPersistAppTestArtifacts();
+  const artifactDir = persistArtifacts
+    ? resolveAppTestArtifactDir(
+        options.sessionId,
+        runId,
+        session.userId,
+        options.artifactDir,
+      )
+    : undefined;
+  if (artifactDir) {
+    await ensureArtifactDir(artifactDir);
+  }
 
   const holdMs = options.holdMs ?? DEFAULT_HOLD_MS;
   const maxClicks = options.maxClicks ?? DEFAULT_MAX_CLICKS;
@@ -207,7 +216,9 @@ export async function runAppTest(
       detail: browserSessionId,
     });
 
-    await writeLiveViewArtifacts(artifactDir, liveViewUrl);
+    if (artifactDir) {
+      await writeLiveViewArtifacts(artifactDir, liveViewUrl);
+    }
 
     await persistStatus(
       options.sessionId,
@@ -304,23 +315,27 @@ export async function runAppTest(
         browserSessionId,
         artifactDir,
       });
-      await writeReportJson(artifactDir, report).catch(() => {});
+      if (artifactDir) {
+        await writeReportJson(artifactDir, report).catch(() => {});
+      }
       return finish(report);
     }
 
-    try {
-      await page.locator("body").screenshot({
-        path: `${artifactDir}/01-home.png`,
-        timeout: 10_000,
-        animations: "disabled",
-      });
-      screenshots.push(`${artifactDir}/01-home.png`);
-    } catch (error) {
-      steps.push({
-        name: "screenshot:home",
-        ok: false,
-        detail: error instanceof Error ? error.message : String(error),
-      });
+    if (artifactDir) {
+      try {
+        await page.locator("body").screenshot({
+          path: `${artifactDir}/01-home.png`,
+          timeout: 10_000,
+          animations: "disabled",
+        });
+        screenshots.push(`${artifactDir}/01-home.png`);
+      } catch (error) {
+        steps.push({
+          name: "screenshot:home",
+          ok: false,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     const scripted = options.actions?.length
@@ -430,7 +445,9 @@ export async function runAppTest(
       usedScriptedActions,
     };
 
-    await writeReportJson(artifactDir, report);
+    if (artifactDir) {
+      await writeReportJson(artifactDir, report);
+    }
     return finish(report);
   } catch (error) {
     const report = failReport({
@@ -447,7 +464,9 @@ export async function runAppTest(
       browserSessionId,
       artifactDir,
     });
-    await writeReportJson(artifactDir, report).catch(() => {});
+    if (artifactDir) {
+      await writeReportJson(artifactDir, report).catch(() => {});
+    }
     return finish(report);
   } finally {
     if (browser) {

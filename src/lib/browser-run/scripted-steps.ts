@@ -8,20 +8,30 @@ async function sleep(ms: number): Promise<void> {
 
 async function shot(
   page: Page,
-  path: string,
+  filePath: string | undefined,
   screenshots: string[],
 ): Promise<boolean> {
+  if (!filePath) {
+    return false;
+  }
   try {
     await page.locator("body").screenshot({
-      path,
+      path: filePath,
       timeout: 10_000,
       animations: "disabled",
     });
-    screenshots.push(path);
+    screenshots.push(filePath);
     return true;
   } catch {
     return false;
   }
+}
+
+function artifactPath(
+  artifactDir: string | undefined,
+  name: string,
+): string | undefined {
+  return artifactDir ? `${artifactDir}/${name}` : undefined;
 }
 
 /** Expand `{{now}}` / `{{unique}}` placeholders so assert values stay in sync. */
@@ -68,7 +78,7 @@ function resolveTarget(action: AppTestAction, unique: string): {
 export async function executeScriptedActions(
   page: Page,
   actions: AppTestAction[],
-  artifactDir: string,
+  artifactDir: string | undefined,
   reportSteps: AppTestStep[],
   screenshots: string[],
 ): Promise<{ ok: boolean; completed: number }> {
@@ -194,7 +204,18 @@ export async function executeScriptedActions(
           shotIndex += 1;
           const file =
             action.path ??
-            `${artifactDir}/${String(shotIndex).padStart(2, "0")}-step.png`;
+            artifactPath(
+              artifactDir,
+              `${String(shotIndex).padStart(2, "0")}-step.png`,
+            );
+          if (!file) {
+            reportSteps.push({
+              name,
+              ok: true,
+              detail: "skipped (no artifact dir)",
+            });
+            break;
+          }
           const ok = await shot(page, file, screenshots);
           reportSteps.push({
             name,
@@ -224,7 +245,10 @@ export async function executeScriptedActions(
         shotIndex += 1;
         await shot(
           page,
-          `${artifactDir}/${String(shotIndex).padStart(2, "0")}-after-${action.action}.png`,
+          artifactPath(
+            artifactDir,
+            `${String(shotIndex).padStart(2, "0")}-after-${action.action}.png`,
+          ),
           screenshots,
         );
       }
@@ -234,7 +258,10 @@ export async function executeScriptedActions(
       shotIndex += 1;
       await shot(
         page,
-        `${artifactDir}/${String(shotIndex).padStart(2, "0")}-fail-${i + 1}.png`,
+        artifactPath(
+          artifactDir,
+          `${String(shotIndex).padStart(2, "0")}-fail-${i + 1}.png`,
+        ),
         screenshots,
       );
       if (!action.continueOnError) {

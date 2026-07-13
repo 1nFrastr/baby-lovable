@@ -32,3 +32,24 @@ export function requireBrowserRunConfig(): BrowserRunConfig {
 export function browserRunConfigured(): boolean {
   return getBrowserRunConfig() !== null;
 }
+
+/**
+ * Whether to write screenshots / report.json / latest-status to disk.
+ *
+ * These are for local CLI/debug (`npm run test:app-preview`). Agent
+ * `testPreview` only needs the in-memory report; on Vercel the deploy FS is
+ * read-only and `/tmp` is not shared across invocations, so disk artifacts
+ * are useless there.
+ *
+ * Override: `BABY_LOVABLE_APP_TEST_ARTIFACTS=0|1`
+ */
+export function shouldPersistAppTestArtifacts(): boolean {
+  const raw = process.env.BABY_LOVABLE_APP_TEST_ARTIFACTS?.trim();
+  if (raw === "0" || raw === "false") {
+    return false;
+  }
+  if (raw === "1" || raw === "true") {
+    return true;
+  }
+  return !(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+}

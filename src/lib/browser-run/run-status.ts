@@ -4,6 +4,7 @@ import path from "node:path";
 import { getSessionRoot } from "@/lib/sandbox/paths";
 import type { UserId } from "@/lib/session/types";
 
+import { shouldPersistAppTestArtifacts } from "./config";
 import type { AppTestAction, AppTestReport } from "./types";
 
 export type AppTestRunStatus = "idle" | "running" | "done" | "error";
@@ -57,6 +58,9 @@ export async function writeLatestAppTestStatus(
   status: AppTestLatestStatus,
   userId: UserId = null,
 ): Promise<void> {
+  if (!shouldPersistAppTestArtifacts()) {
+    return;
+  }
   const filePath = resolveLatestStatusPath(sessionId, userId);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(status, null, 2)}\n`, "utf8");

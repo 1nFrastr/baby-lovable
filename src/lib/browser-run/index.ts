@@ -2,6 +2,7 @@ export {
   browserRunConfigured,
   getBrowserRunConfig,
   requireBrowserRunConfig,
+  shouldPersistAppTestArtifacts,
 } from "./config";
 export { createBrowserRunSession, toTabLiveViewUrl } from "./client";
 export { runAppTest, APP_TEST_LIVE_VIEW_LOG_PREFIX } from "./run-app-test";

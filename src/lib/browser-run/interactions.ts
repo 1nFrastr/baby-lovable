@@ -8,20 +8,30 @@ async function sleep(ms: number): Promise<void> {
 
 async function shot(
   page: Page,
-  path: string,
+  filePath: string | undefined,
   screenshots: string[],
 ): Promise<boolean> {
+  if (!filePath) {
+    return false;
+  }
   try {
     await page.locator("body").screenshot({
-      path,
+      path: filePath,
       timeout: 10_000,
       animations: "disabled",
     });
-    screenshots.push(path);
+    screenshots.push(filePath);
     return true;
   } catch {
     return false;
   }
+}
+
+function artifactPath(
+  artifactDir: string | undefined,
+  name: string,
+): string | undefined {
+  return artifactDir ? `${artifactDir}/${name}` : undefined;
 }
 
 /**
@@ -31,7 +41,7 @@ async function shot(
  */
 export async function exerciseListFormFlow(
   page: Page,
-  artifactDir: string,
+  artifactDir: string | undefined,
   steps: AppTestStep[],
   screenshots: string[],
 ): Promise<{ exercised: boolean; addOk: boolean; deleteOk: boolean }> {
@@ -125,7 +135,7 @@ export async function exerciseListFormFlow(
     ok: addOk,
     detail: addOk ? "item visible after add" : "item not found after add",
   });
-  await shot(page, `${artifactDir}/02-after-add.png`, screenshots);
+  await shot(page, artifactPath(artifactDir, "02-after-add.png"), screenshots);
 
   if (!addOk) {
     return { exercised: true, addOk: false, deleteOk: false };
@@ -182,7 +192,11 @@ export async function exerciseListFormFlow(
           ok: false,
           detail: "no delete control found in row",
         });
-        await shot(page, `${artifactDir}/03-after-delete.png`, screenshots);
+        await shot(
+          page,
+          artifactPath(artifactDir, "03-after-delete.png"),
+          screenshots,
+        );
         return { exercised: true, addOk: true, deleteOk: false };
       }
     }
@@ -208,7 +222,11 @@ export async function exerciseListFormFlow(
     });
   }
 
-  await shot(page, `${artifactDir}/03-after-delete.png`, screenshots);
+  await shot(
+    page,
+    artifactPath(artifactDir, "03-after-delete.png"),
+    screenshots,
+  );
   return { exercised: true, addOk, deleteOk };
 }
 
@@ -216,7 +234,7 @@ export async function exerciseGenericClicks(
   page: Page,
   previewUrl: string,
   origin: string,
-  artifactDir: string,
+  artifactDir: string | undefined,
   maxClicks: number,
   steps: AppTestStep[],
   screenshots: string[],
@@ -257,7 +275,10 @@ export async function exerciseGenericClicks(
       shotIndex += 1;
       await shot(
         page,
-        `${artifactDir}/${String(shotIndex).padStart(2, "0")}-after-click.png`,
+        artifactPath(
+          artifactDir,
+          `${String(shotIndex).padStart(2, "0")}-after-click.png`,
+        ),
         screenshots,
       );
       steps.push({
