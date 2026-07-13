@@ -90,7 +90,7 @@ function mergeStreamResults(
   };
 }
 
-async function finalizeWritable(
+async function finalizeWritableDefault(
   writable: WritableStream<ModelCallStreamPart>,
 ): Promise<void> {
   const writer = writable.getWriter();
@@ -118,6 +118,13 @@ export interface RunAgentStreamWithAutoContinueOptions {
     sendFinish: boolean;
   }) => Promise<AgentStreamPassResult>;
   onAutoContinue?: (continuationNumber: number) => void;
+  /**
+   * Close the workflow writable after the final pass. Required in `'use workflow'`
+   * context — plain `getWriter()` throws outside a step.
+   */
+  finalizeWritable?: (
+    writable: WritableStream<ModelCallStreamPart>,
+  ) => Promise<void>;
 }
 
 /**
@@ -129,6 +136,7 @@ export async function runAgentStreamWithAutoContinue({
   writable,
   streamOnce,
   onAutoContinue,
+  finalizeWritable,
 }: RunAgentStreamWithAutoContinueOptions): Promise<AgentStreamResult> {
   let messages = initialMessages;
   let continuationCount = 0;
@@ -152,7 +160,8 @@ export async function runAgentStreamWithAutoContinue({
 
     if (!shouldAutoContinue(pass.finishReason, continuationCount)) {
       if (writable) {
-        await finalizeWritable(writable);
+        const close = finalizeWritable ?? finalizeWritableDefault;
+        await close(writable);
       }
       return {
         ...accumulated,

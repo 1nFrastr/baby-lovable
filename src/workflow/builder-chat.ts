@@ -7,8 +7,10 @@ import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { createBuilderAgent } from "./builder-agent";
 
 import {
+  closeAgentWritableStep,
   getBuildErrorStep,
   getSessionStep,
+  markSessionRunFailedStep,
   modelMessagesToAssistantUIMessage,
   saveSessionMessagesStep,
 } from "./builder-chat-steps";
@@ -46,31 +48,47 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   const startedAt = Date.now();
   const writable = getWritable<ModelCallStreamPart>();
 
-  const result = await runAgentStreamWithAutoContinue({
-    initialMessages: modelMessages,
-    writable,
-    onAutoContinue: (n) => {
-      console.log(
-        formatTraceStdout(
-          sessionId,
-          "INFO",
-          `auto-continue #${n} after finish=length (invisible to user)`,
-        ),
-      );
-    },
-    streamOnce: async ({ messages, preventClose, sendFinish }) => {
-      return agent.stream({
+  let result;
+  try {
+    result = await runAgentStreamWithAutoContinue({
+      initialMessages: modelMessages,
+      writable,
+      finalizeWritable: closeAgentWritableStep,
+      onAutoContinue: (n) => {
+        console.log(
+          formatTraceStdout(
+            sessionId,
+            "INFO",
+            `auto-continue #${n} after finish=length (invisible to user)`,
+          ),
+        );
+      },
+      streamOnce: async ({ messages, preventClose, sendFinish }) => {
+        return agent.stream({
+          messages,
+          writable,
+          stopWhen: isStepCount(maxSteps),
+          runtimeContext,
+          toolsContext,
+          preventClose,
+          sendFinish,
+          ...trace.hooks,
+        });
+      },
+    });
+  } catch (error) {
+    if (result) {
+      await saveSessionMessagesStep(
+        sessionId,
         messages,
-        writable,
-        stopWhen: isStepCount(maxSteps),
-        runtimeContext,
-        toolsContext,
-        preventClose,
-        sendFinish,
-        ...trace.hooks,
-      });
-    },
-  });
+        result.messages,
+        previousModelCount,
+      );
+    } else {
+      await markSessionRunFailedStep(sessionId);
+    }
+    throw error;
+  }
 
   const assistantMessage = modelMessagesToAssistantUIMessage(
     result.messages,

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import type { Session, SessionSummary } from "@/lib/session/types";
@@ -8,9 +9,17 @@ import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
 
-export function AppShell() {
+interface AppShellProps {
+  /** When set, bootstrap loads this session (from `/sessions/[sessionId]`). */
+  initialSessionId?: string;
+}
+
+export function AppShell({ initialSessionId }: AppShellProps) {
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(
+    initialSessionId ?? null,
+  );
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -29,6 +38,9 @@ export function AppShell() {
 
   const loadSession = useCallback(async (sessionId: string) => {
     const response = await fetch(`/api/sessions/${sessionId}`);
+    if (response.status === 404) {
+      throw new Error("Session not found");
+    }
     if (!response.ok) {
       throw new Error("Failed to load session");
     }
@@ -38,21 +50,33 @@ export function AppShell() {
     return data.session;
   }, []);
 
+  const refreshActiveSession = useCallback(async () => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    try {
+      await loadSession(activeSessionId);
+      await loadSessions();
+    } catch {
+      // Non-fatal — stream may have ended before persistence catches up.
+    }
+  }, [activeSessionId, loadSession, loadSessions]);
+
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
       try {
         setLoadError(null);
-        const nextSessions = await loadSessions();
+        await loadSessions();
         if (cancelled) {
           return;
         }
 
-        if (nextSessions.length > 0) {
-          const firstSessionId = nextSessions[0].id;
-          setActiveSessionId(firstSessionId);
-          await loadSession(firstSessionId);
+        if (initialSessionId) {
+          setActiveSessionId(initialSessionId);
+          await loadSession(initialSessionId);
         }
       } catch (error) {
         if (!cancelled) {
@@ -72,11 +96,12 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [loadSession, loadSessions]);
+  }, [initialSessionId, loadSession, loadSessions]);
 
   const handleSelectSession = async (sessionId: string) => {
     setActiveSessionId(sessionId);
     setLoadError(null);
+    router.push(`/sessions/${sessionId}`);
 
     try {
       await loadSession(sessionId);
@@ -107,6 +132,7 @@ export function AppShell() {
       setSessions(nextSessions);
       setActiveSessionId(data.session.id);
       setActiveSession(data.session);
+      router.push(`/sessions/${data.session.id}`);
     } catch (error) {
       setLoadError(
         error instanceof Error ? error.message : "Failed to create session",
@@ -146,8 +172,17 @@ export function AppShell() {
               Loading sessions…
             </div>
           ) : loadError ? (
-            <div className="flex h-full items-center justify-center px-6 text-sm text-red-600 dark:text-red-400">
-              {loadError}
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {loadError}
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push("/sessions")}
+                className="rounded-xl border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                返回会话列表
+              </button>
             </div>
           ) : !activeSession ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -176,6 +211,11 @@ export function AppShell() {
                   key={activeSession.id}
                   sessionId={activeSession.id}
                   initialMessages={activeSession.messages}
+                  lastRunId={activeSession.lastRunId}
+                  runStatus={activeSession.runStatus}
+                  onSessionRefresh={() => {
+                    void refreshActiveSession();
+                  }}
                 />
               </div>
               <PreviewPanel sessionId={activeSession.id} />

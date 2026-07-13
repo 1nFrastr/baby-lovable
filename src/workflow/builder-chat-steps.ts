@@ -107,7 +107,7 @@ export async function saveSessionMessagesStep(
 ) {
   "use step";
 
-  const { appendMessages, deriveSessionTitle, getSession, updateSession } =
+  const { deriveSessionTitle, getSession, replaceMessages, updateSession } =
     await import("@/lib/session/store");
 
   const session = await getSession(sessionId);
@@ -126,13 +126,43 @@ export async function saveSessionMessagesStep(
 
   const title =
     session.title === "New Project"
-      ? deriveSessionTitle(mergedMessages) ?? session.title
+      ? (deriveSessionTitle(mergedMessages) ?? session.title)
       : session.title;
 
-  await appendMessages(sessionId, mergedMessages);
+  await replaceMessages(sessionId, mergedMessages);
   if (title !== session.title) {
     await updateSession(sessionId, { title });
   }
 
+  await updateSession(sessionId, {
+    runStatus: "completed",
+    lastRunId: null,
+  });
+
   return { messageCount: mergedMessages.length };
+}
+
+export async function markSessionRunFailedStep(sessionId: string) {
+  "use step";
+
+  const { updateSession } = await import("@/lib/session/store");
+  await updateSession(sessionId, {
+    runStatus: "failed",
+    lastRunId: null,
+  });
+}
+
+/** Close the agent writable stream — must run as a step inside workflows. */
+export async function closeAgentWritableStep(
+  writable: WritableStream<import("@ai-sdk/workflow").ModelCallStreamPart>,
+) {
+  "use step";
+
+  const writer = writable.getWriter();
+  try {
+    await writer.write({ type: "finish" });
+  } finally {
+    writer.releaseLock();
+  }
+  await writable.close();
 }

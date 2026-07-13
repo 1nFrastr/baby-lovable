@@ -266,8 +266,11 @@ async function seedWorkspaceFromTemplate(workspaceRoot: string): Promise<void> {
   });
 }
 
-export async function ensureWorkspace(sessionId: string): Promise<string> {
-  const workspaceRoot = getWorkspaceRoot(sessionId);
+export async function ensureWorkspace(
+  sessionId: string,
+  userId: string | null = null,
+): Promise<string> {
+  const workspaceRoot = getWorkspaceRoot(sessionId, userId);
 
   if (await isWorkspaceEmpty(workspaceRoot)) {
     await fs.mkdir(path.dirname(workspaceRoot), { recursive: true });

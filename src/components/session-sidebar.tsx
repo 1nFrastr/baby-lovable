@@ -1,6 +1,7 @@
 "use client";
 
 import type { SessionSummary } from "@/lib/session/types";
+import { isActiveRunStatus } from "@/lib/session/types";
 
 interface SessionSidebarProps {
   sessions: SessionSummary[];
@@ -75,6 +76,9 @@ export function SessionSidebar({
                 >
                   <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     {session.title}
+                    {isActiveRunStatus(session.runStatus) ? (
+                      <span className="ml-2 inline-block h-2 w-2 rounded-full bg-blue-500 align-middle" />
+                    ) : null}
                   </p>
                   <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
                     {session.id}

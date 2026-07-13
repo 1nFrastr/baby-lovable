@@ -11,7 +11,7 @@ loadEnv({ path: ".env", quiet: true });
 import { generateId, type UIMessage } from "ai";
 
 import {
-  appendMessages,
+  replaceMessages,
   createSession,
   deriveSessionTitle,
   getSession,
@@ -24,6 +24,7 @@ import type { SandboxMode } from "@/lib/sandbox/types";
 
 import { logger } from "./logger";
 import { runAgentTurn } from "./run-agent";
+import { printResumeTestResult, runResumeStreamTest } from "./test-resume";
 
 interface CliArgs {
   prompt?: string;
@@ -32,6 +33,7 @@ interface CliArgs {
   maxSteps: number;
   list: boolean;
   help: boolean;
+  testResume: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -40,6 +42,7 @@ function parseArgs(argv: string[]): CliArgs {
     maxSteps: 30,
     list: false,
     help: false,
+    testResume: false,
   };
   const positional: string[] = [];
 
@@ -68,6 +71,9 @@ function parseArgs(argv: string[]): CliArgs {
       case "--help":
         args.help = true;
         break;
+      case "--test-resume":
+        args.testResume = true;
+        break;
       default:
         if (!arg.startsWith("-")) {
           positional.push(arg);
@@ -94,7 +100,8 @@ function printHelp(): void {
       `      --sandbox <mode>   Sandbox mode: local (default) | daytona\n` +
       `      --max-steps <n>    Max agent steps per turn (default: 30)\n` +
       `  -l, --list             List existing sessions and exit\n` +
-      `  -h, --help             Show this help\n\n` +
+      `  -h, --help             Show this help\n` +
+      `      --test-resume      Run headless stream-resume test and exit\n\n` +
       `Examples:\n` +
       `  npm run agent -- -p "创建一个待办事项应用"\n` +
       `  npm run agent -- --session sess_abc123 -p "给标题加上渐变色"\n` +
@@ -166,7 +173,7 @@ async function runTurn(
     ? [...messages, assistantMessage]
     : messages;
 
-  await appendMessages(session.id, mergedMessages);
+  await replaceMessages(session.id, mergedMessages);
 
   if (session.title === "New Project") {
     const title = deriveSessionTitle(mergedMessages);
@@ -223,6 +230,16 @@ async function main(): Promise<void> {
   }
 
   requireGatewayKey();
+
+  if (args.testResume) {
+    logger.banner(["baby-lovable agent · resume test"]);
+    const result = await runResumeStreamTest();
+    await printResumeTestResult(result);
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   const session = await resolveSession(args);
   const workspace = path.relative(process.cwd(), getWorkspaceRoot(session.id));
