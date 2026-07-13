@@ -221,7 +221,7 @@ export const builderTools = {
         .number()
         .optional()
         .describe(
-          "Ms to wait after Live View is ready before automation (default 0 for agent). Use only if a human needs time to open Live View.",
+          "Ms to wait after Live View is ready before automation (default 2000 so the UI PiP can open). Increase if a human needs more time.",
         ),
     }),
     contextSchema: toolContextSchema,

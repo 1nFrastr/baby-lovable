@@ -11,6 +11,7 @@ import {
   useSessionsQuery,
   useSyncSessionSummary,
 } from "@/lib/session/queries";
+import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 
 import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
@@ -29,6 +30,9 @@ export function AppShell() {
   const invalidateSessionDetail = useInvalidateSessionDetail();
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActivatingSession, setIsActivatingSession] = useState(false);
+  const [chatAppTest, setChatAppTest] = useState<AppTestLatestStatus | null>(
+    null,
+  );
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const sandboxMode = sessionsQuery.data?.features.sandboxMode ?? "local";
@@ -38,6 +42,10 @@ export function AppShell() {
 
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
+
+  useEffect(() => {
+    setChatAppTest(null);
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -181,12 +189,14 @@ export function AppShell() {
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                   }}
+                  onAppTestStatus={setChatAppTest}
                 />
               </div>
               <PreviewPanel
                 key={activeSessionId}
                 sessionId={activeSessionId}
                 sandboxMode={activeSession.sandboxMode}
+                chatAppTest={chatAppTest}
               />
             </div>
           )}

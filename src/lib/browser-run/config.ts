@@ -34,13 +34,10 @@ export function browserRunConfigured(): boolean {
 }
 
 /**
- * Whether to write screenshots / report.json / latest-status to disk.
+ * Whether to write screenshots / report.json / monitor.html to disk.
+ * Local CLI debugging only. Live View PiP uses in-memory + Daytona FS status.
  *
- * These are for local CLI/debug (`npm run test:app-preview`). Agent
- * `testPreview` only needs the in-memory report; on Vercel the deploy FS is
- * read-only and `/tmp` is not shared across invocations, so disk artifacts
- * are useless there.
- *
+ * Do NOT key off bare `VERCEL=1`: `vercel env pull` sets that in `.env.local`.
  * Override: `BABY_LOVABLE_APP_TEST_ARTIFACTS=0|1`
  */
 export function shouldPersistAppTestArtifacts(): boolean {
@@ -51,5 +48,8 @@ export function shouldPersistAppTestArtifacts(): boolean {
   if (raw === "1" || raw === "true") {
     return true;
   }
-  return !(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  return !(
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.cwd() === "/var/task"
+  );
 }

@@ -9,6 +9,7 @@ import {
   formatToolPartLabel,
   formatToolPartOutput,
 } from "@/lib/chat/format-tool-label";
+import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
   hasAssistantParts,
   mergeDisplayMessages,
@@ -30,6 +31,10 @@ interface ChatProps {
   runStatus?: SessionRunStatus;
   sandboxMode?: SandboxMode;
   onSessionRefresh?: () => void;
+  /** Live View URL / running state from streamed testPreview tool output. */
+  onAppTestStatus?: (
+    status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
+  ) => void;
 }
 
 export function Chat({
@@ -39,6 +44,7 @@ export function Chat({
   runStatus = "idle",
   sandboxMode = "local",
   onSessionRefresh,
+  onAppTestStatus,
 }: ChatProps) {
   const [appTestingEnabled, setAppTestingEnabled] = useState(false);
 
@@ -78,6 +84,13 @@ export function Chat({
     () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
     [messages, chatMessages, draft, isLiveTurn],
   );
+
+  useEffect(() => {
+    if (!onAppTestStatus) {
+      return;
+    }
+    onAppTestStatus(extractAppTestStatusFromMessages(displayMessages));
+  }, [displayMessages, onAppTestStatus]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);

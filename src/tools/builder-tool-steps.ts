@@ -448,6 +448,7 @@ export async function testPreviewStep(
       usedScriptedActions: false,
       failedSteps: [] as Array<{ name: string; detail?: string }>,
       durationMs: 0,
+      liveViewUrl: undefined as string | undefined,
       liveViewLogged: false,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -455,8 +456,8 @@ export async function testPreviewStep(
 
   const report = await runAppTest({
     sessionId: context.sessionId,
-    // Prefer short hold in agent turns; humans monitoring via CLI can pass holdMs.
-    holdMs: input.holdMs ?? 0,
+    // Default hold so Web UI can poll Live View URL (Daytona-backed status).
+    holdMs: input.holdMs ?? 2_000,
     actions,
   });
 
@@ -465,7 +466,6 @@ export async function testPreviewStep(
     .slice(0, 8)
     .map((s) => ({ name: s.name, detail: s.detail }));
 
-  // Short payload for the model — full Live View URL is logged by runAppTest.
   return {
     ok: report.ok,
     summary: report.summary,
@@ -477,7 +477,7 @@ export async function testPreviewStep(
     failedSteps,
     artifactDir: report.artifactDir,
     durationMs: report.durationMs,
-    /** Present for CLI grepping via agent-trace; keep short in chat. */
+    liveViewUrl: report.liveViewUrl,
     liveViewLogged: Boolean(report.liveViewUrl),
     error: report.error,
   };

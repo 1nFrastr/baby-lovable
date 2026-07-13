@@ -1,10 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-
-import { getSessionRoot } from "@/lib/sandbox/paths";
 import type { UserId } from "@/lib/session/types";
 
-import { shouldPersistAppTestArtifacts } from "./config";
 import type { AppTestAction, AppTestReport } from "./types";
 
 export type AppTestRunStatus = "idle" | "running" | "done" | "error";
@@ -22,48 +17,99 @@ export interface AppTestLatestStatus {
   usedScriptedActions?: boolean;
 }
 
+/** Shared across Vercel isolates via Daytona sandbox FS (app test requires daytona). */
+const REMOTE_STATUS_PATH = ".runtime/app-test-latest-status.json";
+
 const runningBySession = new Map<string, Promise<AppTestReport>>();
 const runLocks = new Set<string>();
+/** Same-process fast path (local next dev / sticky instance). */
+const latestStatusBySession = new Map<string, AppTestLatestStatus>();
 
-export function resolveLatestStatusPath(
+function statusCacheKey(sessionId: string, userId: UserId = null): string {
+  return `${userId ?? "_"}:${sessionId}`;
+}
+
+async function writeRemoteStatus(
   sessionId: string,
-  userId: UserId = null,
-): string {
-  return path.join(
-    getSessionRoot(sessionId, userId),
-    "app-tests",
-    "latest-status.json",
-  );
+  status: AppTestLatestStatus,
+): Promise<void> {
+  try {
+    const { getSession } = await import("@/lib/session/store");
+    const session = await getSession(sessionId);
+    if (!session || session.sandboxMode !== "daytona") {
+      return;
+    }
+    const { getOrCreateDaytonaSandbox } = await import(
+      "@/lib/sandbox/daytona/sandbox-manager"
+    );
+    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+    try {
+      await sandbox.fs.createFolder(".runtime");
+    } catch {
+      // exists
+    }
+    await sandbox.fs.writeTextFile(
+      REMOTE_STATUS_PATH,
+      `${JSON.stringify(status)}\n`,
+    );
+  } catch {
+    // Best effort — memory still helps same-process polls.
+  }
+}
+
+async function readRemoteStatus(
+  sessionId: string,
+): Promise<AppTestLatestStatus | null> {
+  try {
+    const { getSession } = await import("@/lib/session/store");
+    const session = await getSession(sessionId);
+    if (!session || session.sandboxMode !== "daytona") {
+      return null;
+    }
+    const { getOrCreateDaytonaSandbox } = await import(
+      "@/lib/sandbox/daytona/sandbox-manager"
+    );
+    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+    const raw = await sandbox.fs.readTextFile(REMOTE_STATUS_PATH);
+    const parsed = JSON.parse(raw) as AppTestLatestStatus;
+    if (!parsed || typeof parsed !== "object" || !parsed.status) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export async function readLatestAppTestStatus(
   sessionId: string,
   userId: UserId = null,
 ): Promise<AppTestLatestStatus> {
-  const filePath = resolveLatestStatusPath(sessionId, userId);
-  try {
-    const raw = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as AppTestLatestStatus;
-    if (!parsed || typeof parsed !== "object" || !parsed.status) {
-      return { status: "idle" };
-    }
-    return parsed;
-  } catch {
-    return { status: "idle" };
+  const cached = latestStatusBySession.get(statusCacheKey(sessionId, userId));
+  if (cached && (cached.status === "running" || cached.liveViewUrl)) {
+    return cached;
   }
+
+  const remote = await readRemoteStatus(sessionId);
+  if (remote) {
+    latestStatusBySession.set(statusCacheKey(sessionId, userId), remote);
+    return remote;
+  }
+
+  return cached ?? { status: "idle" };
 }
 
+/**
+ * Publish Live View / run status for the Web UI poller.
+ * Memory (same process) + Daytona FS (serverless / cross-instance).
+ */
 export async function writeLatestAppTestStatus(
   sessionId: string,
   status: AppTestLatestStatus,
   userId: UserId = null,
 ): Promise<void> {
-  if (!shouldPersistAppTestArtifacts()) {
-    return;
-  }
-  const filePath = resolveLatestStatusPath(sessionId, userId);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
+  latestStatusBySession.set(statusCacheKey(sessionId, userId), status);
+  await writeRemoteStatus(sessionId, status);
 }
 
 export function isAppTestRunning(sessionId: string): boolean {
@@ -146,9 +192,8 @@ export async function startBackgroundAppTest(options: {
 
   trackAppTestRun(options.sessionId, promise);
 
-  // Don't await — caller returns immediately; status file is updated by runner.
   void promise.catch(() => {
-    // Errors are persisted via writeLatestAppTestStatus in runAppTest.
+    // Errors are published via writeLatestAppTestStatus in runAppTest.
   });
 
   return { started: true };

@@ -22,6 +22,8 @@ interface AppTestLatestStatus {
 interface PreviewPanelProps {
   sessionId: string;
   sandboxMode?: SandboxMode;
+  /** Live View from streamed testPreview tool output (agent path). */
+  chatAppTest?: AppTestLatestStatus | null;
 }
 
 const POLL_MS_READY = 15_000;
@@ -35,17 +37,31 @@ function pollDelay(status: PreviewStatus["status"]): number {
 export function PreviewPanel({
   sessionId,
   sandboxMode = "local",
+  chatAppTest = null,
 }: PreviewPanelProps) {
   const [preview, setPreview] = useState<PreviewStatus>({ status: "stopped" });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [appTest, setAppTest] = useState<AppTestLatestStatus>({
+  const [polledAppTest, setPolledAppTest] = useState<AppTestLatestStatus>({
     status: "idle",
   });
   const [appTestStarting, setAppTestStarting] = useState(false);
   const [appTestError, setAppTestError] = useState<string | null>(null);
   const [pipDismissed, setPipDismissed] = useState(false);
   const previewRef = useRef(preview);
+
+  const appTest: AppTestLatestStatus =
+    chatAppTest?.liveViewUrl || chatAppTest?.status === "running"
+      ? {
+          ...polledAppTest,
+          ...chatAppTest,
+          liveViewUrl: chatAppTest.liveViewUrl ?? polledAppTest.liveViewUrl,
+          status:
+            chatAppTest.status === "running" || polledAppTest.status === "running"
+              ? "running"
+              : (chatAppTest.status ?? polledAppTest.status),
+        }
+      : polledAppTest;
 
   useEffect(() => {
     previewRef.current = preview;
@@ -82,7 +98,7 @@ export function PreviewPanel({
       const data = (await response.json()) as AppTestLatestStatus & {
         error?: string;
       };
-      setAppTest({
+      setPolledAppTest({
         status: data.status ?? "idle",
         runId: data.runId,
         liveViewUrl: data.liveViewUrl,
@@ -235,7 +251,7 @@ export function PreviewPanel({
       if (!response.ok) {
         throw new Error(data?.error ?? `App test failed (${response.status})`);
       }
-      setAppTest((prev) => ({
+      setPolledAppTest((prev) => ({
         ...prev,
         status: "running",
         runId: data?.runId ?? prev.runId,
