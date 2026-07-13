@@ -24,6 +24,8 @@ interface PreviewPanelProps {
   sandboxMode?: SandboxMode;
   /** Live View from streamed testPreview tool output (agent path). */
   chatAppTest?: AppTestLatestStatus | null;
+  /** True after Chat has reported an extract for this session (including none). */
+  chatAppTestReady?: boolean;
 }
 
 const POLL_MS_READY = 15_000;
@@ -75,6 +77,7 @@ export function PreviewPanel({
   sessionId,
   sandboxMode = "local",
   chatAppTest = null,
+  chatAppTestReady = false,
 }: PreviewPanelProps) {
   const [preview, setPreview] = useState<PreviewStatus>({ status: "stopped" });
   const [exporting, setExporting] = useState(false);
@@ -82,11 +85,17 @@ export function PreviewPanel({
   const [polledAppTest, setPolledAppTest] = useState<AppTestLatestStatus>({
     status: "idle",
   });
+  /** PiP only opens for a live chat-driven run — never on hydrate/refresh. */
+  const [pipOpen, setPipOpen] = useState(false);
   const [pipDismissed, setPipDismissed] = useState(false);
   const [pipHoldUntil, setPipHoldUntil] = useState(0);
   const [pipHoldTick, setPipHoldTick] = useState(0);
   const previewRef = useRef(preview);
   const appTestPollBusyRef = useRef(false);
+  const pipHydratedRef = useRef(false);
+  const prevChatStatusRef = useRef<AppTestLatestStatus["status"] | null>(null);
+  const pendingPipOpenRef = useRef(false);
+  const lastPipRunIdRef = useRef<string | undefined>(undefined);
 
   const appTest = mergeChatAndPolledAppTest(polledAppTest, chatAppTest);
   appTestPollBusyRef.current =
@@ -96,18 +105,71 @@ export function PreviewPanel({
     previewRef.current = preview;
   }, [preview]);
 
+  // Open Live View only when the chat stream transitions into a running
+  // testPreview after Chat has hydrated history. Refresh / session switch
+  // must not pop the PiP for past or in-flight rehydrated runs.
   useEffect(() => {
-    setPipDismissed(false);
-  }, [appTest.runId, appTest.liveViewUrl]);
+    if (!chatAppTestReady) {
+      return;
+    }
 
-  useEffect(() => {
+    const chatStatus = chatAppTest?.status ?? "idle";
+    const prevChatStatus = prevChatStatusRef.current;
+    const liveViewUrl = appTest.liveViewUrl ?? chatAppTest?.liveViewUrl;
+
+    if (!pipHydratedRef.current) {
+      pipHydratedRef.current = true;
+      prevChatStatusRef.current = chatStatus;
+      lastPipRunIdRef.current = appTest.runId ?? chatAppTest?.runId;
+      return;
+    }
+
+    const runId = appTest.runId ?? chatAppTest?.runId;
+    if (runId && runId !== lastPipRunIdRef.current) {
+      lastPipRunIdRef.current = runId;
+      setPipDismissed(false);
+    }
+
+    if (chatStatus === "running" && prevChatStatus !== "running") {
+      pendingPipOpenRef.current = true;
+      setPipDismissed(false);
+    }
+
     if (
-      (appTest.status === "done" || appTest.status === "error") &&
-      appTest.liveViewUrl
+      pendingPipOpenRef.current &&
+      chatStatus === "running" &&
+      liveViewUrl &&
+      !pipDismissed
+    ) {
+      pendingPipOpenRef.current = false;
+      setPipOpen(true);
+    }
+
+    if (
+      (chatStatus === "done" || chatStatus === "error") &&
+      prevChatStatus === "running" &&
+      pipOpen &&
+      !pipDismissed &&
+      liveViewUrl
     ) {
       setPipHoldUntil(Date.now() + PIP_HOLD_AFTER_DONE_MS);
     }
-  }, [appTest.status, appTest.liveViewUrl, appTest.runId]);
+
+    if (chatStatus === "idle") {
+      pendingPipOpenRef.current = false;
+      setPipOpen(false);
+      setPipHoldUntil(0);
+    }
+
+    prevChatStatusRef.current = chatStatus;
+  }, [
+    chatAppTestReady,
+    chatAppTest,
+    appTest.liveViewUrl,
+    appTest.runId,
+    pipOpen,
+    pipDismissed,
+  ]);
 
   useEffect(() => {
     if (pipHoldUntil <= Date.now()) {
@@ -115,6 +177,9 @@ export function PreviewPanel({
     }
     const timeoutId = window.setTimeout(() => {
       setPipHoldTick((n) => n + 1);
+      if (Date.now() >= pipHoldUntil) {
+        setPipOpen(false);
+      }
     }, pipHoldUntil - Date.now() + 50);
     return () => window.clearTimeout(timeoutId);
   }, [pipHoldUntil, pipHoldTick]);
@@ -282,6 +347,7 @@ export function PreviewPanel({
   const showPip =
     sandboxMode === "daytona" &&
     Boolean(appTest.liveViewUrl) &&
+    pipOpen &&
     (appTest.status === "running" || pipHoldActive) &&
     !pipDismissed;
   const lastSummary =
@@ -447,7 +513,12 @@ export function PreviewPanel({
                 </a>
                 <button
                   type="button"
-                  onClick={() => setPipDismissed(true)}
+                  onClick={() => {
+                    setPipDismissed(true);
+                    setPipOpen(false);
+                    setPipHoldUntil(0);
+                    pendingPipOpenRef.current = false;
+                  }}
                   className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   aria-label="Close Live View"
                 >

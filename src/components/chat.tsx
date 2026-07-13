@@ -20,7 +20,7 @@ import type { SandboxMode } from "@/lib/sandbox/types";
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
 
 /** Sent when the user clicks Auto Test in the composer. */
-const APP_TEST_USER_PROMPT = "帮我测试一下应用的主要功能";
+const APP_TEST_USER_PROMPT = "Please run a quick happy-path UI test of the main flow.";
 
 interface ChatProps {
   sessionId: string;
@@ -263,7 +263,7 @@ export function Chat({
             type="button"
             onClick={handleRunAppTest}
             disabled={isLiveTurn}
-            title="发送一条消息，让 agent 自动跑一遍主流程测试"
+            title="Send a message asking the agent to run a happy-path UI test"
             className="absolute bottom-4 right-4 z-10 rounded-full border border-zinc-200 bg-white/95 px-3.5 py-2 text-xs font-medium text-zinc-700 shadow-md backdrop-blur transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
             Auto Test

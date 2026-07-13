@@ -31,9 +31,9 @@ export function getDaytonaIdleMinutes(): number {
  * Prebuilt snapshot with starter + pnpm + node_modules.
  * Empty string disables snapshot (falls back to runtime seed).
  * Build with: `npm run build:daytona-snapshot`
- * Default resources: 1 vCPU / 1 GiB / 3 GiB (lean for Tier 1 disk quota).
+ * Default resources: 1 vCPU / 2 GiB / 3 GiB (enough for next-server + pnpm add).
  */
-export const DAYTONA_DEFAULT_SNAPSHOT = "baby-lovable-nextjs-starter-3g";
+export const DAYTONA_DEFAULT_SNAPSHOT = "baby-lovable-nextjs-starter-2g";
 
 export function getDaytonaSnapshotName(): string | null {
   if (process.env.DAYTONA_SNAPSHOT === "") {

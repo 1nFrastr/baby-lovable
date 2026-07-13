@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   useCreateSessionMutation,
@@ -33,6 +33,8 @@ export function AppShell() {
   const [chatAppTest, setChatAppTest] = useState<AppTestLatestStatus | null>(
     null,
   );
+  /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
+  const [chatAppTestReady, setChatAppTestReady] = useState(false);
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const sandboxMode = sessionsQuery.data?.features.sandboxMode ?? "local";
@@ -45,7 +47,16 @@ export function AppShell() {
 
   useEffect(() => {
     setChatAppTest(null);
+    setChatAppTestReady(false);
   }, [activeSessionId]);
+
+  const handleAppTestStatus = useCallback(
+    (status: AppTestLatestStatus | null) => {
+      setChatAppTest(status);
+      setChatAppTestReady(true);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -189,7 +200,7 @@ export function AppShell() {
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                   }}
-                  onAppTestStatus={setChatAppTest}
+                  onAppTestStatus={handleAppTestStatus}
                 />
               </div>
               <PreviewPanel
@@ -197,6 +208,7 @@ export function AppShell() {
                 sessionId={activeSessionId}
                 sandboxMode={activeSession.sandboxMode}
                 chatAppTest={chatAppTest}
+                chatAppTestReady={chatAppTestReady}
               />
             </div>
           )}
