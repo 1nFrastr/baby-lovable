@@ -4,6 +4,7 @@ import { logDaytonaBootstrap } from "./daytona/bootstrap-log";
 import { getDaytonaDevPort, DAYTONA_WORKSPACE_ROOT } from "./daytona/config";
 import {
   destroyDaytonaSandbox,
+  dropManagedSandboxCache,
   getManagedDaytonaSdkSandbox,
   getOrCreateDaytonaSandbox,
 } from "./daytona/sandbox-manager";
@@ -42,9 +43,21 @@ const daytonaStates = new Map<string, DaytonaPreviewState>();
 const daytonaBootstrapPromises = new Map<string, Promise<void>>();
 const daytonaBuildErrors = new Map<string, string>();
 const daytonaDevLogs = new Map<string, string>();
+/** Bumped when preview memory is cleared so in-flight bootstraps cannot clobber newer state. */
+const daytonaBootstrapEpoch = new Map<string, number>();
 
 export function getDaytonaBuildError(sessionId: string): string | null {
   return daytonaBuildErrors.get(sessionId) ?? null;
+}
+
+function bumpBootstrapEpoch(sessionId: string): number {
+  const next = (daytonaBootstrapEpoch.get(sessionId) ?? 0) + 1;
+  daytonaBootstrapEpoch.set(sessionId, next);
+  return next;
+}
+
+function isBootstrapCurrent(sessionId: string, epoch: number): boolean {
+  return (daytonaBootstrapEpoch.get(sessionId) ?? 0) === epoch;
 }
 
 /**
@@ -53,12 +66,14 @@ export function getDaytonaBuildError(sessionId: string): string | null {
  */
 export function clearDaytonaPreviewMemory(sessionId?: string): void {
   if (sessionId) {
+    bumpBootstrapEpoch(sessionId);
     daytonaStates.delete(sessionId);
     daytonaBootstrapPromises.delete(sessionId);
     daytonaBuildErrors.delete(sessionId);
     daytonaDevLogs.delete(sessionId);
     return;
   }
+  daytonaBootstrapEpoch.clear();
   daytonaStates.clear();
   daytonaBootstrapPromises.clear();
   daytonaBuildErrors.clear();
@@ -217,8 +232,19 @@ async function runRemoteInstall(sessionId: string): Promise<boolean> {
   return hasRemoteNodeModules(sessionId);
 }
 
-async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
+async function startRemoteDevServer(
+  sessionId: string,
+  epoch: number,
+): Promise<PreviewStatus> {
+  if (!isBootstrapCurrent(sessionId, epoch)) {
+    return { status: "stopped" };
+  }
+
   const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+  if (!isBootstrapCurrent(sessionId, epoch)) {
+    return { status: "stopped" };
+  }
+
   const sdkSandbox = sandbox.sdkSandbox;
   const port = getDevPort();
   const pm = resolvePackageManager("daytona");
@@ -227,7 +253,7 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
   logDaytonaBootstrap(
     sessionId,
     "preview",
-    `starting dev server on port ${port} (${pm.dev(port)})`,
+    `starting dev server on port ${port} (${pm.dev(port)}) sandbox=${sdkSandbox.id}`,
   );
 
   daytonaStates.set(sessionId, {
@@ -258,6 +284,10 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
 
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
+    if (!isBootstrapCurrent(sessionId, epoch)) {
+      return { status: "stopped" };
+    }
+
     try {
       const preview = await sdkSandbox.getPreviewLink(port);
       const probe = await fetch(preview.url, {
@@ -266,6 +296,10 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
       });
 
       if (probe.status < 600) {
+        if (!isBootstrapCurrent(sessionId, epoch)) {
+          return { status: "stopped" };
+        }
+
         let embedUrl: string | undefined;
         let embedUrlExpiresAt: number | undefined;
         try {
@@ -288,7 +322,11 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
           port,
           devSessionId,
         });
-        logDaytonaBootstrap(sessionId, "preview", `ready ${preview.url}`);
+        logDaytonaBootstrap(
+          sessionId,
+          "preview",
+          `ready ${preview.url} sandbox=${sdkSandbox.id}`,
+        );
         return { status: "ready", url: embedUrl ?? preview.url, port };
       }
     } catch {
@@ -315,6 +353,10 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
 
+  if (!isBootstrapCurrent(sessionId, epoch)) {
+    return { status: "stopped" };
+  }
+
   const error = "Timed out waiting for Daytona preview to become ready";
   logDaytonaBootstrap(sessionId, "preview", error);
   daytonaStates.set(sessionId, {
@@ -326,9 +368,19 @@ async function startRemoteDevServer(sessionId: string): Promise<PreviewStatus> {
   return { status: "error", error };
 }
 
-async function bootstrapDaytonaPreview(sessionId: string): Promise<void> {
+async function bootstrapDaytonaPreview(
+  sessionId: string,
+  epoch: number,
+): Promise<void> {
+  if (!isBootstrapCurrent(sessionId, epoch)) {
+    return;
+  }
+
   logDaytonaBootstrap(sessionId, "preview", "bootstrap started");
   if (!(await hasRemotePackageJson(sessionId))) {
+    if (!isBootstrapCurrent(sessionId, epoch)) {
+      return;
+    }
     logDaytonaBootstrap(sessionId, "preview", "waiting for package.json in workspace");
     daytonaStates.set(sessionId, {
       status: "needs_install",
@@ -339,6 +391,9 @@ async function bootstrapDaytonaPreview(sessionId: string): Promise<void> {
   }
 
   if (!(await hasRemoteNodeModules(sessionId))) {
+    if (!isBootstrapCurrent(sessionId, epoch)) {
+      return;
+    }
     logDaytonaBootstrap(sessionId, "preview", "node_modules missing — installing");
     daytonaStates.set(sessionId, {
       status: "installing",
@@ -353,7 +408,7 @@ async function bootstrapDaytonaPreview(sessionId: string): Promise<void> {
     logDaytonaBootstrap(sessionId, "preview", "node_modules present — skipping install");
   }
 
-  await startRemoteDevServer(sessionId);
+  await startRemoteDevServer(sessionId, epoch);
 }
 
 const DAYTONA_BOOTSTRAP_WAIT_MS = 300_000;
@@ -377,13 +432,22 @@ function kickOffDaytonaBootstrap(sessionId: string): void {
     return;
   }
 
-  logDaytonaBootstrap(sessionId, "preview", "background bootstrap queued");
-  const promise = bootstrapDaytonaPreview(sessionId)
+  const epoch = daytonaBootstrapEpoch.get(sessionId) ?? bumpBootstrapEpoch(sessionId);
+  logDaytonaBootstrap(
+    sessionId,
+    "preview",
+    `background bootstrap queued (epoch=${epoch})`,
+  );
+  const promise = bootstrapDaytonaPreview(sessionId, epoch)
     .catch((error) => {
-      setDaytonaPreviewError(sessionId, error);
+      if (isBootstrapCurrent(sessionId, epoch)) {
+        setDaytonaPreviewError(sessionId, error);
+      }
     })
     .finally(() => {
-      daytonaBootstrapPromises.delete(sessionId);
+      if (daytonaBootstrapPromises.get(sessionId) === promise) {
+        daytonaBootstrapPromises.delete(sessionId);
+      }
     });
   daytonaBootstrapPromises.set(sessionId, promise);
 }
@@ -404,10 +468,7 @@ export async function stopDaytonaDevServer(sessionId: string): Promise<void> {
     }
   }
 
-  daytonaStates.delete(sessionId);
-  daytonaBootstrapPromises.delete(sessionId);
-  daytonaBuildErrors.delete(sessionId);
-  daytonaDevLogs.delete(sessionId);
+  clearDaytonaPreviewMemory(sessionId);
 }
 
 export async function restartDaytonaDevServer(
@@ -423,7 +484,8 @@ export async function restartDaytonaDevServer(
       // Best effort cache clear on local workspace.
     }
 
-    return await startRemoteDevServer(sessionId);
+    const epoch = bumpBootstrapEpoch(sessionId);
+    return await startRemoteDevServer(sessionId, epoch);
   } catch (error) {
     setDaytonaPreviewError(sessionId, error);
     return {
@@ -487,6 +549,60 @@ async function withFreshEmbedUrl(
   return { status: "ready", url: embedUrl, port: state.port };
 }
 
+/** Extract Daytona sandbox id from `https://3000-{id}.daytonaproxy….net`. */
+function sandboxIdFromPreviewUrl(url: string): string | null {
+  try {
+    const host = new URL(url).hostname;
+    const match = host.match(/^\d+-([a-z0-9]+)\./i);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * If another isolate claimed a different sandbox, drop stale preview memory
+ * so the next bootstrap targets the authoritative id.
+ */
+async function invalidatePreviewIfSandboxDrifted(
+  sessionId: string,
+): Promise<boolean> {
+  const state = daytonaStates.get(sessionId);
+  if (!state || state.status !== "ready" || !state.url) {
+    return false;
+  }
+
+  try {
+    const { getSession } = await import("@/lib/session/store");
+    const session = await getSession(sessionId);
+    const authoritativeId = session?.daytonaSandboxId;
+    if (!authoritativeId) {
+      return false;
+    }
+
+    const managedId = getManagedDaytonaSdkSandbox(sessionId)?.id;
+    const urlId = sandboxIdFromPreviewUrl(state.url);
+    const drifted =
+      (managedId && managedId !== authoritativeId) ||
+      (urlId && urlId !== authoritativeId);
+
+    if (!drifted) {
+      return false;
+    }
+
+    logDaytonaBootstrap(
+      sessionId,
+      "preview",
+      `sandbox drift detected (url=${urlId ?? "?"}, managed=${managedId ?? "?"}, session=${authoritativeId}) — clearing preview memory`,
+    );
+    dropManagedSandboxCache(sessionId);
+    clearDaytonaPreviewMemory(sessionId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveDaytonaPreviewStatus(
   sessionId: string,
   options?: { wait?: boolean },
@@ -503,6 +619,11 @@ export async function resolveDaytonaPreviewStatus(
     }
   } catch {
     // config is always available in host app; ignore if tree-shaken oddly
+  }
+
+  if (await invalidatePreviewIfSandboxDrifted(sessionId)) {
+    // Force getOrCreate to drop stale managed cache and reconnect.
+    kickOffDaytonaBootstrap(sessionId);
   }
 
   let current = getDaytonaPreviewStatus(sessionId);

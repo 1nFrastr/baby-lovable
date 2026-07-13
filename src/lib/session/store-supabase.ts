@@ -275,3 +275,55 @@ export async function replaceMessagesSupabase(
 ): Promise<Session> {
   return updateSessionSupabase(sessionId, { messages }, auth);
 }
+
+/**
+ * Atomically claim `daytona_sandbox_id` when it is still null.
+ * Returns the id that won (ours if claimed, or whoever wrote first).
+ */
+export async function claimDaytonaSandboxIdSupabase(
+  sessionId: string,
+  sandboxId: string,
+  auth: SessionAuthContext = { userId: null },
+): Promise<{ claimed: boolean; daytonaSandboxId: string | null }> {
+  const existing = await getSessionSupabase(sessionId, auth);
+  if (!existing) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  if (existing.daytonaSandboxId === sandboxId) {
+    return { claimed: true, daytonaSandboxId: sandboxId };
+  }
+  if (existing.daytonaSandboxId) {
+    return {
+      claimed: false,
+      daytonaSandboxId: existing.daytonaSandboxId,
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const updatedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("sessions")
+    .update({
+      daytona_sandbox_id: sandboxId,
+      updated_at: updatedAt,
+    })
+    .eq("id", sessionId)
+    .is("daytona_sandbox_id", null)
+    .select("daytona_sandbox_id")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to claim daytona sandbox id: ${error.message}`);
+  }
+
+  if (data?.daytona_sandbox_id === sandboxId) {
+    return { claimed: true, daytonaSandboxId: sandboxId };
+  }
+
+  const fresh = await getSessionSupabase(sessionId, auth);
+  return {
+    claimed: fresh?.daytonaSandboxId === sandboxId,
+    daytonaSandboxId: fresh?.daytonaSandboxId ?? null,
+  };
+}
