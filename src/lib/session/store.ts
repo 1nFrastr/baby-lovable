@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isLocalFileStorageMode } from "@/lib/supabase/config";
 import { getSessionRoot } from "@/lib/sandbox/paths";
 
 import {
@@ -31,7 +31,7 @@ export async function createSession(
   input: CreateSessionInput = {},
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return createSessionSupabase(input, auth);
   }
   return createSessionLocal(input, auth);
@@ -41,7 +41,7 @@ export async function getSession(
   sessionId: string,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session | null> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return getSessionSupabase(sessionId, auth);
   }
   return getSessionLocal(sessionId, auth);
@@ -50,7 +50,7 @@ export async function getSession(
 export async function listSessions(
   auth: SessionAuthContext = { userId: null },
 ): Promise<SessionSummary[]> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return listSessionsSupabase(auth);
   }
   return listSessionsLocal(auth);
@@ -61,7 +61,7 @@ export async function updateSession(
   input: UpdateSessionInput,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return updateSessionSupabase(sessionId, input, auth);
   }
   return updateSessionLocal(sessionId, input, auth);
@@ -72,7 +72,7 @@ export async function replaceMessages(
   messages: UIMessage[],
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return replaceMessagesSupabase(sessionId, messages, auth);
   }
   return replaceMessagesLocal(sessionId, messages, auth);

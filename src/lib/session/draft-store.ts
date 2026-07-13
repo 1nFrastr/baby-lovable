@@ -1,4 +1,4 @@
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isLocalFileStorageMode } from "@/lib/supabase/config";
 
 import {
   createEmptyDraft,
@@ -20,7 +20,7 @@ export async function readDraft(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionDraft | null> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return readDraftSupabase(sessionId);
   }
   return readDraftLocal(sessionId, userId);
@@ -31,7 +31,7 @@ export async function writeDraft(
   draft: SessionDraft,
   userId: string | null = null,
 ): Promise<void> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return writeDraftSupabase(sessionId, draft, userId);
   }
   return writeDraftLocal(sessionId, draft, userId);
@@ -41,7 +41,7 @@ export async function deleteDraft(
   sessionId: string,
   userId: string | null = null,
 ): Promise<void> {
-  if (isSupabaseConfigured()) {
+  if (!isLocalFileStorageMode()) {
     return deleteDraftSupabase(sessionId);
   }
   return deleteDraftLocal(sessionId, userId);

@@ -1,5 +1,8 @@
 import type { UserId } from "./types";
-import { getDevUserId, isSupabaseConfigured } from "@/lib/supabase/config";
+import {
+  getDevUserId,
+  isLocalFileStorageMode,
+} from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export interface SessionAuthContext {
@@ -25,7 +28,7 @@ export async function getSessionAuthContext(
 ): Promise<SessionAuthContext> {
   void request;
 
-  if (!isSupabaseConfigured()) {
+  if (isLocalFileStorageMode()) {
     return { userId: null };
   }
 
@@ -46,7 +49,7 @@ export async function requireSessionAuth(
 ): Promise<SessionAuthContext & { userId: string }> {
   const auth = await getSessionAuthContext(request);
 
-  if (isSupabaseConfigured() && !auth.userId) {
+  if (!isLocalFileStorageMode() && !auth.userId) {
     throw new UnauthenticatedError();
   }
 
@@ -59,11 +62,11 @@ export function assertSessionOwner(
   auth: SessionAuthContext,
 ): void {
   // Trusted server context (workflow steps, CLI) — no user cookie available.
-  if (isSupabaseConfigured() && auth.userId === null) {
+  if (!isLocalFileStorageMode() && auth.userId === null) {
     return;
   }
 
-  if (!isSupabaseConfigured()) {
+  if (isLocalFileStorageMode()) {
     if (sessionUserId === null && auth.userId === null) {
       return;
     }

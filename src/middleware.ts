@@ -4,11 +4,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import {
   getSupabasePublishableKey,
   getSupabaseUrl,
-  isSupabaseConfigured,
+  isLocalFileStorageMode,
 } from "@/lib/supabase/config";
 
 export async function middleware(request: NextRequest) {
-  if (!isSupabaseConfigured()) {
+  if (isLocalFileStorageMode()) {
     return NextResponse.next();
   }
 

@@ -4,7 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isLocalFileStorageMode } from "@/lib/supabase/config";
 
 interface AuthUserBarProps {
   className?: string;
@@ -22,10 +22,10 @@ function formatUserLabel(user: User): string {
 
 export function AuthUserBar({ className }: AuthUserBarProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(isSupabaseConfigured());
+  const [loading, setLoading] = useState(!isLocalFileStorageMode());
 
   useEffect(() => {
-    if (!isSupabaseConfigured()) {
+    if (isLocalFileStorageMode()) {
       return;
     }
 
@@ -47,7 +47,7 @@ export function AuthUserBar({ className }: AuthUserBarProps) {
     };
   }, []);
 
-  if (!isSupabaseConfigured()) {
+  if (isLocalFileStorageMode()) {
     return null;
   }
 
