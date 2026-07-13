@@ -38,6 +38,8 @@ interface DaytonaPreviewState {
 
 const SIGNED_PREVIEW_TTL_SECONDS = 3600;
 const SIGNED_PREVIEW_REFRESH_BUFFER_MS = 5 * 60_000;
+/** Cap adopt work on UI poll requests so cold isolates stay responsive. */
+const ADOPT_TIMEOUT_MS = 15_000;
 
 const daytonaStates = new Map<string, DaytonaPreviewState>();
 const daytonaBootstrapPromises = new Map<string, Promise<void>>();
@@ -82,6 +84,87 @@ export function clearDaytonaPreviewMemory(sessionId?: string): void {
 
 function getDevPort(): number {
   return getDaytonaDevPort();
+}
+
+/**
+ * Re-attach to an already-running remote preview without restarting `pnpm dev`.
+ * Critical on Vercel: agent checkPreview and UI polls often land on different
+ * isolates, so in-memory daytonaStates is empty even when Daytona is ready.
+ */
+async function tryAdoptExistingDaytonaPreview(
+  sessionId: string,
+): Promise<PreviewStatus | null> {
+  const adopt = async (): Promise<PreviewStatus | null> => {
+    const { getSession } = await import("@/lib/session/store");
+    const session = await getSession(sessionId);
+    if (!session?.daytonaSandboxId) {
+      return null;
+    }
+
+    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+    const sdkSandbox = sandbox.sdkSandbox;
+    const port = getDevPort();
+    const preview = await sdkSandbox.getPreviewLink(port);
+    const probe = await fetch(preview.url, {
+      headers: { "x-daytona-preview-token": preview.token },
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    // Match startRemoteDevServer: any completed HTTP response means the proxy is up.
+    if (probe.status >= 600) {
+      return null;
+    }
+
+    let embedUrl: string | undefined;
+    let embedUrlExpiresAt: number | undefined;
+    try {
+      const signed = await sdkSandbox.getSignedPreviewUrl(
+        port,
+        SIGNED_PREVIEW_TTL_SECONDS,
+      );
+      embedUrl = signed.url;
+      embedUrlExpiresAt = Date.now() + SIGNED_PREVIEW_TTL_SECONDS * 1000;
+    } catch {
+      // Fall back to standard URL; Web iframe may need a later refresh.
+    }
+
+    daytonaStates.set(sessionId, {
+      status: "ready",
+      url: preview.url,
+      token: preview.token,
+      embedUrl,
+      embedUrlExpiresAt,
+      port,
+      devSessionId: `preview-${sessionId}`,
+    });
+    logDaytonaBootstrap(
+      sessionId,
+      "preview",
+      `adopted existing preview ${preview.url} sandbox=${sdkSandbox.id}`,
+    );
+    return {
+      status: "ready",
+      url: embedUrl ?? preview.url,
+      port,
+    };
+  };
+
+  try {
+    return await Promise.race([
+      adopt(),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), ADOPT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logDaytonaBootstrap(
+      sessionId,
+      "preview",
+      `adopt failed: ${detail.slice(0, 160)}`,
+    );
+    return null;
+  }
 }
 
 /** Map Daytona SDK failures to a short UI-facing message. */
@@ -408,6 +491,21 @@ async function bootstrapDaytonaPreview(
     logDaytonaBootstrap(sessionId, "preview", "node_modules present — skipping install");
   }
 
+  if (!isBootstrapCurrent(sessionId, epoch)) {
+    return;
+  }
+
+  // Prefer adopting a healthy remote preview over killing/restarting pnpm.
+  const adopted = await tryAdoptExistingDaytonaPreview(sessionId);
+  if (adopted?.status === "ready") {
+    logDaytonaBootstrap(
+      sessionId,
+      "preview",
+      "bootstrap adopted existing ready preview",
+    );
+    return;
+  }
+
   await startRemoteDevServer(sessionId, epoch);
 }
 
@@ -621,10 +719,8 @@ export async function resolveDaytonaPreviewStatus(
     // config is always available in host app; ignore if tree-shaken oddly
   }
 
-  if (await invalidatePreviewIfSandboxDrifted(sessionId)) {
-    // Force getOrCreate to drop stale managed cache and reconnect.
-    kickOffDaytonaBootstrap(sessionId);
-  }
+  // Drift only clears stale in-memory URL; adopt / bootstrap below reconnects.
+  await invalidatePreviewIfSandboxDrifted(sessionId);
 
   let current = getDaytonaPreviewStatus(sessionId);
 
@@ -636,12 +732,29 @@ export async function resolveDaytonaPreviewStatus(
     return current;
   }
 
+  // Cold isolate: rediscover ready preview from Daytona via session.daytonaSandboxId
+  // instead of treating empty memory as "not started".
+  if (current.status === "stopped" || current.status === "needs_install") {
+    const adopted = await tryAdoptExistingDaytonaPreview(sessionId);
+    if (adopted?.status === "ready") {
+      return adopted;
+    }
+  }
+
   // Web UI polls with wait:false — never block on sandbox ensure / install / boot.
   if (!wait) {
     if (
       current.status === "installing" ||
       current.status === "starting"
     ) {
+      // Prior request may have died mid-bootstrap (common on Vercel); recover via adopt.
+      if (!daytonaBootstrapPromises.has(sessionId)) {
+        const adopted = await tryAdoptExistingDaytonaPreview(sessionId);
+        if (adopted?.status === "ready") {
+          return adopted;
+        }
+        kickOffDaytonaBootstrap(sessionId);
+      }
       return current;
     }
     kickOffDaytonaBootstrap(sessionId);
