@@ -5,7 +5,14 @@ import { WorkflowChatTransport } from "@ai-sdk/workflow";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type { SessionRunStatus } from "@/lib/session/types";
+import {
+  hasAssistantParts,
+  mergeClientMessagesWithPersisted,
+  mergeDisplayMessages,
+} from "@/lib/chat/merge-messages";
+import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
+
+const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
 
 interface ChatProps {
   sessionId: string;
@@ -36,7 +43,13 @@ export function Chat({
     [onSessionRefresh, sessionId],
   );
 
-  const { sendMessage, status, error } = useChat({
+  const {
+    messages: chatMessages,
+    setMessages,
+    sendMessage,
+    status,
+    error,
+  } = useChat({
     id: sessionId,
     transport,
     messages,
@@ -45,36 +58,79 @@ export function Chat({
     },
   });
 
+  const isLiveTurn =
+    status === "streaming" ||
+    status === "submitted" ||
+    isActiveRunStatus(runStatus);
+
   const displayMessages = useMemo(
-    () => (draft ? [...messages, draft] : messages),
-    [messages, draft],
+    () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
+    [messages, chatMessages, draft, isLiveTurn],
   );
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const lastSyncedPersistedRef = useRef("");
+
+  // useChat only reads `messages` on mount; sync completed history from disk
+  // between turns so the next POST includes prior assistant replies.
+  useEffect(() => {
+    if (isLiveTurn) {
+      return;
+    }
+
+    const fingerprint = messages.map((message) => message.id).join("|");
+    if (fingerprint === lastSyncedPersistedRef.current) {
+      return;
+    }
+    lastSyncedPersistedRef.current = fingerprint;
+
+    setMessages((current) =>
+      mergeClientMessagesWithPersisted(messages, current),
+    );
+  }, [isLiveTurn, messages, setMessages]);
+
+  const handleScroll = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) {
+      return;
+    }
+
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    stickToBottomRef.current =
+      distanceFromBottom <= STICK_TO_BOTTOM_THRESHOLD_PX;
+  }, []);
+
+  useEffect(() => {
+    if (!stickToBottomRef.current) {
+      return;
+    }
+
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [displayMessages, isLiveTurn]);
 
   const handleSubmit = useCallback(
     (event: React.FormEvent) => {
       event.preventDefault();
       const input = inputRef.current;
-      if (!input?.value.trim() || status === "streaming") {
+      if (!input?.value.trim() || isLiveTurn) {
         return;
       }
 
+      stickToBottomRef.current = true;
       sendMessage({ text: input.value });
       input.value = "";
       onSessionRefresh?.();
     },
-    [onSessionRefresh, sendMessage, status],
+    [isLiveTurn, onSessionRefresh, sendMessage],
   );
 
-  const isPolling = runStatus === "running" || runStatus === "pending";
   const showStreamingIndicator =
-    status === "streaming" || (isPolling && draft == null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [displayMessages, showStreamingIndicator]);
+    isLiveTurn &&
+    !hasAssistantParts(displayMessages[displayMessages.length - 1]);
 
   return (
     <div className="flex h-full flex-col">
@@ -84,12 +140,16 @@ export function Chat({
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Session {sessionId}
-          {isPolling ? " · running…" : ""}
+          {isLiveTurn ? " · running…" : ""}
           {error ? ` · ${error.message}` : ""}
         </p>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 space-y-4 overflow-y-auto px-6 py-4"
+      >
         {displayMessages.length === 0 && (
           <div className="mt-20 text-center text-zinc-400 dark:text-zinc-500">
             <p className="mb-2 text-lg">描述你想构建的 Next.js 应用</p>
@@ -161,12 +221,12 @@ export function Chat({
             ref={inputRef}
             type="text"
             placeholder="描述你的 Next.js 应用需求…"
-            disabled={status === "streaming" || isPolling}
+            disabled={isLiveTurn}
             className="flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
           />
           <button
             type="submit"
-            disabled={status === "streaming" || isPolling}
+            disabled={isLiveTurn}
             className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
           >
             发送

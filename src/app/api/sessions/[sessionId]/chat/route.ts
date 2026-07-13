@@ -8,6 +8,7 @@ import {
   SessionAccessDeniedError,
 } from "@/lib/session/auth-context";
 import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
+import { mergeClientMessagesWithPersisted } from "@/lib/chat/merge-messages";
 import {
   createEmptyDraft,
   deleteDraft,
@@ -35,14 +36,20 @@ export async function POST(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const { messages }: { messages: UIMessage[] } = await request.json();
+    const { messages: clientMessages }: { messages: UIMessage[] } =
+      await request.json();
+
+    const messages = mergeClientMessagesWithPersisted(
+      session.messages,
+      clientMessages,
+    );
 
     const title =
       session.title === "New Project"
         ? (deriveSessionTitle(messages) ?? session.title)
         : session.title;
 
-    // Persist the client thread immediately so a refresh mid-turn still has
+    // Persist the merged thread immediately so a refresh mid-turn still has
     // the latest user message. Assistant output is merged when the workflow
     // completes.
     await replaceMessages(sessionId, messages, auth);

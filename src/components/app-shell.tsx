@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SessionDraft } from "@/lib/session/draft-store";
 import {
@@ -14,7 +14,7 @@ import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
 
-const POLL_INTERVAL_MS = 400;
+const POLL_ACTIVE_SESSION_MS = 800;
 
 interface AppShellProps {
   /** When set, bootstrap loads this session (from `/sessions/[sessionId]`). */
@@ -26,17 +26,42 @@ interface SessionResponse {
   draft: SessionDraft | null;
 }
 
+function patchSessionSummary(
+  summaries: SessionSummary[],
+  session: Session,
+): SessionSummary[] {
+  const next: SessionSummary = {
+    id: session.id,
+    userId: session.userId,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastRunId: session.lastRunId,
+    runStatus: session.runStatus,
+    sandboxMode: session.sandboxMode,
+    messageCount: session.messages.length,
+  };
+
+  const index = summaries.findIndex((item) => item.id === session.id);
+  if (index === -1) {
+    return [next, ...summaries];
+  }
+
+  return summaries.map((item, itemIndex) =>
+    itemIndex === index ? next : item,
+  );
+}
+
 export function AppShell({ initialSessionId }: AppShellProps) {
   const router = useRouter();
+  const activeSessionId = initialSessionId ?? null;
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(
-    initialSessionId ?? null,
-  );
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [activeDraft, setActiveDraft] = useState<SessionDraft | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const loadSessions = useCallback(async () => {
     const response = await fetch("/api/sessions");
@@ -50,6 +75,8 @@ export function AppShell({ initialSessionId }: AppShellProps) {
   }, []);
 
   const loadSession = useCallback(async (sessionId: string) => {
+    const requestId = ++loadRequestIdRef.current;
+
     const response = await fetch(`/api/sessions/${sessionId}`);
     if (response.status === 404) {
       throw new Error("Session not found");
@@ -59,8 +86,13 @@ export function AppShell({ initialSessionId }: AppShellProps) {
     }
 
     const data = (await response.json()) as SessionResponse;
+    if (requestId !== loadRequestIdRef.current) {
+      return data.session;
+    }
+
     setActiveSession(data.session);
     setActiveDraft(data.draft);
+    setSessions((current) => patchSessionSummary(current, data.session));
     return data.session;
   }, []);
 
@@ -71,11 +103,13 @@ export function AppShell({ initialSessionId }: AppShellProps) {
 
     try {
       await loadSession(activeSessionId);
-      await loadSessions();
     } catch {
       // Non-fatal — workflow may still be persisting.
     }
-  }, [activeSessionId, loadSession, loadSessions]);
+  }, [activeSessionId, loadSession]);
+
+  const isSessionReady =
+    activeSessionId != null && activeSession?.id === activeSessionId;
 
   useEffect(() => {
     let cancelled = false;
@@ -84,14 +118,6 @@ export function AppShell({ initialSessionId }: AppShellProps) {
       try {
         setLoadError(null);
         await loadSessions();
-        if (cancelled) {
-          return;
-        }
-
-        if (initialSessionId) {
-          setActiveSessionId(initialSessionId);
-          await loadSession(initialSessionId);
-        }
       } catch (error) {
         if (!cancelled) {
           setLoadError(
@@ -110,34 +136,53 @@ export function AppShell({ initialSessionId }: AppShellProps) {
     return () => {
       cancelled = true;
     };
-  }, [initialSessionId, loadSession, loadSessions]);
+  }, [loadSessions]);
 
   useEffect(() => {
-    if (!activeSession || !isActiveRunStatus(activeSession.runStatus)) {
+    if (!activeSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void loadSession(activeSessionId).catch((error) => {
+      if (!cancelled) {
+        setLoadError(
+          error instanceof Error ? error.message : "Failed to load session",
+        );
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, loadSession]);
+
+  useEffect(() => {
+    if (!activeSessionId || !isSessionReady) {
+      return;
+    }
+
+    if (!isActiveRunStatus(activeSession!.runStatus)) {
       return;
     }
 
     const timer = window.setInterval(() => {
       void refreshActiveSession();
-    }, POLL_INTERVAL_MS);
+    }, POLL_ACTIVE_SESSION_MS);
 
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeSession, refreshActiveSession]);
+  }, [activeSession, activeSessionId, isSessionReady, refreshActiveSession]);
 
-  const handleSelectSession = async (sessionId: string) => {
-    setActiveSessionId(sessionId);
+  const handleSelectSession = (sessionId: string) => {
+    if (sessionId === activeSessionId) {
+      return;
+    }
+
     setLoadError(null);
     router.push(`/sessions/${sessionId}`);
-
-    try {
-      await loadSession(sessionId);
-    } catch (error) {
-      setLoadError(
-        error instanceof Error ? error.message : "Failed to load session",
-      );
-    }
   };
 
   const handleCreateSession = async () => {
@@ -156,11 +201,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
       }
 
       const data = (await response.json()) as { session: Session };
-      const nextSessions = await loadSessions();
-      setSessions(nextSessions);
-      setActiveSessionId(data.session.id);
-      setActiveSession(data.session);
-      setActiveDraft(null);
+      setSessions((current) => patchSessionSummary(current, data.session));
       router.push(`/sessions/${data.session.id}`);
     } catch (error) {
       setLoadError(
@@ -186,9 +227,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
         <SessionSidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
-          onSelect={(sessionId) => {
-            void handleSelectSession(sessionId);
-          }}
+          onSelect={handleSelectSession}
           onCreate={() => {
             void handleCreateSession();
           }}
@@ -213,7 +252,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
                 返回会话列表
               </button>
             </div>
-          ) : !activeSession ? (
+          ) : !activeSessionId ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-lg text-zinc-700 dark:text-zinc-200">
                 创建第一个项目会话
@@ -233,12 +272,16 @@ export function AppShell({ initialSessionId }: AppShellProps) {
                 {isCreating ? "Creating…" : "New Project"}
               </button>
             </div>
+          ) : !isSessionReady ? (
+            <div className="flex h-full items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
+              Loading session…
+            </div>
           ) : (
             <div className="flex h-full min-h-0">
               <div className="min-w-0 flex-1">
                 <Chat
-                  key={activeSession.id}
-                  sessionId={activeSession.id}
+                  key={activeSessionId}
+                  sessionId={activeSessionId}
                   messages={activeSession.messages}
                   draft={activeDraft?.message ?? null}
                   runStatus={activeSession.runStatus}
@@ -247,7 +290,7 @@ export function AppShell({ initialSessionId }: AppShellProps) {
                   }}
                 />
               </div>
-              <PreviewPanel sessionId={activeSession.id} />
+              <PreviewPanel key={activeSessionId} sessionId={activeSessionId} />
             </div>
           )}
         </main>
