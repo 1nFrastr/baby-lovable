@@ -1,7 +1,7 @@
 import type { Session } from "@/lib/session/types";
 import { getSession, updateSession } from "@/lib/session/store";
 
-import { DAYTONA_VOLUME_MOUNT } from "./config";
+import { DAYTONA_VOLUME_MOUNT, getDaytonaSnapshotName } from "./config";
 import { getDaytonaClient } from "./client";
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { ensureSharedVolume } from "./volume";
@@ -76,28 +76,48 @@ async function createDaytonaSandbox(session: Session): Promise<Sandbox> {
 
   const idleMinutes = Number(process.env.DAYTONA_SANDBOX_IDLE_MINUTES ?? 30);
 
+  const snapshot = getDaytonaSnapshotName();
+  const baseParams = {
+    language: "typescript" as const,
+    labels: {
+      "baby-lovable-session": session.id,
+    },
+    autoStopInterval: idleMinutes > 0 ? idleMinutes : 0,
+    volumes: [
+      {
+        volumeId: volume.id,
+        mountPath: DAYTONA_VOLUME_MOUNT,
+        subpath: volumeSubpath,
+      },
+    ],
+  };
+
   logDaytonaBootstrap(
     session.id,
     "sandbox",
-    `creating sandbox (volume subpath=${volumeSubpath})`,
+    snapshot
+      ? `creating sandbox from snapshot=${snapshot} (volume subpath=${volumeSubpath})`
+      : `creating sandbox (volume subpath=${volumeSubpath})`,
   );
-  const sandbox = await daytona.create(
-    {
-      language: "typescript",
-      labels: {
-        "baby-lovable-session": session.id,
-      },
-      autoStopInterval: idleMinutes > 0 ? idleMinutes : 0,
-      volumes: [
-        {
-          volumeId: volume.id,
-          mountPath: DAYTONA_VOLUME_MOUNT,
-          subpath: volumeSubpath,
-        },
-      ],
-    },
-    { timeout: 180 },
-  );
+
+  let sandbox: Sandbox;
+  try {
+    sandbox = await daytona.create(
+      snapshot ? { ...baseParams, snapshot } : baseParams,
+      { timeout: 180 },
+    );
+  } catch (error) {
+    if (!snapshot) {
+      throw error;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    logDaytonaBootstrap(
+      session.id,
+      "sandbox",
+      `snapshot ${snapshot} unavailable (${detail.slice(0, 200)}) — falling back to default image`,
+    );
+    sandbox = await daytona.create(baseParams, { timeout: 180 });
+  }
 
   await sandbox.waitUntilStarted(180);
   logDaytonaBootstrap(session.id, "sandbox", `sandbox started ${sandbox.id}`);

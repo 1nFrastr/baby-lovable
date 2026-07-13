@@ -9,6 +9,7 @@
     "lint": "eslint --cache --cache-location .eslintcache src scripts templates/nextjs-starter",
     "agent": "tsx src/cli/index.ts",
     "cleanup-previews": "tsx scripts/cleanup-preview-servers.ts",
+    "build:daytona-snapshot": "tsx src/cli/build-daytona-snapshot.ts",
     "test:daytona-fs": "tsx src/cli/test-daytona-fs.ts",
     "test:daytona-volume-sync": "tsx src/cli/test-daytona-volume-sync.ts",
     "test:daytona-git": "tsx src/cli/test-daytona-git.ts",

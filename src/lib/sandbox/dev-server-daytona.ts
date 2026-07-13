@@ -445,19 +445,22 @@ export async function resolveDaytonaPreviewStatus(
     return current;
   }
 
+  // Web UI polls with wait:false — never block on sandbox ensure / install / boot.
+  if (!wait) {
+    if (
+      current.status === "installing" ||
+      current.status === "starting"
+    ) {
+      return current;
+    }
+    kickOffDaytonaBootstrap(sessionId);
+    return { status: "starting", port: getDevPort() };
+  }
+
   if (current.status === "stopped" || current.status === "needs_install") {
     if (await hasRemotePackageJson(sessionId)) {
       kickOffDaytonaBootstrap(sessionId);
       current = getDaytonaPreviewStatus(sessionId);
-      if (!wait) {
-        if (
-          current.status === "stopped" ||
-          current.status === "needs_install"
-        ) {
-          return { status: "starting", port: getDevPort() };
-        }
-        return current;
-      }
     } else {
       return { status: "needs_install" };
     }
@@ -469,11 +472,6 @@ export async function resolveDaytonaPreviewStatus(
     current.status === "starting";
 
   if (bootstrapping) {
-    if (!wait) {
-      return current.status === "stopped"
-        ? { status: "starting", port: getDevPort() }
-        : current;
-    }
     await waitForDaytonaBootstrap(sessionId);
     current = getDaytonaPreviewStatus(sessionId);
     if (current.status !== "stopped") {
@@ -483,21 +481,12 @@ export async function resolveDaytonaPreviewStatus(
 
   if (await hasRemoteNodeModules(sessionId)) {
     kickOffDaytonaBootstrap(sessionId);
-    if (!wait) {
-      const next = getDaytonaPreviewStatus(sessionId);
-      return next.status === "stopped"
-        ? { status: "starting", port: getDevPort() }
-        : next;
-    }
     await waitForDaytonaBootstrap(sessionId);
     return withFreshEmbedUrl(sessionId, getDaytonaPreviewStatus(sessionId));
   }
 
   if (await hasRemotePackageJson(sessionId)) {
     kickOffDaytonaBootstrap(sessionId);
-    if (!wait) {
-      return { status: "installing" };
-    }
     await waitForDaytonaBootstrap(sessionId);
     return withFreshEmbedUrl(sessionId, getDaytonaPreviewStatus(sessionId));
   }

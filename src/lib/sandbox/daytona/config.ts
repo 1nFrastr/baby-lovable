@@ -27,6 +27,21 @@ export function getDaytonaIdleMinutes(): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30;
 }
 
+/**
+ * Prebuilt snapshot with starter + pnpm + node_modules.
+ * Empty string disables snapshot (falls back to runtime seed).
+ * Build with: `npm run build:daytona-snapshot`
+ */
+export const DAYTONA_DEFAULT_SNAPSHOT = "baby-lovable-nextjs-starter";
+
+export function getDaytonaSnapshotName(): string | null {
+  if (process.env.DAYTONA_SNAPSHOT === "") {
+    return null;
+  }
+  const name = process.env.DAYTONA_SNAPSHOT?.trim() || DAYTONA_DEFAULT_SNAPSHOT;
+  return name || null;
+}
+
 export function isDaytonaConfigured(): boolean {
   return Boolean(process.env.DAYTONA_API_KEY || process.env.DAYTONA_JWT_TOKEN);
 }
