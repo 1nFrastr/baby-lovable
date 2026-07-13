@@ -3,6 +3,9 @@
  * Kill orphaned session preview dev servers (pnpm dev / next dev / next-server)
  * under .baby-lovable/sessions/<id>/workspace. Does not touch the host app (npm run dev).
  *
+ * Also catches detached next-server orphans (PPID=1) whose command line no longer
+ * includes the session path — detected via process cwd instead.
+ *
  * Usage:
  *   npm run cleanup-previews
  *   npm run cleanup-previews -- --dry-run
@@ -10,16 +13,23 @@
  */
 
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+const DATA_ROOT = process.env.BABY_LOVABLE_DATA_DIR ?? ".baby-lovable";
+const SESSIONS_ROOT = path.resolve(process.cwd(), DATA_ROOT, "sessions");
 const SESSION_MARKER = /\.baby-lovable\/sessions\/([^/]+)\/workspace/;
+
+const ORPHAN_COMMAND =
+  /\bnext-server\b|\.next\/dev\/build\/|node.*\/next\/dist\/bin\/next dev/;
 
 interface ProcessInfo {
   pid: number;
   command: string;
   sessionId: string | null;
+  source: "command" | "cwd";
 }
 
 function parseArgs(): { dryRun: boolean; keepSessions: Set<string> } {
@@ -37,9 +47,44 @@ function parseArgs(): { dryRun: boolean; keepSessions: Set<string> } {
   return { dryRun, keepSessions };
 }
 
+function sessionIdFromPath(targetPath: string): string | null {
+  const relative = path.relative(SESSIONS_ROOT, targetPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return null;
+  }
+
+  const sessionId = relative.split(path.sep)[0];
+  return sessionId?.startsWith("sess_") ? sessionId : null;
+}
+
+function sessionIdFromCommand(command: string): string | null {
+  return command.match(SESSION_MARKER)?.[1] ?? null;
+}
+
+async function getProcessCwd(pid: number): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("lsof", [
+      "-a",
+      "-p",
+      String(pid),
+      "-d",
+      "cwd",
+      "-Fn",
+    ]);
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("n")) {
+        return line.slice(1);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function listProcesses(): Promise<ProcessInfo[]> {
   const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
-  const processes: ProcessInfo[] = [];
+  const byPid = new Map<number, ProcessInfo>();
 
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
@@ -52,17 +97,31 @@ async function listProcesses(): Promise<ProcessInfo[]> {
     const command = match[2];
     if (!Number.isFinite(pid) || pid <= 0) continue;
 
-    const sessionMatch = command.match(SESSION_MARKER);
-    if (!sessionMatch) continue;
+    const sessionId = sessionIdFromCommand(command);
+    if (sessionId) {
+      byPid.set(pid, { pid, command, sessionId, source: "command" });
+      continue;
+    }
 
-    processes.push({
+    if (!ORPHAN_COMMAND.test(command)) {
+      continue;
+    }
+
+    const cwd = await getProcessCwd(pid);
+    if (!cwd) continue;
+
+    const sessionIdFromCwd = sessionIdFromPath(cwd);
+    if (!sessionIdFromCwd) continue;
+
+    byPid.set(pid, {
       pid,
       command,
-      sessionId: sessionMatch[1],
+      sessionId: sessionIdFromCwd,
+      source: "cwd",
     });
   }
 
-  return processes;
+  return [...byPid.values()];
 }
 
 async function killProcessTree(
@@ -94,17 +153,43 @@ function isPreviewLeader(command: string): boolean {
   return /\bnext dev\b/.test(command) || /\bpnpm\b.*\bdev\b/.test(command);
 }
 
+function isHostAppProcess(command: string, cwd: string | null): boolean {
+  if (sessionIdFromCommand(command)) {
+    return false;
+  }
+
+  const hostRoot = process.cwd();
+  if (command.includes(`${hostRoot}/node_modules`) && /\bnext dev\b/.test(command)) {
+    return true;
+  }
+
+  if (cwd && path.resolve(cwd) === hostRoot) {
+    return true;
+  }
+
+  return false;
+}
+
 async function main(): Promise<void> {
   const { dryRun, keepSessions } = parseArgs();
   const processes = await listProcesses();
 
-  if (processes.length === 0) {
+  const filtered: ProcessInfo[] = [];
+  for (const proc of processes) {
+    const cwd = proc.source === "cwd" ? await getProcessCwd(proc.pid) : null;
+    if (isHostAppProcess(proc.command, cwd)) {
+      continue;
+    }
+    filtered.push(proc);
+  }
+
+  if (filtered.length === 0) {
     console.log("No session preview processes found.");
     return;
   }
 
   const bySession = new Map<string, ProcessInfo[]>();
-  for (const proc of processes) {
+  for (const proc of filtered) {
     if (!proc.sessionId) continue;
     const list = bySession.get(proc.sessionId) ?? [];
     list.push(proc);
@@ -135,12 +220,15 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `Found ${processes.length} session preview process(es) across ${bySession.size} session(s).`,
+    `Found ${filtered.length} session preview process(es) across ${bySession.size} session(s).`,
   );
 
   for (const proc of targets) {
     const label = proc.sessionId ? `[${proc.sessionId}]` : "[unknown]";
-    console.log(`${dryRun ? "Would kill" : "Killing"} ${label} pid=${proc.pid}`);
+    const via = proc.source === "cwd" ? " (cwd orphan)" : "";
+    console.log(
+      `${dryRun ? "Would kill" : "Killing"} ${label}${via} pid=${proc.pid}`,
+    );
     if (!dryRun) {
       await killProcessTree(proc.pid, "SIGTERM");
     }
@@ -152,7 +240,13 @@ async function main(): Promise<void> {
 
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  const remaining = await listProcesses();
+  const remaining = (await listProcesses()).filter((proc) => {
+    if (proc.sessionId && keepSessions.has(proc.sessionId)) {
+      return false;
+    }
+    return !isHostAppProcess(proc.command, null);
+  });
+
   const toForceKill = remaining.filter(
     (proc) => proc.sessionId && !keepSessions.has(proc.sessionId),
   );
@@ -167,16 +261,15 @@ async function main(): Promise<void> {
     await killProcessTree(proc.pid, "SIGKILL");
   }
 
-  const stillRunning = await listProcesses();
-  const left = stillRunning.filter(
+  const stillRunning = (await listProcesses()).filter(
     (proc) => proc.sessionId && !keepSessions.has(proc.sessionId),
   );
 
-  if (left.length === 0) {
+  if (stillRunning.length === 0) {
     console.log("Cleanup complete.");
   } else {
-    console.warn(`Warning: ${left.length} process(es) could not be stopped.`);
-    for (const proc of left) {
+    console.warn(`Warning: ${stillRunning.length} process(es) could not be stopped.`);
+    for (const proc of stillRunning) {
       console.warn(`  pid=${proc.pid} ${proc.command.slice(0, 120)}`);
     }
     process.exitCode = 1;

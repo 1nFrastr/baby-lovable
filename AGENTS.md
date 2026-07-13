@@ -128,7 +128,7 @@ Preview lifecycle is owned by `src/lib/sandbox/dev-server.ts` — agents must **
 
 ### Orphan preview servers (CPU / heat)
 
-Each session boots its own `pnpm dev` → `next dev` → `next-server` under `.baby-lovable/sessions/<id>/workspace/`. Processes are spawned **detached** so they can survive host restarts; if the host app's in-memory tracker is lost, old previews become **orphans** and keep consuming CPU (multiple instances stack linearly).
+Each session boots its own `pnpm dev` → `next dev` → `next-server` under `.baby-lovable/sessions/<id>/workspace/`. Processes are spawned **detached** so they can survive host restarts; if the host app's in-memory tracker is lost, old previews become **orphans** and keep consuming CPU (multiple instances stack linearly). Some orphans lose their session path in `ps` output (PPID=1); the cleanup script also matches by process **cwd**.
 
 **Clean up orphans** (does not stop the host `npm run dev`):
 
