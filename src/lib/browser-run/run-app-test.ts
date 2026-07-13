@@ -1,6 +1,7 @@
 import { chromium, type Browser } from "playwright-core";
 
 import { getSession } from "@/lib/session/store";
+import { isSyntheticHttpPreviewError } from "@/lib/sandbox/dev-server";
 import { getPreviewReport } from "@/lib/sandbox/preview";
 
 import {
@@ -167,7 +168,10 @@ export async function runAppTest(
     );
   }
 
-  if (preview.buildError) {
+  if (
+    preview.buildError &&
+    !isSyntheticHttpPreviewError(preview.buildError)
+  ) {
     return finish(
       failReport({
         sessionId: options.sessionId,

@@ -529,28 +529,40 @@ export async function getDaytonaPreviewReport(
     const state = daytonaStates.get(sessionId);
     // Probe with the standard preview URL + token (not the signed embed URL).
     const probeUrl = state?.url ?? resolved.url;
-    try {
-      const response = await fetch(probeUrl, {
-        headers: state?.token
-          ? { "x-daytona-preview-token": state.token }
-          : undefined,
-        signal: AbortSignal.timeout(5_000),
-      });
-      httpStatus = response.status;
-    } catch {
-      httpStatus = 503;
-    }
+
+    const probeOnce = async (): Promise<number> => {
+      try {
+        const response = await fetch(probeUrl, {
+          headers: state?.token
+            ? { "x-daytona-preview-token": state.token }
+            : undefined,
+          signal: AbortSignal.timeout(5_000),
+        });
+        return response.status;
+      } catch {
+        return 503;
+      }
+    };
+
+    httpStatus = await probeOnce();
 
     const devLog = await readRemoteDevLog(sessionId);
     const logError = extractCompileErrorFromLog(devLog);
+
+    // Live probe wins over a stale in-memory error (common after Daytona proxy
+    // cold-start 502s). A healthy response with no compile marker clears the gate.
     if (logError) {
       buildError = logError;
-    }
-
-    if (!buildError && httpStatus !== undefined && httpStatus >= 500) {
-      buildError =
-        logError ??
-        `Preview returned HTTP ${httpStatus} but no compile error was captured.`;
+    } else if (httpStatus < 500) {
+      buildError = null;
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      httpStatus = await probeOnce();
+      if (httpStatus < 500) {
+        buildError = null;
+      } else {
+        buildError = `Preview returned HTTP ${httpStatus} but no compile error was captured.`;
+      }
     }
 
     if (buildError) {

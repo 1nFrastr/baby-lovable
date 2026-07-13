@@ -64,6 +64,13 @@ export function isUnreliableCompileError(message: string): boolean {
   return /\[browser\]/i.test(message);
 }
 
+/** Daytona proxy / cold-start 5xx with no compile log — often clears on retry. */
+export function isSyntheticHttpPreviewError(message: string): boolean {
+  return /Preview returned HTTP \d+ but no compile error was captured/i.test(
+    message,
+  );
+}
+
 function stripAnsi(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/\u001b\[[0-9;]*m/g, "");
@@ -676,7 +683,11 @@ export function isTransientPreviewFailure(report: PreviewReport): boolean {
     return false;
   }
 
-  if (report.buildError && !isUnreliableCompileError(report.buildError)) {
+  if (
+    report.buildError &&
+    !isUnreliableCompileError(report.buildError) &&
+    !isSyntheticHttpPreviewError(report.buildError)
+  ) {
     return false;
   }
 
