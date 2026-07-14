@@ -35,6 +35,8 @@ export function AppShell() {
   );
   /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
+  /** Bumps preview iframe remount after a new successful checkPreview. */
+  const [previewReloadKey, setPreviewReloadKey] = useState<string | null>(null);
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const sandboxMode = sessionsQuery.data?.features.sandboxMode ?? "local";
@@ -48,12 +50,20 @@ export function AppShell() {
   useEffect(() => {
     setChatAppTest(null);
     setChatAppTestReady(false);
+    setPreviewReloadKey(null);
   }, [activeSessionId]);
 
   const handleAppTestStatus = useCallback(
     (status: AppTestLatestStatus | null) => {
       setChatAppTest(status);
       setChatAppTestReady(true);
+    },
+    [],
+  );
+
+  const handleCheckPreviewOk = useCallback(
+    (signal: { toolCallId: string }) => {
+      setPreviewReloadKey(signal.toolCallId);
     },
     [],
   );
@@ -201,6 +211,7 @@ export function AppShell() {
                     invalidateSessionDetail(activeSessionId);
                   }}
                   onAppTestStatus={handleAppTestStatus}
+                  onCheckPreviewOk={handleCheckPreviewOk}
                 />
               </div>
               <PreviewPanel
@@ -209,6 +220,7 @@ export function AppShell() {
                 sandboxMode={activeSession.sandboxMode}
                 chatAppTest={chatAppTest}
                 chatAppTestReady={chatAppTestReady}
+                previewReloadKey={previewReloadKey}
               />
             </div>
           )}

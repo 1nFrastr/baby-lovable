@@ -26,6 +26,11 @@ interface PreviewPanelProps {
   chatAppTest?: AppTestLatestStatus | null;
   /** True after Chat has reported an extract for this session (including none). */
   chatAppTestReady?: boolean;
+  /**
+   * Changes when Chat sees a new successful checkPreview (toolCallId).
+   * Remounts the iframe so Daytona proxy / blocked HMR still shows latest UI.
+   */
+  previewReloadKey?: string | null;
 }
 
 const POLL_MS_READY = 15_000;
@@ -78,10 +83,12 @@ export function PreviewPanel({
   sandboxMode = "local",
   chatAppTest = null,
   chatAppTestReady = false,
+  previewReloadKey = null,
 }: PreviewPanelProps) {
   const [preview, setPreview] = useState<PreviewStatus>({ status: "stopped" });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [iframeEpoch, setIframeEpoch] = useState(0);
   const [polledAppTest, setPolledAppTest] = useState<AppTestLatestStatus>({
     status: "idle",
   });
@@ -198,6 +205,26 @@ export function PreviewPanel({
       return null;
     }
   }, [sessionId]);
+
+  // After agent checkPreview ok: refresh status URL then remount iframe.
+  // Cross-origin Daytona preview cannot use contentWindow.reload().
+  useEffect(() => {
+    if (!previewReloadKey) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      await loadPreview();
+      if (!cancelled) {
+        setIframeEpoch((n) => n + 1);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewReloadKey, loadPreview]);
 
   const loadAppTest = useCallback(async () => {
     if (sandboxMode !== "daytona") {
@@ -429,7 +456,7 @@ export function PreviewPanel({
       <div className="relative min-h-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
         {preview.status === "ready" ? (
           <iframe
-            key={preview.url}
+            key={`${preview.url}::${iframeEpoch}`}
             src={preview.url}
             title="App preview"
             className="h-full w-full border-0 bg-white"
