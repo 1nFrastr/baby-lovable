@@ -1,10 +1,13 @@
 # baby-lovable
 
-> 面试 / 技术评审主文档。细节设计见 `docs/`。
+**baby-lovable** 是对标 [Lovable](https://lovable.dev) 的 baby 版本：在浏览器里完成的云端 vibe coding agent——用自然语言描述应用，Agent 在隔离沙盒中写代码、热更新预览，并可一键远程点测 UI，而不是靠人手工验收。
 
-## 一句话
+### 亮点技术栈
 
-**baby-lovable** 是一个 AI 驱动的 Next.js 应用构建器：用户用自然语言描述需求，Builder Agent 在隔离的 per-session workspace 中改代码，并通过托管 dev-server 预览（以及可选的远程浏览器测试）自动验证，而不是依赖人工点 UI。
+- **Agent**：Vercel AI SDK v7 `WorkflowAgent` + Workflow DevKit（durable 多步、流式续传）
+- **沙盒**：Daytona 远程 workspace（Volume 持久化 / Snapshot 冷启动 / signed Preview）
+- **自动测**：Cloudflare Browser Run + Playwright Live View（对云端 Preview 可见地点测）
+- **宿主**：Next.js 16 · Supabase Auth/Postgres（多用户）· 本地文件模式可零后端开发 · 同款 CLI 自回归
 
 ---
 
@@ -56,32 +59,36 @@
 
 ---
 
-## 3. 当前完成程度
+## 3. 当前完成程度（用户视角）
 
-### 已完成（可演示 / 可运行）
+### 已完成
 
-- Local 沙盒全链路：聊天 → 改代码 → 预览 → CLI / Web
-- CLI one-shot 与交互 REPL（与 Web **同 Agent**）
-- Durable Web chat：Workflow run、断线续流、draft 恢复
-- Local file mode ↔ Supabase Auth/Postgres 双存储门面
-- Daytona：远程 workspace、Volume 持久化、Snapshot 冷启动、signed Preview iframe
-- `checkPreview` 编译门控；路径白名单（禁止改 `.next` / `node_modules`）
-- Cloudflare Browser Run：`testPreview` / Auto Test / Live View PiP（需 Daytona + CF 配置）
-- 每 turn workspace git checkpoint；orphan preview 清理脚本
+- **对话式建站**：用自然语言描述需求，Agent 在隔离工作区里生成 / 修改 Next.js 应用
+- **实时预览**：右侧预览生成中的应用；编译失败会反馈给 Agent 继续修
+- **多项目会话**：侧边栏新建 / 切换项目；每个会话有独立 URL，可稍后回来接着改
+- **流式对话与刷新恢复**：回复边生成边显示；中途刷新可续上未完成的一轮
+- **账号与多用户隔离**（生产部署）：GitHub 授权登录（开发环境另有匿名登录）；用户只能看到自己的会话与数据
+- **云端隔离运行**（可选）：项目在远程沙盒中构建与预览，关闭后源码仍可恢复
+- **一键导出代码**（云端模式）：预览面板可下载 workspace zip
+- **自动 UI 测试**（云端模式 + 已配置浏览器服务）：「Auto Test」用远程浏览器点一遍页面，并可弹出 Live View 观看测试过程
+- **命令行同款能力**：CLI 可无界面跑同一套建站 Agent，方便自动化验收
 
-### 未做 / 刻意推迟
+### 未做 / 部分完成
 
-| 项 | 状态 | 说明 |
+| 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| Web UI 切换 sandbox | 未做 | 仅环境变量 `BABY_LOVABLE_SANDBOX_MODE` |
-| Local 导出 zip | 未做 | Daytona 侧已有 export；local 抛 `NotImplementedError` |
-| `gitRemote` push | 预留字段 | Schema 有字段，无 remote push 实现 |
-| Local 上 Browser Run | 架构不可行 | CF 无法访问 localhost |
-| 任意 shell / `runCommand` | 收紧 | Deprecated，仅允许白名单 pnpm |
-| 协作 / 多席实时编辑 | 未做 | 单用户会话模型 |
-| 计费 / 配额产品化 | 部分 | Daytona 配额错误有 surfacing；无完整计费 |
+| **长上下文管理** | 未做 | 多轮对话 + 工具结果会把上下文撑满；尚无摘要 / 裁剪 / 压缩，长项目易变慢、变贵、跑偏 |
+| **工具治理** | 部分 | 已有路径与命令白名单、部分工具输出对 UI 隐藏；缺统一的结果截断、调用预算、失败退避与「何时必须 / 禁止用某工具」策略 |
+| **对话消息 UI** | 部分 | 能流式看回复与工具调用；长会话下工具块嘈杂、层次弱，缺折叠 / 摘要时间线 / 更清晰的「正在改什么」 |
+| 界面里切换「本机预览 / 云端沙盒」 | 未做 | 由部署环境变量决定 |
+| 本机模式下导出 zip | 未做 | 仅云端模式支持 Export |
+| 把项目推送到用户自己的 GitHub 仓库 | 未做 | 有预留，未接通 |
+| 分享只读链接（项目 / 预览）给他人 | 未做 | |
+| 本机预览上跑 Auto Test | 不做 | 远程浏览器访问不到 localhost |
+| 多人同时编辑同一项目 | 未做 | 当前是单用户会话 |
+| 套餐 / 计费 / 自助升配额 | 部分 | 配额不足会提示，无完整付费产品 |
 
-更细列表见 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+更细矩阵见 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ---
 
@@ -89,13 +96,15 @@
 
 | 优先级 | 方向 | 为什么先做 |
 | --- | --- | --- |
-| P0 | 稳定性：Daytona 冷 isolate Preview 状态、Agent 未调 `checkPreview` 的引导 | 直接影响「可用」与完成度评分 |
-| P1 | 导出与交付：local zip、git remote push、一键分享 Preview | 可交付性 / 用户闭环 |
-| P2 | Web 可选 sandbox + 更清晰的「本地开发 vs 云端隔离」引导 | UX |
-| P3 | 更强的 App Test：脚本库、断言 DSL、失败自动回归 | 创新性加深 |
-| P4 | 多模型 / 人机审批 / 更长任务编排 | 平台化，复杂度高，后置 |
+| **P0** | **长上下文管理**：历史摘要、工具结果压缩、按需回捞文件而非整段塞进 prompt | 多轮建站是核心场景；上下文失控会直接毁掉可用性与成本 |
+| **P0** | **工具治理**：输出截断与预算、调用频率约束、强制编译门控与测试 opt-in 策略固化 | 减少无效 tool loop、漏验预览、噪声结果污染下一轮推理 |
+| **P0** | **对话消息 UI**：工具调用折叠 / 分组、进度时间线、突出文件路径与验证结果 | 用户要看得懂 Agent 在干什么，而不是被 tool 日志淹没 |
+| P1 | 预览更稳、缺配额 / 密钥时的产品级提示 | 「能不能用」的底线体验 |
+| P2 | 本机导出、推 GitHub、分享只读预览 | 做完能带走 / 能给别人看 |
+| P3 | 界面可选本机或云端；更强 Auto Test（失败后再修） | UX 与创新加深 |
+| P4 | 团队空间、多模型、人机审批长任务 | 平台化，后置 |
 
-原则：**先让默认路径更稳更短，再加新能力**——与早期渐进迭代一致。
+原则：**先治住上下文、工具行为与对话可读性，再堆交付与协作能力**——否则会话越长越不可用、也越难看懂。
 
 ---
 

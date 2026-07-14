@@ -1,83 +1,97 @@
 # 完成度与路线图
 
-> 对应面试要求：做了什么、没做什么、继续投入的优先级。总览见 [../README.md](../README.md)。
+> 对应面试要求：做了什么、没做什么、继续投入的优先级。总览见 [../README.md](../README.md)。  
+> 本节以**用户能感知的功能**为主；底层实现细节见 [ARCHITECTURE.md](./ARCHITECTURE.md) / [ENGINEERING.md](./ENGINEERING.md)。
 
-## 1. 功能完成度矩阵
+## 1. 功能完成度矩阵（用户视角）
 
-| 能力 | 状态 | 说明 |
+| 能力 | 状态 | 用户能感知到什么 |
 | --- | --- | --- |
-| 自然语言驱动改 Next 应用 | ✅ | Builder Agent + starter template |
-| 文件工具（读写改删搜） | ✅ | 源码路径守卫 |
-| 依赖安装（白名单） | ✅ | pnpm add/remove/install |
-| 托管 Preview + checkPreview | ✅ | local + daytona |
-| CLI one-shot / REPL / resume | ✅ | 与 Web 同 Agent |
-| Web 流式聊天 + 续流 + draft | ✅ | Workflow DevKit |
-| 多会话 UI / URL | ✅ | `/sessions/[id]` |
-| Local 零后端模式 | ✅ | 文件存储 + 跳过登录 |
-| Supabase Auth + Postgres | ✅ | 生产路径 |
-| Daytona 远程沙盒 | ✅ | Volume + Snapshot + Preview |
-| Signed Preview iframe | ✅ | Web |
-| Cloudflare Browser Run / testPreview | ✅ | 需 Daytona + CF；opt-in |
-| Auto Test + Live View PiP | ✅ | |
-| 每 turn git checkpoint | ✅ | lastCommitSha |
-| Daytona workspace export | ✅ | zip 路径 |
-| Local workspace export | ❌ | `NotImplementedError` |
-| Web UI 选择 sandbox | ❌ | 仅环境变量 |
-| git remote push | ❌ | 字段预留 |
-| 任意 shell | ❌（有意） | runCommand deprecated |
-| Local 上 Browser Run | ❌（有意） | 架构不可达 |
-| 协作编辑 / 权限角色 | ❌ | |
-| 计费与配额产品化 | 🟡 | 有错误提示，无完整产品 |
-| 消息历史裁剪 / 摘要 | ❌ | 长会话成本未治理 |
-| 自动回归测试套件（host） | 🟡 | 靠 CLI 脚本与专项 test:*，无完整 CI 矩阵 |
+| 对话式生成 / 修改 Next.js 应用 | ✅ | 聊天描述需求，Agent 改代码 |
+| 实时预览 | ✅ | 侧栏 / 面板看正在构建的应用 |
+| 编译失败自动反馈再修 | ✅ | 坏代码会暴露给 Agent，而不是默默挂掉 |
+| 多项目会话 + 独立 URL | ✅ | 新建 / 切换项目，链接可收藏回来接着做 |
+| 流式回复 + 刷新后续聊 | ✅ | 长回复边出边看；刷新不丢进行中的一轮 |
+| GitHub 授权登录 | ✅ | 生产环境用 GitHub 登录进入产品 |
+| 匿名登录（开发） | ✅ | 本地/开发可快速进入，无需 GitHub |
+| 多用户数据隔离 | ✅ | 只能看到自己的会话与项目，看不到别人的 |
+| 云端隔离构建与预览 | ✅ | 可选：项目在远程跑，不占用本机；源码可持久 |
+| 导出项目 zip | 🟡 | 云端模式可 Export；本机模式尚无 |
+| Auto Test + 观看测试过程 | 🟡 | 云端 + 已配置时可用；本机预览不可用 |
+| 命令行建站（同款 Agent） | ✅ | 无 UI 也能跑一轮并落盘结果 |
+| **长上下文管理**（摘要 / 裁剪 / 压缩） | ❌ | 长会话工具结果会撑满上下文，尚无治理 |
+| **工具治理**（预算、截断、调用策略） | 🟡 | 有白名单与部分 UI 隐藏；缺统一预算与结果压缩 |
+| **对话消息 UI**（折叠 / 时间线 / 可读性） | 🟡 | 流式与工具标签可用；长会话工具块易嘈杂 |
+| 界面切换本机 / 云端模式 | ❌ | 目前由部署配置决定 |
+| 推送到自己的 GitHub 仓库 | ❌ | |
+| 分享只读项目 / 预览链接 | ❌ | |
+| 多人同时编辑同一项目 | ❌ | |
+| 套餐计费 / 自助升配额 | 🟡 | 配额不足有提示；无完整付费流 |
 
-图例：✅ 可用 · 🟡 部分 · ❌ 未做 / 有意不做
+图例：✅ 可用 · 🟡 部分场景可用 · ❌ 未做
 
 ---
 
-## 2. 工程质量快照
+## 2. 工程质量快照（给技术评审）
 
 | 维度 | 现状 | 缺口 |
 | --- | --- | --- |
-| 可运行性 | 本地一条命令可演示 | 生产需配齐 Supabase / Daytona / CF |
-| 可观测性 | CLI trace + `[agent-trace]` + session.json | 无统一 APM |
-| 安全 | 路径与命令白名单、RLS（Supabase） | Local 模式无用户隔离 |
-| 稳定性 | 大量 Daytona/Vercel isolate 修复已合入 | 冷启动 / 配额仍属运维现实 |
-| 文档 | 本目录 + AGENTS.md + README | 可再补演示录屏与架构海报 |
+| 可运行性 | 本地一条命令可演示 | 生产需配齐登录、云端沙盒、浏览器测试等可选依赖 |
+| 可观测性 | CLI trace + 会话落盘 | 无统一 APM |
+| 安全 | 登录后会话按用户隔离；Agent 不可乱写系统目录 | 本地免登录模式无多用户隔离 |
+| Agent 可控性 | 路径/命令白名单、验证工具分层 | **上下文膨胀与工具 loop 仍是主风险** |
+| 稳定性 | 云端预览在多实例下已做收敛 | 冷启动 / 第三方配额仍属现实约束 |
+| 文档 | README + 本目录 + AGENTS.md | 可再补演示录屏 |
 
 ---
 
 ## 3. 若继续投入：建议优先级
 
-### P0 — 默认路径更稳（完成度 / 可交付）
+### P0 — 长上下文管理 + 工具治理 + 对话消息 UI（最高优先级）
 
-1. Agent 结束前强制或强提示 `checkPreview`（减少 incomplete WARN）
-2. Daytona Preview 在多 isolate 下的状态一致性（已有 adopt，继续收敛边界情况）
-3. 配额 / 密钥缺失时的 UX 文案统一（Daytona、CF、AI Gateway）
+多轮建站产品化的瓶颈，优先于导出 / 分享 / 团队功能。
 
-### P1 — 交付闭环（可交付性 / UX）
+**长上下文管理**
 
-1. Local workspace zip 导出（与 Daytona 对称）
-2. `gitRemote`：可选推到用户仓库（面试故事完整：「对话在 DB，代码在 GitHub」）
-3. 分享链接：只读 Preview / 只读会话
+1. 会话历史摘要（保留目标与关键决策，丢掉重复 tool 噪声）
+2. 工具结果截断 / 结构化摘要；大文件「路径引用 + 按需 read」，禁止整文件反复进上下文
+3. Token / 轮次预算与触顶时的压缩策略（不只靠 auto-continue 硬续）
 
-### P2 — 体验清晰（UX）
+**工具治理**
 
-1. Web 明示当前 sandbox（local vs daytona）与能力差异（能否 Auto Test）
-2. 可选：设置页切换 sandbox（需处理会话已绑定模式的迁移规则）
-3. 首轮引导：示例 prompt +「发生了什么」时间线
+1. 统一 tool 输出预算与对模型可见的裁剪策略
+2. 调用约束：并行度、同轮重复、失败退避；编译检查默认、浏览器测 opt-in 固化进策略层（不仅靠 prompt）
+3. 可观测：哪次 tool 吃掉了多少上下文、哪些调用是无效 loop
 
-### P3 — 加深创新（创新性）
+**对话消息 UI**
 
-1. App Test 断言 DSL / 脚本库（不止 todo heuristic）
-2. 失败步骤 → 自动开一轮修复 turn（有限次）
-3. 视觉回归（截图 diff）——注意成本
+1. 工具调用默认折叠 / 按步骤分组，展开才看原始输出
+2. 进度时间线：正在改的文件、编译 / 测试结果用状态条突出，而不是淹没在日志里
+3. 长会话可读性：轮次分隔、失败步骤高亮、减少重复 tool 噪音
+
+### P1 — 默认路径更稳
+
+1. 减少「改完了但预览其实没过」
+2. 云端预览刷新 / 多实例更少掉链
+3. 缺密钥、配额打满时的产品级文案
+
+### P2 — 交付闭环（可带走 / 可分享）
+
+1. 本机模式也能导出 zip
+2. 一键推到用户自己的 GitHub 仓库
+3. 分享只读预览 / 只读会话链接
+
+### P3 — 体验清晰与更强自动测
+
+1. 界面明示本机 vs 云端及能否 Auto Test
+2. 更强自动测脚本与失败后再修有限轮
+3. 首轮引导与「正在发生什么」时间线
 
 ### P4 — 平台化（后置）
 
-1. 多模型路由、人机审批（WorkflowAgent `needsApproval`）
-2. 组织 / 团队空间
-3. 自建队列多云——仅当离开 Vercel Workflow 有强需求时
+1. 团队空间与协作
+2. 多模型选择、长任务人机审批
+3. 完整计费与组织管理
 
 ---
 
@@ -85,25 +99,26 @@
 
 短期不打算做：
 
-- 在 Agent 内开放任意 bash
-- 把源码 blob 存进 Postgres
-- Local Preview 强行对接 Cloudflare Browser Run
-- 为面试 Demo 同时维护 E2B + Daytona 两套远程后端
+- 让 Agent 在用户机器上执行任意 shell
+- 把整份源码塞进数据库当主存储
+- 强行让本机 localhost 预览对接云端浏览器测试
+- 为 Demo 同时维护两套互不兼容的远程沙盒厂商
+- 在未做上下文 / 工具治理前，优先堆团队协作与计费
 
 ---
 
 ## 5. 建议的演示脚本（评审 5–10 分钟）
 
-1. **Local CLI**（工程思维）：`npm run agent -- -p "…"` → 展示 `session.json` + workspace  
-2. **Web Preview**（UX）：同会话或新会话，展示 iframe 热更新  
-3. **（可选）Daytona + Auto Test**（创新）：远程 Preview + Live View  
-4. **打开 README.md**（可交付性）：取舍与完成度自述  
+1. **对话建站 + 预览**：提一个小需求，看侧栏预览起来  
+2. **多会话 / 刷新**：换项目、刷新页面，展示可恢复  
+3. **（生产）登录隔离**：GitHub 登录后只见自己的项目  
+4. **（可选）Auto Test**：云端模式下点 Auto Test + Live View  
+5. **打开 README**：完成度与取舍——并点明下一步是上下文、工具治理与对话 UI  
 
 ---
 
 ## 6. 待细化大纲钩子
 
-- [ ] 是否用百分比给「整体完成度」一个主观分（例如核心闭环 85%，云端增强 70%）？
-- [ ] 是否列出已知 bug / 限制的 issue 风列表？
-- [ ] 是否补充部署拓扑图（Vercel + Supabase + Daytona + CF）？
-- [ ] 演示账号 / 环境是否单独 `docs/DEMO.md`（含密钥获取步骤，不含密钥本身）？
+- [ ] 长上下文方案是否写成一页 ADR（摘要粒度、保留哪些 tool 结果）？
+- [ ] 工具治理是否列出「预算数字」草案（每轮 max tools / 单结果 max chars）？
+- [ ] 演示账号 / 环境是否单独 `docs/DEMO.md`？
