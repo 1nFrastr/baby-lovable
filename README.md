@@ -4,7 +4,7 @@
 
 演示地址：https://baby-lovable.vercel.app/
 
-演示 1：基础对话
+演示 1：基础能力
 
 https://github.com/user-attachments/assets/df081939-f3ec-44fb-ba3f-13a68d9ce010
 
