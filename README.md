@@ -1,6 +1,6 @@
 # baby-lovable
 
-**baby-lovable** 是对标 [Lovable](https://lovable.dev) 的 baby 版本：在浏览器里完成的云端 vibe coding agent——用自然语言描述应用，Agent 在隔离沙盒中写代码、热更新预览，并可一键远程点测 UI，而不是靠人手工验收。
+**baby-lovable** 是对标 [Lovable](https://lovable.dev) 的 baby 版本
 
 演示地址：https://baby-lovable.vercel.app/
 
