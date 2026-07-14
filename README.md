@@ -2,6 +2,25 @@
 
 **baby-lovable** 是对标 [Lovable](https://lovable.dev) 的 baby 版本：在浏览器里完成的云端 vibe coding agent——用自然语言描述应用，Agent 在隔离沙盒中写代码、热更新预览，并可一键远程点测 UI，而不是靠人手工验收。
 
+演示地址：https://baby-lovable.vercel.app/
+
+演示 1：基础对话
+
+https://github.com/user-attachments/assets/df081939-f3ec-44fb-ba3f-13a68d9ce010
+
+演示 2：可恢复流 resumable streaming
+
+https://github.com/user-attachments/assets/2eca82e8-ebeb-4bcb-b359-abd4bcb76b98
+
+演示 3：自动化浏览器测试 AutoTest
+
+https://github.com/user-attachments/assets/3d307aae-430f-4a4d-8659-d11ce6f7f050
+
+演示 4：持久化工作流引擎与可观测性 Durable Workflow
+
+https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
+
+
 ### 亮点技术栈
 
 - **Agent**：Vercel AI SDK v7 `WorkflowAgent` + Workflow DevKit（durable 多步、流式续传）
