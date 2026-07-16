@@ -7,7 +7,6 @@ import {
   type SessionAuthContext,
 } from "./auth-context";
 import {
-  claimDaytonaSandboxIdLocal,
   createSessionLocal,
   getSessionLocal,
   listSessionsLocal,
@@ -15,7 +14,6 @@ import {
   updateSessionLocal,
 } from "./store-local";
 import {
-  claimDaytonaSandboxIdSupabase,
   createSessionSupabase,
   getSessionSupabase,
   listSessionsSupabase,
@@ -78,18 +76,6 @@ export async function replaceMessages(
     return replaceMessagesSupabase(sessionId, messages, auth);
   }
   return replaceMessagesLocal(sessionId, messages, auth);
-}
-
-/** CAS-claim session.daytonaSandboxId when null; returns the winning id. */
-export async function claimDaytonaSandboxId(
-  sessionId: string,
-  sandboxId: string,
-  auth: SessionAuthContext = { userId: null },
-): Promise<{ claimed: boolean; daytonaSandboxId: string | null }> {
-  if (!isLocalFileStorageMode()) {
-    return claimDaytonaSandboxIdSupabase(sessionId, sandboxId, auth);
-  }
-  return claimDaytonaSandboxIdLocal(sessionId, sandboxId, auth);
 }
 
 export function deriveSessionTitle(messages: UIMessage[]): string | undefined {

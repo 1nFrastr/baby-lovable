@@ -421,7 +421,7 @@ export function PreviewPanel({
                       ? "Project not ready"
                       : preview.status === "error"
                         ? preview.error
-                        : "Preview not started"}
+                        : "Waiting for agent to start preview…"}
           </p>
         </div>
 

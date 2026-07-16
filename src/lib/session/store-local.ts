@@ -212,35 +212,3 @@ export async function replaceMessagesLocal(
 ): Promise<Session> {
   return updateSessionLocal(sessionId, { messages }, auth);
 }
-
-/**
- * Claim `daytonaSandboxId` when unset (best-effort CAS for local file store).
- */
-export async function claimDaytonaSandboxIdLocal(
-  sessionId: string,
-  sandboxId: string,
-  auth: SessionAuthContext = { userId: null },
-): Promise<{ claimed: boolean; daytonaSandboxId: string | null }> {
-  const existing = await getSessionLocal(sessionId, auth);
-  if (!existing) {
-    throw new Error(`Session not found: ${sessionId}`);
-  }
-
-  if (existing.daytonaSandboxId === sandboxId) {
-    return { claimed: true, daytonaSandboxId: sandboxId };
-  }
-  if (existing.daytonaSandboxId) {
-    return {
-      claimed: false,
-      daytonaSandboxId: existing.daytonaSandboxId,
-    };
-  }
-
-  await updateSessionLocal(sessionId, { daytonaSandboxId: sandboxId }, auth);
-
-  const fresh = await getSessionLocal(sessionId, auth);
-  return {
-    claimed: fresh?.daytonaSandboxId === sandboxId,
-    daytonaSandboxId: fresh?.daytonaSandboxId ?? null,
-  };
-}

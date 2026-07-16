@@ -19,7 +19,7 @@ import {
   getDaytonaPreviewReport,
   getDaytonaPreviewStatus,
   hasDaytonaNodeModules,
-  resolveDaytonaPreviewStatus,
+  observeDaytonaPreviewStatus,
 } from "./dev-server-daytona";
 import { getSession } from "@/lib/session/store";
 import { getBuildError as getLocalBuildError } from "./dev-server";
@@ -65,13 +65,13 @@ export async function getPreviewReport(
   return getLocalPreviewReport(sessionId, options);
 }
 
+/** Observe-only for UI polls — never create sandbox or kick off install/dev. */
 export async function resolvePreviewStatus(
   sessionId: string,
 ): Promise<PreviewStatus> {
   const mode = await sandboxModeFor(sessionId);
   if (mode === "daytona") {
-    // Web UI polls this endpoint — do not block on remote install/dev boot.
-    return resolveDaytonaPreviewStatus(sessionId, { wait: false });
+    return observeDaytonaPreviewStatus(sessionId);
   }
   return resolveLocalPreviewStatus(sessionId);
 }

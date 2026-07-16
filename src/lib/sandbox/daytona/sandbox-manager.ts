@@ -1,9 +1,5 @@
 import type { Session } from "@/lib/session/types";
-import {
-  claimDaytonaSandboxId,
-  getSession,
-  updateSession,
-} from "@/lib/session/store";
+import { getSession, updateSession } from "@/lib/session/store";
 
 import { DAYTONA_VOLUME_MOUNT, getDaytonaSnapshotName } from "./config";
 import { getDaytonaClient } from "./client";
@@ -108,76 +104,9 @@ async function reconnectWithRetries(
   logDaytonaBootstrap(
     sessionId,
     "sandbox",
-    `sandbox ${sandboxId} still unavailable after ${RECONNECT_ATTEMPTS} attempts — will create new`,
+    `sandbox ${sandboxId} still unavailable after ${RECONNECT_ATTEMPTS} attempts`,
   );
   return null;
-}
-
-async function deleteSandboxBestEffort(
-  sessionId: string,
-  sandbox: Sandbox,
-  reason: string,
-): Promise<void> {
-  logDaytonaBootstrap(
-    sessionId,
-    "sandbox",
-    `deleting sandbox ${sandbox.id} (${reason})`,
-  );
-  try {
-    await sandbox.delete(60);
-  } catch {
-    // Sandbox may already be gone.
-  }
-}
-
-/**
- * After creating a sandbox, CAS-claim session.daytonaSandboxId.
- * If another isolate already claimed a different id, adopt that one and delete ours.
- */
-async function claimOrAdoptSandbox(
-  sessionId: string,
-  created: Sandbox,
-): Promise<Sandbox> {
-  const result = await claimDaytonaSandboxId(sessionId, created.id);
-
-  if (result.claimed || result.daytonaSandboxId === created.id) {
-    logDaytonaBootstrap(
-      sessionId,
-      "sandbox",
-      `claimed sandbox id ${created.id}`,
-    );
-    return created;
-  }
-
-  if (result.daytonaSandboxId) {
-    logDaytonaBootstrap(
-      sessionId,
-      "sandbox",
-      `lost create race — adopting ${result.daytonaSandboxId}, discarding ${created.id}`,
-    );
-    await deleteSandboxBestEffort(sessionId, created, "lost create race");
-    const adopted = await reconnectWithRetries(sessionId, result.daytonaSandboxId);
-    if (adopted) {
-      return adopted;
-    }
-    // Winner's sandbox vanished — clear and claim ours.
-    await persistSandboxId(sessionId, null);
-    const retry = await claimDaytonaSandboxId(sessionId, created.id);
-    if (retry.claimed || retry.daytonaSandboxId === created.id) {
-      return created;
-    }
-    if (retry.daytonaSandboxId) {
-      await deleteSandboxBestEffort(sessionId, created, "lost reclaim race");
-      const again = await reconnectWithRetries(sessionId, retry.daytonaSandboxId);
-      if (again) {
-        return again;
-      }
-    }
-  }
-
-  // No authoritative id — force-persist ours as last resort.
-  await persistSandboxId(sessionId, created.id);
-  return created;
 }
 
 async function createDaytonaSandbox(session: Session): Promise<Sandbox> {
@@ -244,15 +173,58 @@ async function createDaytonaSandbox(session: Session): Promise<Sandbox> {
     await updateSession(session.id, { volumeSubpath });
   }
 
-  // Do NOT persist sandbox id here — claimOrAdoptSandbox owns that.
+  await persistSandboxId(session.id, sandbox.id);
   return sandbox;
+}
+
+function cacheManaged(
+  sessionId: string,
+  sandbox: Sandbox,
+  projectSandbox: DaytonaProjectSandbox,
+): DaytonaProjectSandbox {
+  managed.set(sessionId, {
+    sandbox,
+    projectSandbox,
+    lastActivity: Date.now(),
+  });
+  return projectSandbox;
+}
+
+/**
+ * Reconnect to session.daytonaSandboxId only — never create.
+ * Used by UI observe/adopt paths.
+ */
+export async function getExistingDaytonaSandbox(
+  sessionId: string,
+): Promise<DaytonaProjectSandbox | null> {
+  const session = await getSession(sessionId);
+  if (!session?.daytonaSandboxId || session.sandboxMode !== "daytona") {
+    return null;
+  }
+
+  const cached = managed.get(sessionId);
+  if (cached && cached.sandbox.id === session.daytonaSandboxId) {
+    touchActivity(sessionId);
+    return cached.projectSandbox;
+  }
+
+  if (cached) {
+    dropManagedEntry(sessionId);
+  }
+
+  const sandbox = await reconnectWithRetries(sessionId, session.daytonaSandboxId);
+  if (!sandbox) {
+    return null;
+  }
+
+  const projectSandbox = new DaytonaProjectSandbox(sessionId, sandbox);
+  await ensureDaytonaWorkspace(projectSandbox, session);
+  return cacheManaged(sessionId, sandbox, projectSandbox);
 }
 
 async function ensureManagedSandbox(
   session: Session,
 ): Promise<DaytonaProjectSandbox> {
-  // Always re-read session so we honor the authoritative daytonaSandboxId
-  // written by another Vercel isolate (agent step vs preview poll).
   const fresh = await getSession(session.id);
   if (fresh) {
     session = fresh;
@@ -280,40 +252,21 @@ async function ensureManagedSandbox(
   if (session.daytonaSandboxId) {
     sandbox = await reconnectWithRetries(session.id, session.daytonaSandboxId);
     if (!sandbox) {
-      // Dead id — clear so CAS claim can succeed for the replacement.
       await persistSandboxId(session.id, null);
       session = (await getSession(session.id)) ?? session;
     }
   }
 
-  // Another isolate may have claimed while we were reconnecting.
   if (!sandbox) {
-    const latest = await getSession(session.id);
-    if (latest?.daytonaSandboxId) {
-      sandbox = await reconnectWithRetries(session.id, latest.daytonaSandboxId);
-      if (sandbox) {
-        session = latest;
-      }
-    }
-  }
-
-  if (!sandbox) {
-    const created = await createDaytonaSandbox(session);
-    sandbox = await claimOrAdoptSandbox(session.id, created);
+    sandbox = await createDaytonaSandbox(session);
   }
 
   const projectSandbox = new DaytonaProjectSandbox(session.id, sandbox);
   await ensureDaytonaWorkspace(projectSandbox, session);
-
-  managed.set(session.id, {
-    sandbox,
-    projectSandbox,
-    lastActivity: Date.now(),
-  });
-
-  return projectSandbox;
+  return cacheManaged(session.id, sandbox, projectSandbox);
 }
 
+/** Provision path: reconnect or create. Agent turn / POST start only. */
 export async function getOrCreateDaytonaSandbox(
   sessionId: string,
 ): Promise<DaytonaProjectSandbox> {

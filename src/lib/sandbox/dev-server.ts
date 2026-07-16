@@ -728,10 +728,9 @@ export async function getPreviewReport(
     await waitForPreviewReady(sessionId);
   }
 
-  // Actively resolve/bootstrap the preview instead of passively reporting
-  // "stopped". In CLI/headless contexts the frontend never opens the preview
-  // panel, so this is what installs deps + boots the dev server on demand.
-  const resolved = await resolvePreviewStatus(sessionId);
+  // Provision here (agent/CLI checkPreview) — UI polls must not call this path.
+  ensurePreviewBootstrap(sessionId);
+  const resolved = await waitForPreviewReady(sessionId);
 
   // Default to the in-memory error, which is kept fresh for managed dev servers
   // (cleared on a successful recompile). Avoid scraping the append-only dev log
@@ -768,6 +767,10 @@ export async function getPreviewReport(
   };
 }
 
+/**
+ * Observe-only: report local preview state without install/boot.
+ * UI GET /preview uses this; agent provision uses ensurePreviewBootstrap.
+ */
 export async function resolvePreviewStatus(
   sessionId: string,
 ): Promise<PreviewStatus> {
@@ -776,26 +779,5 @@ export async function resolvePreviewStatus(
     return { status: "ready", url: active.url, port: active.port };
   }
 
-  const current = getPreviewStatus(sessionId);
-  if (
-    current.status === "ready" ||
-    current.status === "starting" ||
-    current.status === "installing"
-  ) {
-    return current;
-  }
-
-  if (await hasNodeModules(sessionId)) {
-    kickOffBootstrap(sessionId);
-    return getPreviewStatus(sessionId).status === "stopped"
-      ? { status: "starting", port: sessionPort(sessionId) }
-      : getPreviewStatus(sessionId);
-  }
-
-  if (await hasPackageJson(sessionId)) {
-    kickOffBootstrap(sessionId);
-    return { status: "installing" };
-  }
-
-  return { status: "needs_install" };
+  return getPreviewStatus(sessionId);
 }
