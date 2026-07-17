@@ -94,11 +94,11 @@ export async function getBuildErrorStep(
 ): Promise<string | null> {
   "use step";
 
-  const { ensurePreviewBootstrap, getCachedPreviewBuildError } = await import(
+  const { startPreview, getBuildError } = await import(
     "@/lib/sandbox/preview"
   );
-  ensurePreviewBootstrap(sessionId);
-  return getCachedPreviewBuildError(sessionId);
+  startPreview(sessionId);
+  return getBuildError(sessionId);
 }
 
 export async function saveSessionMessagesStep(
@@ -189,24 +189,6 @@ export async function commitWorkspaceTurnStep(
       );
     }
 
-    if (session.sandboxMode === "daytona") {
-      try {
-        const { persistDaytonaWorkspaceToVolume } = await import(
-          "@/lib/sandbox/daytona/volume-sync"
-        );
-        const synced = await persistDaytonaWorkspaceToVolume(sandbox);
-        if (synced) {
-          console.warn(
-            `[agent-trace] session=${sessionId} INFO volume sync: source persisted to volume`,
-          );
-        }
-      } catch (error) {
-        console.warn(
-          `[agent-trace] session=${sessionId} WARN volume sync failed:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    }
   } catch (error) {
     console.warn(
       `[agent-trace] session=${sessionId} WARN post-turn checkpoint failed:`,

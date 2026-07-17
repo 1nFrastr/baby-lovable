@@ -150,7 +150,30 @@ BABY_LOVABLE_LOCAL_MODE=1 NEXT_PUBLIC_BABY_LOVABLE_LOCAL_MODE=1 npm run dev
 
 ---
 
-## 6. 文档地图
+## 6. 开发用量（Cursor）
+
+本仓库从脚手架到当前形态，主要在 Cursor 里用 Agent 推进。以下为 **本项目相关** 的 IDE 用量（已剔除无关会话），区间 `2026-07-12 15:36` → `2026-07-14 08:22`（+08），原始明细见 [docs/usage/usage-events-2026-07-14.csv](./docs/usage/usage-events-2026-07-14.csv)。
+
+| | |
+| --- | ---: |
+| **总 Token** | **221,116,210**（约 2.21 亿） |
+| 事件数 | 667 |
+
+分项：Cache Read 204.2M · Input 15.0M · Output 1.9M。
+
+| 模型 | 事件 | Total Tokens | 占比 |
+| --- | ---: | ---: | ---: |
+| composer-2.5-fast | 284 | 102,087,741 | 46.2% |
+| cursor-grok-4.5-high-fast | 167 | 60,890,744 | 27.5% |
+| auto | 173 | 50,919,901 | 23.0% |
+| 其他（grok-4.5-xhigh / sonnet / gpt-5.6） | 43 | 7,217,824 | 3.3% |
+| **合计** | **667** | **221,116,210** | **100%** |
+
+按日：7/12 18.6M · 7/13 146.0M · 7/14 56.5M。
+
+---
+
+## 7. 文档地图
 
 | 文档 | 读者 | 内容 |
 | --- | --- | --- |
@@ -158,4 +181,5 @@ BABY_LOVABLE_LOCAL_MODE=1 NEXT_PUBLIC_BABY_LOVABLE_LOCAL_MODE=1 npm run dev
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 关注选型 | WorkflowAgent / Daytona / Browser Run |
 | [docs/DATA-MODEL.md](./docs/DATA-MODEL.md) | 关注数据 | 会话 vs 代码真相源、状态机 |
 | [docs/ROADMAP.md](./docs/ROADMAP.md) | 关注完成度 | Done / Not done / Next |
+| [docs/usage/usage-events-2026-07-14.csv](./docs/usage/usage-events-2026-07-14.csv) | 关注用量 | 本仓库 Cursor Token 明细 |
 | [AGENTS.md](./AGENTS.md) | 跑 Agent | 操作手册 |

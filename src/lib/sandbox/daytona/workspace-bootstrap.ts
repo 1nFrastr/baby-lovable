@@ -1,16 +1,12 @@
 import type { Session } from "@/lib/session/types";
 import { updateSession } from "@/lib/session/store";
 
-import type { DaytonaProjectSandbox } from "../daytona-provider";
+import type { DaytonaProjectSandbox } from "./provider";
 import { resolvePackageManager } from "../package-manager";
 import { initWorkspaceGit } from "../workspace-git";
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { DAYTONA_WORKSPACE_ROOT } from "./config";
 import { readStarterTemplateFiles } from "./template-seed";
-import {
-  restoreDaytonaWorkspaceFromVolume,
-  volumeHasSource,
-} from "./volume-sync";
 
 const PNPM_BOOTSTRAP =
   "corepack enable && corepack prepare pnpm@10.12.1 --activate || npm install -g pnpm@10.12.1";
@@ -93,65 +89,28 @@ async function ensurePnpmAvailable(sandbox: DaytonaProjectSandbox, sessionId: st
 }
 
 /**
- * Prepare the sandbox local workspace. Snapshot-backed sandboxes already have
- * starter + node_modules; volume restore covers resumed sessions.
- *
- * Initial seed intentionally does NOT persist to volume — that sync is slow and
- * starter content is deterministic. First real persist happens after an agent turn.
+ * Prepare the sandbox local workspace.
+ * Snapshot-backed sandboxes may already have starter + node_modules;
+ * otherwise seed from the Next.js starter template.
+ * Persistence is the sandbox disk for now (freestyle git later).
  */
 export async function ensureDaytonaWorkspace(
   sandbox: DaytonaProjectSandbox,
   session: Session,
 ): Promise<void> {
   logDaytonaBootstrap(session.id, "workspace", "checking workspace state");
-  const [empty, hasPackageJson, hasVolumeSource] = await Promise.all([
+  const [empty, hasPackageJson] = await Promise.all([
     isWorkspaceEmpty(sandbox),
     pathExists(sandbox, "package.json"),
-    volumeHasSource(sandbox),
   ]);
 
-  // Only restore from volume when the local workspace has no project yet.
-  // Reused sandboxes keep their local disk state (incl. node_modules).
-  let restored = false;
-  if ((empty || !hasPackageJson) && hasVolumeSource) {
-    logDaytonaBootstrap(session.id, "workspace", "restoring source from volume");
-    restored = await restoreDaytonaWorkspaceFromVolume(sandbox);
-    if (restored) {
-      logDaytonaBootstrap(session.id, "workspace", "restored source from volume");
-    }
-  }
-
-  if (!restored && (empty || !hasPackageJson)) {
+  if (empty || !hasPackageJson) {
     logDaytonaBootstrap(session.id, "workspace", "seeding starter template");
     await seedFromTemplate(sandbox);
     logDaytonaBootstrap(session.id, "workspace", "installing pnpm");
     await installPnpm(sandbox);
-    logDaytonaBootstrap(
-      session.id,
-      "workspace",
-      "skipping initial volume persist (deferred to post-turn)",
-    );
     await ensureGitInitialized(sandbox, session);
     logDaytonaBootstrap(session.id, "workspace", "workspace ready (seeded)");
-    return;
-  }
-
-  const [stillEmpty, stillHasPkg] = await Promise.all([
-    isWorkspaceEmpty(sandbox),
-    pathExists(sandbox, "package.json"),
-  ]);
-  if (stillEmpty || !stillHasPkg) {
-    logDaytonaBootstrap(session.id, "workspace", "seeding starter template (fallback)");
-    await seedFromTemplate(sandbox);
-    logDaytonaBootstrap(session.id, "workspace", "installing pnpm");
-    await installPnpm(sandbox);
-    logDaytonaBootstrap(
-      session.id,
-      "workspace",
-      "skipping initial volume persist (deferred to post-turn)",
-    );
-    await ensureGitInitialized(sandbox, session);
-    logDaytonaBootstrap(session.id, "workspace", "workspace ready (seeded fallback)");
     return;
   }
 

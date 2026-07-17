@@ -7,9 +7,9 @@ import {
   type SandboxFileSystem,
   type SandboxGitRunner,
   type SandboxProcessRunner,
-} from "./types";
-import { createGitRunner } from "./git-runner";
-import { DAYTONA_WORKSPACE_ROOT } from "./daytona/config";
+} from "../types";
+import { createGitRunner } from "../git-runner";
+import { DAYTONA_WORKSPACE_ROOT } from "./config";
 
 function normalizeRelativePath(targetPath: string): string {
   const normalized = targetPath.replace(/\\/g, "/").replace(/^\.\//, "");

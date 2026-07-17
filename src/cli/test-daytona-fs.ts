@@ -1,14 +1,9 @@
 /**
- * Daytona filesystem smoke test — uses ONLY official @daytona/sdk APIs.
- *
- * Tests two modes to isolate volume vs local-FS issues:
- *   local   — no volume mount; project lives on sandbox local disk (Direction B)
- *   volume  — volume mounted at /home/daytona/persist; source uploaded via SDK (Direction A/C)
+ * Daytona filesystem smoke test — sandbox local disk only (official SDK APIs).
  *
  * Usage:
- *   npx tsx src/cli/test-daytona-fs.ts              # default: local
- *   npx tsx src/cli/test-daytona-fs.ts --mode volume
- *   npx tsx src/cli/test-daytona-fs.ts --keep        # don't delete sandbox on exit
+ *   npx tsx src/cli/test-daytona-fs.ts
+ *   npx tsx src/cli/test-daytona-fs.ts --keep   # don't delete sandbox on exit
  */
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local", quiet: true });
@@ -19,26 +14,11 @@ import type { Sandbox } from "@daytona/sdk";
 
 import { readStarterTemplateFiles } from "@/lib/sandbox/daytona/template-seed";
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
 const WORKSPACE = process.env.DAYTONA_WORKSPACE_ROOT ?? "/home/daytona/workspace";
-const VOLUME_MOUNT = process.env.DAYTONA_VOLUME_MOUNT ?? "/home/daytona/persist";
 const DEV_PORT = Number(process.env.DAYTONA_DEV_PORT ?? 3000);
-const VOLUME_NAME = process.env.DAYTONA_VOLUME_NAME ?? "baby-lovable-workspaces";
 
-type TestMode = "local" | "volume";
-
-function parseArgs(): { mode: TestMode; keep: boolean } {
-  const args = process.argv.slice(2);
-  let mode: TestMode = "local";
-  let keep = false;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--mode" && args[i + 1]) mode = args[++i] as TestMode;
-    if (args[i] === "--keep") keep = true;
-  }
-  return { mode, keep };
+function parseArgs(): { keep: boolean } {
+  return { keep: process.argv.slice(2).includes("--keep") };
 }
 
 function log(tag: string, msg: string) {
@@ -66,32 +46,10 @@ function getClient(): Daytona {
   });
 }
 
-async function createSandbox(daytona: Daytona, mode: TestMode): Promise<Sandbox> {
-  if (mode === "local") {
-    log("CREATE", "sandbox (no volume) …");
-    const sandbox = await daytona.create(
-      { language: "typescript", labels: { "test": "daytona-fs-local" } },
-      { timeout: 180 },
-    );
-    await sandbox.waitUntilStarted(180);
-    return sandbox;
-  }
-
-  log("VOLUME", `get-or-create "${VOLUME_NAME}" …`);
-  const volume = await daytona.volume.get(VOLUME_NAME, true);
-  log("CREATE", `sandbox + volume mount at ${VOLUME_MOUNT} …`);
+async function createSandbox(daytona: Daytona): Promise<Sandbox> {
+  log("CREATE", "sandbox (local disk) …");
   const sandbox = await daytona.create(
-    {
-      language: "typescript",
-      labels: { "test": "daytona-fs-volume" },
-      volumes: [
-        {
-          volumeId: volume.id,
-          mountPath: VOLUME_MOUNT,
-          subpath: `test/${Date.now()}`,
-        },
-      ],
-    },
+    { language: "typescript", labels: { test: "daytona-fs-local" } },
     { timeout: 180 },
   );
   await sandbox.waitUntilStarted(180);
@@ -240,110 +198,26 @@ async function startDevServer(sandbox: Sandbox, cwd: string): Promise<string> {
   fail("dev server timeout");
 }
 
-/** For volume mode: copy source from volume → local workspace via SDK download+upload. */
-async function copyVolumeToWorkspace(
-  sandbox: Sandbox,
-  volumeDir: string,
-  workspaceDir: string,
-): Promise<void> {
-  log("COPY", `${volumeDir} → ${workspaceDir} via SDK (no rsync) …`);
-
-  // List files on volume
-  const entries = await sandbox.fs.listFiles(volumeDir);
-  const files: string[] = [];
-
-  async function walk(dir: string, prefix = ""): Promise<void> {
-    const items = await sandbox.fs.listFiles(dir);
-    for (const item of items) {
-      const rel = prefix ? `${prefix}/${item.name}` : item.name;
-      const abs = `${dir}/${item.name}`;
-      if (item.isDir) {
-        await walk(abs, rel);
-      } else {
-        files.push(rel);
-      }
-    }
-  }
-  await walk(volumeDir);
-
-  log("COPY", `found ${files.length} files on volume`);
-
-  await sandbox.fs.createFolder(workspaceDir, "755");
-
-  for (const rel of files) {
-    const content = await sandbox.fs.downloadFile(`${volumeDir}/${rel}`);
-    await sandbox.fs.uploadFile(content, `${workspaceDir}/${rel}`);
-  }
-  log("COPY", "✓ done");
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 async function main() {
-  const { mode, keep } = parseArgs();
-  log("MODE", mode);
-  log("INFO", `workspace=${WORKSPACE}  volume=${VOLUME_MOUNT}  port=${DEV_PORT}`);
+  const { keep } = parseArgs();
+  log("INFO", `workspace=${WORKSPACE}  port=${DEV_PORT}`);
 
   const daytona = getClient();
   let sandbox: Sandbox | null = null;
 
   try {
-    sandbox = await createSandbox(daytona, mode);
+    sandbox = await createSandbox(daytona);
     log("SANDBOX", `id=${sandbox.id}  state=${sandbox.state}`);
 
-    // Probe filesystem
     const probe = await sandbox.process.executeCommand("pwd && ls -la", ".", undefined, 30);
     log("PROBE", probe.result?.trim().split("\n").slice(0, 5).join(" | "));
 
-    if (mode === "local") {
-      // Direction B: everything on local sandbox disk
-      await seedProject(sandbox, WORKSPACE);
-      await installPnpm(sandbox, WORKSPACE);
-      await runPnpmInstall(sandbox, WORKSPACE);
-      await startDevServer(sandbox, WORKSPACE);
-    } else {
-      // Direction A/C: source on volume, build on local disk
-      await seedProject(sandbox, VOLUME_MOUNT);
+    await seedProject(sandbox, WORKSPACE);
+    await installPnpm(sandbox, WORKSPACE);
+    await runPnpmInstall(sandbox, WORKSPACE);
+    await startDevServer(sandbox, WORKSPACE);
 
-      // Verify volume write via SDK
-      const volCheck = await sandbox.process.executeCommand(
-        `test -f ${JSON.stringify(`${VOLUME_MOUNT}/package.json`)} && echo VOL_OK`,
-        ".",
-        undefined,
-        30,
-      );
-      if (!volCheck.result?.includes("VOL_OK")) {
-        fail("package.json not found on volume after SDK upload");
-      }
-      log("VOLUME", "✓ package.json on volume");
-
-      // Test: can pnpm install directly ON volume? (expected to fail/slow)
-      log("TEST", "attempting pnpm install ON volume (FUSE) …");
-      await installPnpm(sandbox, VOLUME_MOUNT);
-      const volInstall = await sandbox.process.executeCommand(
-        "pnpm install",
-        VOLUME_MOUNT,
-        undefined,
-        300,
-      );
-      if (volInstall.exitCode === 0) {
-        log("TEST", "⚠ pnpm install ON volume succeeded (unexpected?)");
-      } else {
-        log("TEST", `✗ pnpm install ON volume failed (expected): exit ${volInstall.exitCode}`);
-        log("TEST", volInstall.result?.slice(-500) ?? "");
-      }
-
-      // Copy source to local workspace via SDK, then install+dev there
-      await sandbox.fs.createFolder(WORKSPACE, "755");
-      await copyVolumeToWorkspace(sandbox, VOLUME_MOUNT, WORKSPACE);
-      await installPnpm(sandbox, WORKSPACE);
-      await runPnpmInstall(sandbox, WORKSPACE);
-      await startDevServer(sandbox, WORKSPACE);
-    }
-
-    log("PASS", `All checks passed (mode=${mode})`);
+    log("PASS", "All checks passed");
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   } finally {

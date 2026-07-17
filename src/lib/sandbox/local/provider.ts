@@ -1,3 +1,8 @@
+/**
+ * Local ProjectSandbox adapter (fs / process / git on disk).
+ * Lifecycle (ensure / status) lives in ./sandbox.ts.
+ */
+
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -9,15 +14,9 @@ import {
   type SandboxFileSystem,
   type SandboxGitRunner,
   type SandboxProcessRunner,
-} from "./types";
-import { createGitRunner } from "./git-runner";
-import { getWorkspaceRoot, resolveWorkspacePath } from "./paths";
-
-const NEXTJS_STARTER_TEMPLATE = path.join(
-  process.cwd(),
-  "templates",
-  "nextjs-starter",
-);
+} from "../types";
+import { createGitRunner } from "../git-runner";
+import { getWorkspaceRoot, resolveWorkspacePath } from "../paths";
 
 function globToRegExp(pattern: string): RegExp {
   const escaped = pattern
@@ -226,60 +225,4 @@ export class LocalProjectSandbox implements ProjectSandbox {
     this.process = new LocalSandboxProcessRunner(sessionId, this.rootDir);
     this.git = createGitRunner(this);
   }
-}
-
-async function isWorkspaceEmpty(workspaceRoot: string): Promise<boolean> {
-  try {
-    const entries = await fs.readdir(workspaceRoot);
-    return entries.length === 0;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return true;
-    }
-    throw error;
-  }
-}
-
-async function seedWorkspaceFromTemplate(workspaceRoot: string): Promise<void> {
-  try {
-    await fs.access(NEXTJS_STARTER_TEMPLATE);
-  } catch {
-    throw new Error(
-      `Starter template not found: ${NEXTJS_STARTER_TEMPLATE}`,
-    );
-  }
-
-  await fs.mkdir(workspaceRoot, { recursive: true });
-  await fs.cp(NEXTJS_STARTER_TEMPLATE, workspaceRoot, {
-    recursive: true,
-    filter: (source) => {
-      if (source.endsWith(".DS_Store")) {
-        return false;
-      }
-
-      const relative = path.relative(NEXTJS_STARTER_TEMPLATE, source);
-      if (
-        relative === "node_modules" ||
-        relative.startsWith(`node_modules${path.sep}`)
-      ) {
-        return false;
-      }
-
-      return true;
-    },
-  });
-}
-
-export async function ensureWorkspace(
-  sessionId: string,
-  userId: string | null = null,
-): Promise<string> {
-  const workspaceRoot = getWorkspaceRoot(sessionId, userId);
-
-  if (await isWorkspaceEmpty(workspaceRoot)) {
-    await fs.mkdir(path.dirname(workspaceRoot), { recursive: true });
-    await seedWorkspaceFromTemplate(workspaceRoot);
-  }
-
-  return workspaceRoot;
 }

@@ -40,8 +40,6 @@ export interface Session {
   runStatus: SessionRunStatus;
   sandboxMode: SandboxMode;
   gitRemote?: string;
-  /** Daytona volume subpath for workspace persistence. */
-  volumeSubpath?: string;
   /** Active Daytona sandbox id (ephemeral compute). */
   daytonaSandboxId?: string | null;
   /** Last successful git commit in the workspace. */
@@ -76,7 +74,6 @@ export interface UpdateSessionInput {
   runStatus?: SessionRunStatus;
   sandboxMode?: SandboxMode;
   gitRemote?: string;
-  volumeSubpath?: string;
   daytonaSandboxId?: string | null;
   lastCommitSha?: string;
   deletedAt?: string | null;

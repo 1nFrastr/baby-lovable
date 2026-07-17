@@ -3,8 +3,7 @@ import path from "node:path";
 
 import type { UIMessage } from "ai";
 
-import { ensureWorkspace } from "@/lib/sandbox/local-provider";
-import { getVolumeSubpath } from "@/lib/sandbox/daytona/volume-paths";
+import { ensureWorkspace } from "@/lib/sandbox/local/sandbox";
 import {
   getSessionsRoot,
   resolveSessionRoot,
@@ -116,9 +115,7 @@ export async function createSessionLocal(
     deletedAt: null,
   };
 
-  if (session.sandboxMode === "daytona") {
-    session.volumeSubpath = getVolumeSubpath(session.id, session.userId);
-  } else {
+  if (session.sandboxMode === "local") {
     await ensureWorkspace(session.id, session.userId);
   }
 
@@ -211,36 +208,4 @@ export async function replaceMessagesLocal(
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
   return updateSessionLocal(sessionId, { messages }, auth);
-}
-
-/**
- * Claim `daytonaSandboxId` when unset (best-effort CAS for local file store).
- */
-export async function claimDaytonaSandboxIdLocal(
-  sessionId: string,
-  sandboxId: string,
-  auth: SessionAuthContext = { userId: null },
-): Promise<{ claimed: boolean; daytonaSandboxId: string | null }> {
-  const existing = await getSessionLocal(sessionId, auth);
-  if (!existing) {
-    throw new Error(`Session not found: ${sessionId}`);
-  }
-
-  if (existing.daytonaSandboxId === sandboxId) {
-    return { claimed: true, daytonaSandboxId: sandboxId };
-  }
-  if (existing.daytonaSandboxId) {
-    return {
-      claimed: false,
-      daytonaSandboxId: existing.daytonaSandboxId,
-    };
-  }
-
-  await updateSessionLocal(sessionId, { daytonaSandboxId: sandboxId }, auth);
-
-  const fresh = await getSessionLocal(sessionId, auth);
-  return {
-    claimed: fresh?.daytonaSandboxId === sandboxId,
-    daytonaSandboxId: fresh?.daytonaSandboxId ?? null,
-  };
 }

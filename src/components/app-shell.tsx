@@ -179,7 +179,7 @@ export function AppShell() {
               </p>
               <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
                 {sandboxMode === "daytona"
-                  ? "Daytona 模式会在远程沙箱中从 Next.js starter 模板初始化项目，并同步到持久化 Volume。"
+                  ? "Daytona 模式会在远程沙箱内部文件系统中从 Next.js starter 模板初始化项目。"
                   : "baby-lovable 会在本地 `.baby-lovable/sessions/` 目录中从 Next.js starter 模板初始化项目，并持久化你的修改。"}
               </p>
               <button

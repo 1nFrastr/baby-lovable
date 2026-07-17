@@ -1,7 +1,6 @@
 import type { UIMessage } from "ai";
 
-import { ensureWorkspace } from "@/lib/sandbox/local-provider";
-import { getVolumeSubpath } from "@/lib/sandbox/daytona/volume-paths";
+import { ensureWorkspace } from "@/lib/sandbox/local/sandbox";
 import { getDevUserId } from "@/lib/supabase/config";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -38,7 +37,6 @@ interface SessionRow {
   run_status: SessionRunStatus;
   sandbox_mode: SandboxMode;
   git_remote: string | null;
-  volume_subpath: string | null;
   daytona_sandbox_id: string | null;
   last_commit_sha: string | null;
   deleted_at: string | null;
@@ -63,9 +61,6 @@ function rowToSession(row: SessionRow): Session {
   }
   if (row.git_remote) {
     session.gitRemote = row.git_remote;
-  }
-  if (row.volume_subpath) {
-    session.volumeSubpath = row.volume_subpath;
   }
   if (row.daytona_sandbox_id) {
     session.daytonaSandboxId = row.daytona_sandbox_id;
@@ -105,7 +100,6 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     run_status: session.runStatus,
     sandbox_mode: session.sandboxMode,
     git_remote: session.gitRemote ?? null,
-    volume_subpath: session.volumeSubpath ?? null,
     daytona_sandbox_id: session.daytonaSandboxId ?? null,
     last_commit_sha: session.lastCommitSha ?? null,
     deleted_at: session.deletedAt ?? null,
@@ -143,10 +137,6 @@ export async function createSessionSupabase(
     sandboxMode: input.sandboxMode ?? getDefaultSandboxMode(),
     deletedAt: null,
   };
-
-  if (session.sandboxMode === "daytona") {
-    session.volumeSubpath = getVolumeSubpath(session.id, userId);
-  }
 
   const { error } = await supabase.from("sessions").insert({
     ...sessionToRow(session),
@@ -254,7 +244,6 @@ export async function updateSessionSupabase(
       run_status: row.run_status,
       sandbox_mode: row.sandbox_mode,
       git_remote: row.git_remote,
-      volume_subpath: row.volume_subpath,
       daytona_sandbox_id: row.daytona_sandbox_id,
       last_commit_sha: row.last_commit_sha,
       deleted_at: row.deleted_at,
@@ -274,56 +263,4 @@ export async function replaceMessagesSupabase(
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
   return updateSessionSupabase(sessionId, { messages }, auth);
-}
-
-/**
- * Atomically claim `daytona_sandbox_id` when it is still null.
- * Returns the id that won (ours if claimed, or whoever wrote first).
- */
-export async function claimDaytonaSandboxIdSupabase(
-  sessionId: string,
-  sandboxId: string,
-  auth: SessionAuthContext = { userId: null },
-): Promise<{ claimed: boolean; daytonaSandboxId: string | null }> {
-  const existing = await getSessionSupabase(sessionId, auth);
-  if (!existing) {
-    throw new Error(`Session not found: ${sessionId}`);
-  }
-
-  if (existing.daytonaSandboxId === sandboxId) {
-    return { claimed: true, daytonaSandboxId: sandboxId };
-  }
-  if (existing.daytonaSandboxId) {
-    return {
-      claimed: false,
-      daytonaSandboxId: existing.daytonaSandboxId,
-    };
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const updatedAt = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("sessions")
-    .update({
-      daytona_sandbox_id: sandboxId,
-      updated_at: updatedAt,
-    })
-    .eq("id", sessionId)
-    .is("daytona_sandbox_id", null)
-    .select("daytona_sandbox_id")
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to claim daytona sandbox id: ${error.message}`);
-  }
-
-  if (data?.daytona_sandbox_id === sandboxId) {
-    return { claimed: true, daytonaSandboxId: sandboxId };
-  }
-
-  const fresh = await getSessionSupabase(sessionId, auth);
-  return {
-    claimed: fresh?.daytonaSandboxId === sandboxId,
-    daytonaSandboxId: fresh?.daytonaSandboxId ?? null,
-  };
 }

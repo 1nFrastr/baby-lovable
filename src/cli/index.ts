@@ -236,21 +236,6 @@ async function commitTurnWorkspace(
     );
   }
 
-  if (session.sandboxMode === "daytona") {
-    try {
-      const { persistDaytonaWorkspaceToVolume } = await import(
-        "@/lib/sandbox/daytona/volume-sync"
-      );
-      const synced = await persistDaytonaWorkspaceToVolume(sandbox);
-      if (synced) {
-        logger.info("Volume sync: source persisted to volume");
-      }
-    } catch (error) {
-      logger.warn(
-        `Volume sync failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
 }
 
 async function interactiveLoop(
@@ -316,7 +301,7 @@ async function main(): Promise<void> {
 
   const workspace =
     session.sandboxMode === "daytona"
-      ? `daytona:workspace + persist:${session.volumeSubpath ?? session.id}`
+      ? "daytona:workspace"
       : path.relative(process.cwd(), getWorkspaceRoot(session.id));
 
   logger.banner([
@@ -351,10 +336,10 @@ async function main(): Promise<void> {
 async function shutdownPreview(session: Session): Promise<void> {
   if (session.sandboxMode === "daytona") {
     try {
-      const { getDaytonaPreviewStatus } = await import(
-        "@/lib/sandbox/dev-server-daytona"
+      const { getDaytonaAppServerStatus } = await import(
+        "@/lib/sandbox/daytona/app-server"
       );
-      const status = getDaytonaPreviewStatus(session.id);
+      const status = await getDaytonaAppServerStatus(session.id);
       if (status.status === "ready" && status.url) {
         logger.info(`Daytona sandbox kept — preview: ${status.url}`);
       } else {
@@ -367,8 +352,8 @@ async function shutdownPreview(session: Session): Promise<void> {
   }
 
   try {
-    const { stopDevServer } = await import("@/lib/sandbox/preview");
-    await stopDevServer(session.id);
+    const { stopAppServer } = await import("@/lib/sandbox/preview");
+    await stopAppServer(session.id);
   } catch {
     // Best-effort: never block exit on teardown failures.
   }
