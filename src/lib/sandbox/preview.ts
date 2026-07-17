@@ -1,127 +1,121 @@
-import type { PreviewStatus } from "./dev-server";
-import {
-  ensureDevServer as ensureLocalDevServer,
-  ensurePreviewBootstrap as ensureLocalPreviewBootstrap,
-  getPreviewReport as getLocalPreviewReport,
-  getPreviewStatus as getLocalPreviewStatus,
-  hasNodeModules as hasLocalNodeModules,
-  isTransientPreviewFailure as isLocalTransientPreviewFailure,
-  resolvePreviewStatus as resolveLocalPreviewStatus,
-  restartDevServer as restartLocalDevServer,
-  stopDevServer as stopLocalDevServer,
-  type PreviewReport,
-} from "./dev-server";
-import {
-  destroyDaytonaPreview,
-  ensureDaytonaDevServer,
-  ensureDaytonaPreviewBootstrap,
-  getDaytonaBuildError,
-  getDaytonaPreviewReport,
-  getDaytonaPreviewStatus,
-  hasDaytonaNodeModules,
-  observeDaytonaPreviewStatus,
-} from "./dev-server-daytona";
-import { getSession } from "@/lib/session/store";
-import { getBuildError as getLocalBuildError } from "./dev-server";
+/**
+ * Preview API — one place for callers.
+ *
+ * Three layers: sandbox → appServer → previewUrl
+ *
+ * Read:  getSandboxStatus / getAppServerStatus / getPreviewUrlStatus / getAllStatus
+ *        checkAppServer / getBuildError
+ * Write: startPreview / startAppServer / restartAppServer / stopAppServer / deleteSandbox
+ *
+ * Mode (local | daytona) is chosen once via createPreviewBackend / getPreviewBackend.
+ */
 
-async function sandboxModeFor(sessionId: string) {
-  const session = await getSession(sessionId);
-  return session?.sandboxMode ?? "local";
+import { createPreviewBackend, getPreviewBackend } from "./preview-backend";
+import { isTempFailure as isLocalTempFailure } from "./preview-errors";
+import type {
+  AllStatus,
+  AppServerCheck,
+  AppServerStatus,
+  PreviewUrlStatus,
+  SandboxStatus,
+} from "./preview-types";
+
+function previewUrlFromAppServer(appServer: AppServerStatus): PreviewUrlStatus {
+  if (appServer.status === "ready") {
+    return { status: "ready", url: appServer.url };
+  }
+  return { status: "none" };
 }
 
-export function ensurePreviewBootstrap(sessionId: string): void {
-  void sandboxModeFor(sessionId).then((mode) => {
-    if (mode === "daytona") {
-      ensureDaytonaPreviewBootstrap(sessionId);
-      return;
-    }
-    ensureLocalPreviewBootstrap(sessionId);
-  });
+export async function getSandboxStatus(
+  sessionId: string,
+): Promise<SandboxStatus> {
+  return (await getPreviewBackend(sessionId)).getSandboxStatus(sessionId);
+}
+
+export async function getAppServerStatus(
+  sessionId: string,
+): Promise<AppServerStatus> {
+  return (await getPreviewBackend(sessionId)).getAppServerStatus(sessionId);
+}
+
+export async function getPreviewUrlStatus(
+  sessionId: string,
+): Promise<PreviewUrlStatus> {
+  return previewUrlFromAppServer(await getAppServerStatus(sessionId));
+}
+
+/** Read-only snapshot of all three layers. Never starts anything. */
+export async function getAllStatus(sessionId: string): Promise<AllStatus> {
+  const backend = await getPreviewBackend(sessionId);
+  const [sandbox, appServer] = await Promise.all([
+    backend.getSandboxStatus(sessionId),
+    backend.getAppServerStatus(sessionId),
+  ]);
+  return {
+    sandbox,
+    appServer,
+    previewUrl: previewUrlFromAppServer(appServer),
+  };
 }
 
 /**
- * Read the in-memory preview compile error without waiting for install/dev-server
- * bootstrap. Use at agent turn start; call getPreviewReport from checkPreview when
- * a full status probe is needed.
+ * Check app server health (HTTP + buildError).
+ * Does not start sandbox or app server.
  */
-export async function getCachedPreviewBuildError(
+export async function checkAppServer(
+  sessionId: string,
+): Promise<AppServerCheck> {
+  return (await getPreviewBackend(sessionId)).checkAppServer(sessionId);
+}
+
+export async function getBuildError(
   sessionId: string,
 ): Promise<string | null> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    return getDaytonaBuildError(sessionId);
-  }
-  return getLocalBuildError(sessionId);
+  return (await getPreviewBackend(sessionId)).getBuildError(sessionId);
 }
 
-export async function getPreviewReport(
+/** Background: sandbox → app server → preview URL. Call at agent turn start. */
+export function startPreview(sessionId: string): void {
+  void getPreviewBackend(sessionId).then((backend) => {
+    backend.startPreview(sessionId);
+  });
+}
+
+export async function startAppServer(
   sessionId: string,
-  options?: { restart?: boolean },
-): Promise<PreviewReport> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    return getDaytonaPreviewReport(sessionId, options);
-  }
-  return getLocalPreviewReport(sessionId, options);
+): Promise<AppServerStatus> {
+  return (await getPreviewBackend(sessionId)).startAppServer(sessionId);
 }
 
-/** Observe-only for UI polls — never create sandbox or kick off install/dev. */
-export async function resolvePreviewStatus(
+export async function restartAppServer(
   sessionId: string,
-): Promise<PreviewStatus> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    return observeDaytonaPreviewStatus(sessionId);
-  }
-  return resolveLocalPreviewStatus(sessionId);
+): Promise<AppServerStatus> {
+  return (await getPreviewBackend(sessionId)).restartAppServer(sessionId);
 }
 
-export async function ensureDevServer(sessionId: string): Promise<PreviewStatus> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    return ensureDaytonaDevServer(sessionId);
-  }
-  return ensureLocalDevServer(sessionId);
+export async function stopAppServer(sessionId: string): Promise<void> {
+  await (await getPreviewBackend(sessionId)).stopAppServer(sessionId);
+}
+
+export async function deleteSandbox(sessionId: string): Promise<void> {
+  await (await getPreviewBackend(sessionId)).deleteSandbox(sessionId);
 }
 
 export async function hasNodeModules(sessionId: string): Promise<boolean> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    return hasDaytonaNodeModules(sessionId);
-  }
-  return hasLocalNodeModules(sessionId);
+  return (await getPreviewBackend(sessionId)).hasNodeModules(sessionId);
 }
 
-export async function getPreviewStatus(
-  sessionId: string,
-): Promise<PreviewStatus> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    return getDaytonaPreviewStatus(sessionId);
-  }
-  return getLocalPreviewStatus(sessionId);
+export function isTempFailure(check: AppServerCheck): boolean {
+  return isLocalTempFailure(check);
 }
 
-export async function restartDevServer(sessionId: string): Promise<PreviewStatus> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    const { restartDaytonaDevServer } = await import("./dev-server-daytona");
-    return restartDaytonaDevServer(sessionId);
-  }
-  return restartLocalDevServer(sessionId);
-}
-
-export async function stopDevServer(sessionId: string): Promise<void> {
-  const mode = await sandboxModeFor(sessionId);
-  if (mode === "daytona") {
-    await destroyDaytonaPreview(sessionId);
-    return;
-  }
-  await stopLocalDevServer(sessionId);
-}
-
-export function isTransientPreviewFailure(report: PreviewReport): boolean {
-  return isLocalTransientPreviewFailure(report);
-}
-
-export type { PreviewReport, PreviewStatus };
+export { createPreviewBackend, getPreviewBackend };
+export type { PreviewBackend } from "./preview-backend";
+export type {
+  AllStatus,
+  AppServerCheck,
+  AppServerStatus,
+  PreviewUrlStatus,
+  SandboxStatus,
+} from "./preview-types";

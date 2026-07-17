@@ -3,8 +3,7 @@ import path from "node:path";
 
 import type { UIMessage } from "ai";
 
-import { ensureWorkspace } from "@/lib/sandbox/local-provider";
-import { getVolumeSubpath } from "@/lib/sandbox/daytona/volume-paths";
+import { ensureWorkspace } from "@/lib/sandbox/local/sandbox";
 import {
   getSessionsRoot,
   resolveSessionRoot,
@@ -116,9 +115,7 @@ export async function createSessionLocal(
     deletedAt: null,
   };
 
-  if (session.sandboxMode === "daytona") {
-    session.volumeSubpath = getVolumeSubpath(session.id, session.userId);
-  } else {
+  if (session.sandboxMode === "local") {
     await ensureWorkspace(session.id, session.userId);
   }
 

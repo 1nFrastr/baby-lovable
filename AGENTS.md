@@ -124,7 +124,7 @@ Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 3. If `buildError` is non-null, fix source code and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
 4. Optionally `curl` the preview URL or read workspace source files to assert behavior.
 
-Preview lifecycle is owned by `src/lib/sandbox/dev-server.ts` — agents must **not** run `pnpm dev` themselves.
+Preview lifecycle is owned by `src/lib/sandbox/local/app-server.ts` / `daytona/app-server.ts` — agents must **not** run `pnpm dev` themselves.
 
 ### Orphan preview servers (CPU / heat)
 

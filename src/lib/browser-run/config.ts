@@ -77,12 +77,3 @@ export function appTestStatusWriteDelayMs(): number {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? Math.min(n, 30_000) : 0;
 }
-
-/**
- * Local-only: drop in-memory Daytona preview state before each status resolve,
- * so the poller re-discovers preview like a cold Vercel isolate.
- * Separate from volume/persistence bugs — does not recreate the sandbox.
- */
-export function simulatePreviewColdIsolate(): boolean {
-  return envFlagEnabled("BABY_LOVABLE_SIMULATE_PREVIEW_COLD");
-}

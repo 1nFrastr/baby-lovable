@@ -12,8 +12,8 @@ import {
   runAppTest,
   type AppTestAction,
 } from "@/lib/browser-run";
-import { ensureDaytonaPreviewBootstrap } from "@/lib/sandbox/dev-server-daytona";
-import { getPreviewReport } from "@/lib/sandbox/preview";
+import { startDaytonaPreview } from "@/lib/sandbox/daytona/app-server";
+import { checkAppServer } from "@/lib/sandbox/preview";
 import { getSession } from "@/lib/session/store";
 
 function printUsage(): void {
@@ -142,7 +142,7 @@ function parseArgs(argv: string[]) {
 async function waitForPreviewReady(sessionId: string, timeoutMs = 300_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const report = await getPreviewReport(sessionId);
+    const report = await checkAppServer(sessionId);
     if (report.status === "ready" && report.url) {
       return report;
     }
@@ -179,7 +179,7 @@ async function main() {
 
   if (bootstrap) {
     console.log("Bootstrapping Daytona preview…");
-    ensureDaytonaPreviewBootstrap(sessionId);
+    startDaytonaPreview(sessionId);
     await waitForPreviewReady(sessionId);
     console.log("Preview ready.");
   }

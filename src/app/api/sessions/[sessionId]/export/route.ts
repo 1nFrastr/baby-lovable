@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { exportWorkspaceArchive } from "@/lib/sandbox/export-archive";
+import { exportWorkspaceArchive } from "@/lib/sandbox/daytona/export-archive";
 import { NotImplementedError } from "@/lib/sandbox/types";
 import {
   requireSessionAuth,

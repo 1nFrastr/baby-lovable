@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { PreviewStatus } from "@/lib/sandbox/dev-server";
+import type { AppServerStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
 /** Mirrors AppTestLatestStatus — kept local so the client bundle does not pull Node fs. */
@@ -40,7 +40,7 @@ const APP_TEST_POLL_MS_RUNNING = 800;
 /** Keep PiP visible briefly after the run ends so the final frame is usable. */
 const PIP_HOLD_AFTER_DONE_MS = 10_000;
 
-function pollDelay(status: PreviewStatus["status"]): number {
+function pollDelay(status: AppServerStatus["status"]): number {
   return status === "ready" ? POLL_MS_READY : POLL_MS_ACTIVE;
 }
 
@@ -85,7 +85,9 @@ export function PreviewPanel({
   chatAppTestReady = false,
   previewReloadKey = null,
 }: PreviewPanelProps) {
-  const [preview, setPreview] = useState<PreviewStatus>({ status: "stopped" });
+  const [preview, setPreview] = useState<AppServerStatus>({ status: "stopped" });
+  const [sandboxStatus, setSandboxStatus] =
+    useState<SandboxStatus>("missing");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [iframeEpoch, setIframeEpoch] = useState(0);
@@ -191,16 +193,27 @@ export function PreviewPanel({
     return () => window.clearTimeout(timeoutId);
   }, [pipHoldUntil, pipHoldTick]);
 
-  const loadPreview = useCallback(async (): Promise<PreviewStatus | null> => {
+  const loadPreview = useCallback(async (): Promise<AppServerStatus | null> => {
     try {
       const response = await fetch(`/api/sessions/${sessionId}/preview`);
       if (!response.ok) {
         return null;
       }
 
-      const data = (await response.json()) as { preview: PreviewStatus };
-      setPreview(data.preview);
-      return data.preview;
+      const data = (await response.json()) as {
+        preview?: AppServerStatus;
+        appServer?: AppServerStatus;
+        sandbox?: SandboxStatus;
+      };
+      const appServer = data.appServer ?? data.preview;
+      if (!appServer) {
+        return null;
+      }
+      setPreview(appServer);
+      if (data.sandbox) {
+        setSandboxStatus(data.sandbox);
+      }
+      return appServer;
     } catch {
       return null;
     }
@@ -421,7 +434,9 @@ export function PreviewPanel({
                       ? "Project not ready"
                       : preview.status === "error"
                         ? preview.error
-                        : "Waiting for agent to start preview…"}
+                        : sandboxStatus === "stopped"
+                          ? "Sandbox stopped — waiting for agent to warm preview…"
+                          : "Waiting for agent to start preview…"}
           </p>
         </div>
 

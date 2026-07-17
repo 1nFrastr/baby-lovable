@@ -220,8 +220,8 @@ export async function searchFilesStep(
 }
 
 async function restartPreviewAfterInstall(context: ToolContext): Promise<void> {
-  const { restartDevServer } = await import("@/lib/sandbox/preview");
-  void restartDevServer(context.sessionId).catch(() => {
+  const { restartAppServer } = await import("@/lib/sandbox/preview");
+  void restartAppServer(context.sessionId).catch(() => {
     // Preview restart failures are surfaced through checkPreview.
   });
 }
@@ -358,20 +358,20 @@ export async function checkPreviewStep(
   "use step";
 
   const {
-    getPreviewReport,
-    isTransientPreviewFailure,
-    restartDevServer,
+    checkAppServer,
+    isTempFailure,
+    restartAppServer,
   } = await import("@/lib/sandbox/preview");
 
   if (input.restart) {
-    await restartDevServer(context.sessionId);
+    await restartAppServer(context.sessionId);
     await new Promise((resolve) => setTimeout(resolve, 8_000));
   } else {
     // Give HMR a moment to settle after the agent's last edit.
     await new Promise((resolve) => setTimeout(resolve, 4_000));
   }
 
-  let report = await getPreviewReport(context.sessionId);
+  let report = await checkAppServer(context.sessionId);
   let retried = false;
 
   for (
@@ -381,13 +381,13 @@ export async function checkPreviewStep(
     attempt++
   ) {
     await new Promise((resolve) => setTimeout(resolve, 3_000));
-    report = await getPreviewReport(context.sessionId);
+    report = await checkAppServer(context.sessionId);
     retried = true;
   }
 
-  if (!input.restart && isTransientPreviewFailure(report)) {
+  if (!input.restart && isTempFailure(report)) {
     await new Promise((resolve) => setTimeout(resolve, 3_000));
-    report = await getPreviewReport(context.sessionId);
+    report = await checkAppServer(context.sessionId);
     retried = true;
   }
 

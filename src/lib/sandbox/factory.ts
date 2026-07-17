@@ -1,8 +1,9 @@
 import {
-  destroyDaytonaSandbox,
+  deleteDaytonaSandbox,
   getOrCreateDaytonaSandbox,
-} from "./daytona/sandbox-manager";
-import { ensureWorkspace, LocalProjectSandbox } from "./local-provider";
+} from "./daytona/sandbox";
+import { ensureWorkspace } from "./local/sandbox";
+import { LocalProjectSandbox } from "./local/provider";
 import type { ProjectSandbox, SandboxMode } from "./types";
 
 export async function getProjectSandbox(
@@ -26,4 +27,4 @@ export async function createSandbox(
   return getProjectSandbox(sessionId, mode, userId);
 }
 
-export { destroyDaytonaSandbox };
+export { deleteDaytonaSandbox };

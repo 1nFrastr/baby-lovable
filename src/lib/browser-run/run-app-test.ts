@@ -1,8 +1,8 @@
 import { chromium, type Browser } from "playwright-core";
 
 import { getSession } from "@/lib/session/store";
-import { isSyntheticHttpPreviewError } from "@/lib/sandbox/dev-server";
-import { getPreviewReport } from "@/lib/sandbox/preview";
+import { isSyntheticHttpPreviewError } from "@/lib/sandbox/preview-errors";
+import { checkAppServer } from "@/lib/sandbox/preview";
 
 import {
   createAppTestRunId,
@@ -151,7 +151,7 @@ export async function runAppTest(
     );
   }
 
-  const preview = await getPreviewReport(options.sessionId);
+  const preview = await checkAppServer(options.sessionId);
   if (preview.status !== "ready" || !preview.url) {
     return finish(
       failReport({

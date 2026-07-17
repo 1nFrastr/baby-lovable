@@ -1,15 +1,11 @@
-import { getOrCreateDaytonaSandbox } from "./daytona/sandbox-manager";
-import {
-  stageVolumeSourceToPath,
-  volumeHasSource,
-} from "./daytona/volume-sync";
-import { DAYTONA_WORKSPACE_ROOT } from "./daytona/config";
-import type { DaytonaProjectSandbox } from "./daytona-provider";
+import { getOrCreateDaytonaSandbox } from "./sandbox";
+import { DAYTONA_WORKSPACE_ROOT } from "./config";
+import type { DaytonaProjectSandbox } from "./provider";
 import { getSession } from "@/lib/session/store";
-import { NotImplementedError, type ProjectSandbox } from "./types";
-import { commitWorkspaceTurn } from "./workspace-git";
+import { NotImplementedError, type ProjectSandbox } from "../types";
+import { commitWorkspaceTurn } from "../workspace-git";
 
-export type ExportArchiveSource = "volume" | "sandbox-git";
+export type ExportArchiveSource = "sandbox-git";
 
 export interface ExportArchiveResult {
   filename: string;
@@ -19,7 +15,6 @@ export interface ExportArchiveResult {
 }
 
 const EXPORT_ZIP_PATH = "/tmp/baby-lovable-export.zip";
-const EXPORT_STAGING_DIR = "/tmp/baby-lovable-export-staging";
 
 const GIT_NAME = "baby-lovable";
 const GIT_EMAIL = "agent@baby-lovable.local";
@@ -100,7 +95,7 @@ async function gitArchiveAt(
       30,
     );
     if (head.exitCode !== 0) {
-      // Fresh tree with no commits yet (e.g. only tracked nothing) — create one.
+      // Fresh tree with no commits yet — create one.
       const bootstrap = await sandbox.process.executeCommand(
         [
           "git add -A",
@@ -134,10 +129,7 @@ async function gitArchiveAt(
   }
 }
 
-/**
- * Prefer durable volume source-of-truth. If the user exports before the first
- * persist, fall back to the live sandbox workspace git tree.
- */
+/** Export live sandbox workspace via git archive. */
 async function exportDaytonaArchive(
   sessionId: string,
   title?: string,
@@ -145,22 +137,6 @@ async function exportDaytonaArchive(
   const sandbox = await getOrCreateDaytonaSandbox(sessionId);
   const filename = archiveFilename(sessionId, title);
 
-  if (await volumeHasSource(sandbox)) {
-    const count = await stageVolumeSourceToPath(sandbox, EXPORT_STAGING_DIR);
-    if (count === 0) {
-      throw new Error("volume has package.json but no exportable source files");
-    }
-    await gitArchiveAt(sandbox, EXPORT_STAGING_DIR);
-    const bytes = await downloadExportZip(sandbox);
-    return {
-      filename,
-      contentType: "application/zip",
-      bytes,
-      source: "volume",
-    };
-  }
-
-  // Pre-persist path: commit working tree then archive sandbox git.
   try {
     await commitWorkspaceTurn(sandbox, {
       turnIndex: 0,
@@ -183,8 +159,6 @@ async function exportDaytonaArchive(
 
 /**
  * Export the session workspace as a zip of the git tree at HEAD.
- *
- * Daytona: volume (durable SoT) when populated; otherwise live sandbox git.
  * Local: not implemented yet — interface reserved.
  */
 export async function exportWorkspaceArchive(

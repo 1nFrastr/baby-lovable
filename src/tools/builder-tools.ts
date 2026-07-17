@@ -194,13 +194,13 @@ export const builderTools = {
   }),
   checkPreview: tool({
     description:
-      "Check the live dev-server preview for compile/runtime errors. Call this after editing files to verify the preview still compiles. Set restart=true to restart the managed dev server when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
+      "Probe the live app-server preview for compile/runtime errors (does not start preview). Call after editing files. Preview is warmed at turn start — if status is installing/starting, wait and call again. Set restart=true to restart the managed app server when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
     inputSchema: z.object({
       restart: z
         .boolean()
         .optional()
         .describe(
-          "Restart the managed dev server before checking. Use when preview cache is corrupt — never delete .next manually.",
+          "Restart the managed app server before probing. Use when preview cache is corrupt — never delete .next manually.",
         ),
     }),
     contextSchema: toolContextSchema,
@@ -208,7 +208,7 @@ export const builderTools = {
   }),
   testPreview: tool({
     description:
-      "Optional UI smoke test (Daytona + Browser Run). Call ONLY when the user explicitly asks to test/verify the preview in the browser — not after every checkPreview. Pass a small `actions` array (prefer 3–5 steps, max 8) for the main happy path — e.g. fill → submit → assertVisible. Do not script empty-state / delete / filter flows unless the user asked. Requires checkPreview ok. Returns { ok, summary, failedSteps }. On failure, fix once then stop.",
+      "Optional UI smoke test (Daytona + Browser Run). Call ONLY when the user explicitly asks to test/verify the preview in the browser — not after every checkPreview. Pass a small `actions` array (prefer 3–5 steps, max 8) for the main happy path — e.g. fill → submit → assertVisible. Do not script empty-state / delete / filter flows unless the user asked. Requires preview already ready (checkPreview ok). Does not start the preview. Returns { ok, summary, failedSteps }. On failure, fix once then stop.",
     inputSchema: z.object({
       actions: z
         .array(appTestActionSchema)

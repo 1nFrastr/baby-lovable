@@ -25,12 +25,8 @@ function pnpmCommands(): PackageManagerCommands {
 
 /** Resolve install/dev shell commands for the active sandbox mode. */
 export function resolvePackageManager(sandboxMode: SandboxMode): PackageManagerCommands {
-  const base = pnpmCommands();
-  // Daytona: workspace is local FS; volume mount is persist-only.
-  if (sandboxMode === "daytona") {
-    return base;
-  }
-  return base;
+  void sandboxMode;
+  return pnpmCommands();
 }
 
 export function packageManagerPromptLines(

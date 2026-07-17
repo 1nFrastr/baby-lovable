@@ -91,7 +91,7 @@ flowchart TB
 - Snapshot：预装 starter + `node_modules`，加速冷启动
 - `getPreviewLink` / signed embed URL：给 iframe 与 Browser Run
 
-关键路径：`src/lib/sandbox/daytona/**`、`dev-server-daytona.ts`
+关键路径：`src/lib/sandbox/daytona/**`、`src/lib/sandbox/local/**`
 
 ### 为什么倾向 Daytona（基于实现需求，而非品牌偏好）
 
@@ -176,7 +176,7 @@ ProjectSandbox {
 
 - `command-policy.ts`：收窄可执行命令
 - `protected-paths.ts`：收窄可写路径
-- Preview 生命周期归 `dev-server*.ts`，不归模型
+- Preview 生命周期归 `local/app-server*.ts` / `daytona/app-server*.ts`，不归模型
 
 ---
 

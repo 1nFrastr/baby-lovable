@@ -4,7 +4,6 @@ export {
   requireBrowserRunConfig,
   shouldPersistAppTestArtifacts,
   simulateServerlessMemoryLoss,
-  simulatePreviewColdIsolate,
   appTestStatusWriteDelayMs,
 } from "./config";
 export { createBrowserRunSession, toTabLiveViewUrl } from "./client";

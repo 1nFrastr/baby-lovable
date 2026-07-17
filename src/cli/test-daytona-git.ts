@@ -4,7 +4,7 @@ loadEnv({ path: ".env.local", quiet: true });
 
 import { Daytona } from "@daytona/sdk";
 
-import { DaytonaProjectSandbox } from "@/lib/sandbox/daytona-provider";
+import { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
 import { DAYTONA_WORKSPACE_ROOT } from "@/lib/sandbox/daytona/config";
 import { commitWorkspaceTurn } from "@/lib/sandbox/workspace-git";
 

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 
 import {
-  ensureDevServer,
-  getPreviewStatus,
+  deleteSandbox,
+  getAllStatus,
   hasNodeModules,
-  restartDevServer,
-  resolvePreviewStatus,
-  stopDevServer,
+  restartAppServer,
+  startAppServer,
+  stopAppServer,
 } from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
@@ -26,6 +26,7 @@ async function resolveAuth(request: Request) {
   }
 }
 
+/** Read-only: three-layer status. Never starts anything. */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -43,9 +44,13 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const preview = await resolvePreviewStatus(sessionId);
+    const all = await getAllStatus(sessionId);
     return NextResponse.json({
-      preview,
+      sandbox: all.sandbox,
+      appServer: all.appServer,
+      previewUrl: all.previewUrl,
+      // keep old field for existing UI during transition
+      preview: all.appServer,
       sandboxMode: session.sandboxMode,
     });
   } catch (error) {
@@ -56,6 +61,7 @@ export async function GET(
   }
 }
 
+/** Write: start or restart app server. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -77,25 +83,30 @@ export async function POST(
       action?: "start" | "restart";
     };
 
-    // Local: require node_modules before start (bootstrap installs via GET poll).
-    // Daytona: ensureDevServer/restart handles remote install during bootstrap.
     if (session.sandboxMode === "local") {
       const hasDeps = await hasNodeModules(sessionId);
       if (!hasDeps) {
         return NextResponse.json({
+          sandbox: "running" as const,
+          appServer: { status: "needs_install" as const },
+          previewUrl: { status: "none" as const },
           preview: { status: "needs_install" as const },
           sandboxMode: session.sandboxMode,
         });
       }
     }
 
-    const preview =
+    const appServer =
       body.action === "restart"
-        ? await restartDevServer(sessionId)
-        : await ensureDevServer(sessionId);
+        ? await restartAppServer(sessionId)
+        : await startAppServer(sessionId);
 
+    const all = await getAllStatus(sessionId);
     return NextResponse.json({
-      preview,
+      sandbox: all.sandbox,
+      appServer,
+      previewUrl: all.previewUrl,
+      preview: appServer,
       sandboxMode: session.sandboxMode,
     });
   } catch (error) {
@@ -106,6 +117,10 @@ export async function POST(
   }
 }
 
+/**
+ * Stop app server by default.
+ * Pass ?deleteSandbox=1 to also delete the Daytona sandbox.
+ */
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -123,10 +138,22 @@ export async function DELETE(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    await stopDevServer(sessionId);
-    const preview = await getPreviewStatus(sessionId);
+    const deleteVm =
+      new URL(request.url).searchParams.get("deleteSandbox") === "1" ||
+      new URL(request.url).searchParams.get("destroy") === "1";
+
+    if (deleteVm) {
+      await deleteSandbox(sessionId);
+    } else {
+      await stopAppServer(sessionId);
+    }
+
+    const all = await getAllStatus(sessionId);
     return NextResponse.json({
-      preview,
+      sandbox: all.sandbox,
+      appServer: all.appServer,
+      previewUrl: all.previewUrl,
+      preview: all.appServer,
       sandboxMode: session.sandboxMode,
     });
   } catch (error) {
