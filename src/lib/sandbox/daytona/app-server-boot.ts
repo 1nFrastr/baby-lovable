@@ -13,6 +13,7 @@ import {
   remoteFileExists,
   signedEmbedUrl,
 } from "./app-server-health";
+import { clearSignedPreviewStore } from "@/lib/session/signed-preview-store";
 
 export const DEV_SESSION = (sessionId: string) => `preview-${sessionId}`;
 
@@ -78,7 +79,7 @@ export async function startDevServer(
         signal: AbortSignal.timeout(5_000),
       });
       if (res.status < 600) {
-        const embed = await signedEmbedUrl(sdk, port);
+        const embed = await signedEmbedUrl(sessionId, sdk, port);
         return { status: "ready", url: embed ?? preview.url, port };
       }
     } catch {
@@ -119,6 +120,7 @@ export async function runStart(sessionId: string): Promise<AppServerStatus> {
 }
 
 export async function stopDevSession(sessionId: string): Promise<void> {
+  await clearSignedPreviewStore(sessionId);
   const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
   if (!sandbox) {
     return;

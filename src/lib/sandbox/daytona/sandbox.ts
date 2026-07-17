@@ -7,6 +7,7 @@ import { ensureDaytonaWorkspace } from "./workspace-bootstrap";
 import { commitWorkspaceTurn } from "../workspace-git";
 import type { SandboxStatus } from "../preview-types";
 import type { DaytonaProjectSandbox } from "./provider";
+import { clearSignedPreviewStore } from "@/lib/session/signed-preview-store";
 import {
   createSandbox,
   persistSandboxId,
@@ -135,6 +136,8 @@ export async function getOrCreateDaytonaSandbox(
 }
 
 export async function deleteDaytonaSandbox(sessionId: string): Promise<void> {
+  await clearSignedPreviewStore(sessionId);
+
   const session = await getSession(sessionId);
   const sandboxId = session?.daytonaSandboxId;
   if (!sandboxId) {
