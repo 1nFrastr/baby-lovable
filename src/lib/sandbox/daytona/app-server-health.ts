@@ -1,12 +1,19 @@
 /** App-server health: probe preview URL, next logs, compile errors. */
+import {
+  readSignedPreviewStore,
+  writeSignedPreviewStore,
+} from "@/lib/session/signed-preview-store";
+import type { Sandbox } from "@daytona/sdk";
+
 import { isUnreliableCompileError } from "../preview-errors";
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
-import { getExistingDaytonaSandbox } from "./sandbox";
 import type { DaytonaProjectSandbox } from "./provider";
-import type { Sandbox } from "@daytona/sdk";
+import { getExistingDaytonaSandbox } from "./sandbox";
 
 const SIGNED_TTL_SEC = 3600;
+/** Re-mint before expiry so iframe never hits a dead signed URL mid-session. */
+const SIGNED_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 15_000;
 
 const COMPILE_MARKERS = [
@@ -57,12 +64,36 @@ export function extractCompileError(content: string): string | null {
   return null;
 }
 
+/**
+ * Stable iframe URL for a session. Reuses the same signed URL until near TTL
+ * so localStorage / cookies keep working across checkPreview and page refresh.
+ * Backed by session store (disk or Supabase) for serverless / Workflow isolates.
+ */
 export async function signedEmbedUrl(
+  sessionId: string,
   sdk: Sandbox,
   port: number,
 ): Promise<string | undefined> {
+  const now = Date.now();
+  const cached = await readSignedPreviewStore(sessionId);
+  if (
+    cached &&
+    cached.sandboxId === sdk.id &&
+    cached.port === port &&
+    cached.expiresAtMs - SIGNED_REFRESH_BUFFER_MS > now
+  ) {
+    return cached.url;
+  }
+
   try {
-    return (await sdk.getSignedPreviewUrl(port, SIGNED_TTL_SEC)).url;
+    const signed = await sdk.getSignedPreviewUrl(port, SIGNED_TTL_SEC);
+    await writeSignedPreviewStore(sessionId, {
+      url: signed.url,
+      sandboxId: sdk.id,
+      port,
+      expiresAtMs: now + SIGNED_TTL_SEC * 1000,
+    });
+    return signed.url;
   } catch {
     return undefined;
   }
@@ -98,7 +129,7 @@ export async function probePreview(
       return null;
     }
 
-    const embed = await signedEmbedUrl(sdk, port);
+    const embed = await signedEmbedUrl(sessionId, sdk, port);
     logDaytonaBootstrap(sessionId, "preview", `ready ${preview.url}`);
     return {
       url: embed ?? preview.url,
