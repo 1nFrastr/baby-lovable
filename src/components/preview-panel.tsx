@@ -30,11 +30,6 @@ interface PreviewPanelProps {
   chatAppTest?: AppTestLatestStatus | null;
   /** True after Chat has reported an extract for this session (including none). */
   chatAppTestReady?: boolean;
-  /**
-   * Changes when Chat sees a new successful checkPreview (toolCallId).
-   * Remounts the iframe so Daytona proxy / blocked HMR still shows latest UI.
-   */
-  previewReloadKey?: string | null;
 }
 
 /** Keep PiP visible briefly after the run ends so the final frame is usable. */
@@ -123,7 +118,6 @@ export function PreviewPanel({
   runtimeProjection = null,
   chatAppTest = null,
   chatAppTestReady = false,
-  previewReloadKey = null,
 }: PreviewPanelProps) {
   const invalidateRuntime = useInvalidateSessionRuntime();
   const projection = runtimeProjection;
@@ -232,14 +226,6 @@ export function PreviewPanel({
     };
   }, []);
 
-  // After agent checkPreview ok: refresh runtime snapshot (iframe remounts via key).
-  useEffect(() => {
-    if (!previewReloadKey) {
-      return;
-    }
-    invalidateRuntime(sessionId);
-  }, [previewReloadKey, invalidateRuntime, sessionId]);
-
   // Enter / re-enter session once: kick startPreview. invalidateRuntime must stay
   // referentially stable (useCallback) or this effect loops with POST /preview.
   useEffect(() => {
@@ -326,8 +312,8 @@ export function PreviewPanel({
       : preview.status === "starting"
         ? preview.url
         : undefined;
-  // Remount when generation advances or checkPreview toolCallId changes.
-  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${previewReloadKey ?? ""}`;
+  // Remount only when URL or restart generation changes — not on checkPreview.
+  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}`;
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">

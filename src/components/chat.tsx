@@ -11,10 +11,6 @@ import {
 } from "@/lib/chat/format-tool-label";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
-  extractLatestSuccessfulCheckPreview,
-  type CheckPreviewOkSignal,
-} from "@/lib/chat/check-preview-from-messages";
-import {
   hasAssistantParts,
   mergeDisplayMessages,
   persistedMessagesLagChat,
@@ -40,8 +36,6 @@ interface ChatProps {
   onAppTestStatus?: (
     status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
   ) => void;
-  /** Fires when a new successful checkPreview appears (skips history on hydrate). */
-  onCheckPreviewOk?: (signal: CheckPreviewOkSignal) => void;
 }
 
 export function Chat({
@@ -52,7 +46,6 @@ export function Chat({
   sandboxMode = "local",
   onSessionRefresh,
   onAppTestStatus,
-  onCheckPreviewOk,
 }: ChatProps) {
   const transport = useMemo(
     () =>
@@ -97,29 +90,6 @@ export function Chat({
     }
     onAppTestStatus(extractAppTestStatusFromMessages(displayMessages));
   }, [displayMessages, onAppTestStatus]);
-
-  const checkPreviewSeededRef = useRef(false);
-  const lastCheckPreviewOkIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!onCheckPreviewOk) {
-      return;
-    }
-
-    const signal = extractLatestSuccessfulCheckPreview(displayMessages);
-    if (!checkPreviewSeededRef.current) {
-      checkPreviewSeededRef.current = true;
-      lastCheckPreviewOkIdRef.current = signal?.toolCallId ?? null;
-      return;
-    }
-
-    if (!signal || signal.toolCallId === lastCheckPreviewOkIdRef.current) {
-      return;
-    }
-
-    lastCheckPreviewOkIdRef.current = signal.toolCallId;
-    onCheckPreviewOk(signal);
-  }, [displayMessages, onCheckPreviewOk]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
