@@ -62,9 +62,6 @@ function rowToSession(row: SessionRow): Session {
   if (row.git_remote) {
     session.gitRemote = row.git_remote;
   }
-  if (row.daytona_sandbox_id) {
-    session.daytonaSandboxId = row.daytona_sandbox_id;
-  }
   if (row.last_commit_sha) {
     session.lastCommitSha = row.last_commit_sha;
   }
@@ -100,7 +97,7 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     run_status: session.runStatus,
     sandbox_mode: session.sandboxMode,
     git_remote: session.gitRemote ?? null,
-    daytona_sandbox_id: session.daytonaSandboxId ?? null,
+    daytona_sandbox_id: null,
     last_commit_sha: session.lastCommitSha ?? null,
     deleted_at: session.deletedAt ?? null,
   };
@@ -209,7 +206,7 @@ export async function updateSessionSupabase(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const { lastRunId, daytonaSandboxId, ...rest } = input;
+  const { lastRunId, ...rest } = input;
 
   const updated: Session = {
     ...existing,
@@ -222,12 +219,6 @@ export async function updateSessionSupabase(
     delete updated.lastRunId;
   } else if (lastRunId !== undefined) {
     updated.lastRunId = lastRunId;
-  }
-
-  if (daytonaSandboxId === null) {
-    delete updated.daytonaSandboxId;
-  } else if (daytonaSandboxId !== undefined) {
-    updated.daytonaSandboxId = daytonaSandboxId;
   }
 
   const supabase = getSupabaseAdminClient();
@@ -244,7 +235,7 @@ export async function updateSessionSupabase(
       run_status: row.run_status,
       sandbox_mode: row.sandbox_mode,
       git_remote: row.git_remote,
-      daytona_sandbox_id: row.daytona_sandbox_id,
+      daytona_sandbox_id: null,
       last_commit_sha: row.last_commit_sha,
       deleted_at: row.deleted_at,
     })

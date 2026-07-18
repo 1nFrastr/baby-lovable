@@ -1,27 +1,25 @@
-/** App-server API: status / start / stop / check (preview URL layer). */
+/** App-server API shim: status / start / stop / check → reconciler. */
 import type { AppServerCheck, AppServerStatus } from "../preview-types";
 import { logDaytonaBootstrap } from "./bootstrap-log";
+import { formatStartError } from "./app-server-boot";
+import { remoteFileExists } from "./app-server-health";
+import {
+  checkRuntimePreview,
+  ensureDesiredState,
+  readRuntime,
+  readRuntimeAppServerStatus,
+} from "./runtime-reconciler";
+import { deriveAppServerStatus } from "./runtime-state";
+import { getExistingDaytonaSandbox } from "./sandbox";
+import { extractCompileError, readDevLog } from "./app-server-health";
 import { getDaytonaDevPort } from "./config";
-import {
-  getExistingDaytonaSandbox,
-  getOrCreateDaytonaSandbox,
-} from "./sandbox";
-import {
-  extractCompileError,
-  httpStatus,
-  probePreview,
-  readDevLog,
-  remoteFileExists,
-} from "./app-server-health";
-import {
-  formatStartError,
-  runStart,
-  startDevServer,
-  stopDevSession,
-} from "./app-server-boot";
 
+/** Pure read — never create or wake. */
 export async function hasDaytonaNodeModules(sessionId: string): Promise<boolean> {
-  const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
+  if (!sandbox) {
+    return false;
+  }
   return remoteFileExists(sandbox, "node_modules/next/package.json");
 }
 
@@ -39,37 +37,29 @@ export async function getDaytonaBuildError(
 export async function getDaytonaAppServerStatus(
   sessionId: string,
 ): Promise<AppServerStatus> {
-  const ready = await probePreview(sessionId);
-  if (ready) {
-    return { status: "ready", url: ready.url, port: ready.port };
-  }
-
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
-  if (!sandbox) {
-    return { status: "stopped" };
-  }
-  if (!(await remoteFileExists(sandbox, "package.json"))) {
-    return { status: "needs_install" };
-  }
-  return { status: "stopped" };
+  return readRuntimeAppServerStatus(sessionId);
 }
 
-/** Fire-and-forget start (remote work continues if this isolate exits). */
+/** Fire-and-forget: submit desired=preview-ready. */
 export function startDaytonaPreview(sessionId: string): void {
-  void runStart(sessionId).catch((error) => {
-    logDaytonaBootstrap(
-      sessionId,
-      "preview",
-      `start failed: ${formatStartError(error).slice(0, 200)}`,
-    );
-  });
+  void ensureDesiredState(sessionId, "preview-ready", { wait: false }).catch(
+    (error) => {
+      logDaytonaBootstrap(
+        sessionId,
+        "preview",
+        `start failed: ${formatStartError(error).slice(0, 200)}`,
+      );
+    },
+  );
 }
 
 export async function startDaytonaAppServer(
   sessionId: string,
   options?: { wait?: boolean },
 ): Promise<AppServerStatus> {
-  if (!(options?.wait ?? false)) {
+  const wait = options?.wait ?? false;
+
+  if (!wait) {
     const current = await getDaytonaAppServerStatus(sessionId);
     if (current.status === "ready") {
       return current;
@@ -82,29 +72,28 @@ export async function startDaytonaAppServer(
   }
 
   try {
-    return await runStart(sessionId);
+    const snapshot = await ensureDesiredState(sessionId, "preview-ready", {
+      wait: true,
+    });
+    return deriveAppServerStatus(snapshot);
   } catch (error) {
     return { status: "error", error: formatStartError(error) };
   }
 }
 
 export async function stopDaytonaAppServer(sessionId: string): Promise<void> {
-  await stopDevSession(sessionId);
+  await ensureDesiredState(sessionId, "stopped", { wait: true });
 }
 
 export async function restartDaytonaAppServer(
   sessionId: string,
 ): Promise<AppServerStatus> {
-  await stopDevSession(sessionId);
-
   try {
-    const sandbox = await getOrCreateDaytonaSandbox(sessionId);
-    try {
-      await sandbox.process.executeCommand("rm -rf .next", ".", undefined, 60);
-    } catch {
-      // best effort
-    }
-    return await startDevServer(sandbox, sessionId);
+    const snapshot = await ensureDesiredState(sessionId, "preview-ready", {
+      wait: true,
+      restart: true,
+    });
+    return deriveAppServerStatus(snapshot);
   } catch (error) {
     return { status: "error", error: formatStartError(error) };
   }
@@ -114,38 +103,14 @@ export async function restartDaytonaAppServer(
 export async function checkDaytonaAppServer(
   sessionId: string,
 ): Promise<AppServerCheck> {
-  const probed = await probePreview(sessionId);
-
-  if (!probed) {
-    const status = await getDaytonaAppServerStatus(sessionId);
-    return {
-      status: status.status,
-      url: status.status === "ready" ? status.url : undefined,
-      buildError:
-        status.status === "error"
-          ? (status.error ?? "Preview failed to start in Daytona sandbox")
-          : null,
-    };
-  }
-
-  let http = await httpStatus(probed.probeUrl, probed.token);
-  let buildError = extractCompileError(await readDevLog(probed.sandbox));
-
-  if (!buildError && http < 500) {
-    buildError = null;
-  } else if (!buildError && http >= 500) {
-    await new Promise((r) => setTimeout(r, 2_000));
-    http = await httpStatus(probed.probeUrl, probed.token);
-    buildError =
-      http < 500
-        ? null
-        : `Preview returned HTTP ${http} but no compile error was captured.`;
-  }
-
+  const result = await checkRuntimePreview(sessionId);
   return {
-    status: "ready",
-    url: probed.url,
-    httpStatus: http,
-    buildError,
+    status: result.status,
+    url: result.url,
+    httpStatus: result.httpStatus,
+    buildError: result.buildError,
   };
 }
+
+/** Expose snapshot read for debugging / future callers. */
+export { readRuntime };

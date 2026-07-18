@@ -84,7 +84,6 @@ The CLI logger (`src/cli/logger.ts`) prints timestamped, colorized events:
 On each turn the runner also:
 
 - Bootstraps preview in the background (`pnpm install` + `pnpm dev` in the session workspace)
-- Injects any live `[Preview build error]` into context before the model runs
 - Saves merged messages back to `session.json`
 
 ## Web UI — optional visual check

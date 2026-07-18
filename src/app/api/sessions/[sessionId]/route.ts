@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { getAllStatus } from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
@@ -11,6 +10,10 @@ import { resolveSessionRunState } from "@/lib/session/run-status";
 import { getSession } from "@/lib/session/store";
 import { isActiveRunStatus } from "@/lib/session/types";
 
+/**
+ * Session history + run/draft only.
+ * Preview status lives on GET/POST `/preview` (PreviewPanel) — never block chat load on Daytona observe.
+ */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -34,7 +37,6 @@ export async function GET(
     }
 
     const resolved = await resolveSessionRunState(session);
-    const all = await getAllStatus(sessionId);
     const rawDraft =
       isActiveRunStatus(resolved.runStatus) && resolved.lastRunId
         ? await readDraft(sessionId, auth.userId)
@@ -45,10 +47,6 @@ export async function GET(
     return NextResponse.json({
       session: resolved,
       draft,
-      sandbox: all.sandbox,
-      appServer: all.appServer,
-      previewUrl: all.previewUrl,
-      preview: all.appServer,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {

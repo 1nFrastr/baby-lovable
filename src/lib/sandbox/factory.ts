@@ -1,6 +1,6 @@
 import {
+  attachDaytonaSandboxForFs,
   deleteDaytonaSandbox,
-  getOrCreateDaytonaSandbox,
 } from "./daytona/sandbox";
 import { ensureWorkspace } from "./local/sandbox";
 import { LocalProjectSandbox } from "./local/provider";
@@ -12,7 +12,7 @@ export async function getProjectSandbox(
   userId: string | null = null,
 ): Promise<ProjectSandbox> {
   if (mode === "daytona") {
-    return getOrCreateDaytonaSandbox(sessionId);
+    return attachDaytonaSandboxForFs(sessionId);
   }
 
   await ensureWorkspace(sessionId, userId);

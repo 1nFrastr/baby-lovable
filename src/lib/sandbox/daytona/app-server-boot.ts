@@ -1,19 +1,8 @@
-/** App-server boot: pnpm install + start/stop remote `pnpm dev`. */
-import type { AppServerStatus } from "../preview-types";
+/** App-server boot: atomic install / start / stop (no orchestration loops). */
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { DAYTONA_WORKSPACE_ROOT, getDaytonaDevPort } from "./config";
-import {
-  getExistingDaytonaSandbox,
-  getOrCreateDaytonaSandbox,
-} from "./sandbox";
 import { resolvePackageManager } from "../package-manager";
 import type { DaytonaProjectSandbox } from "./provider";
-import {
-  probePreview,
-  remoteFileExists,
-  signedEmbedUrl,
-} from "./app-server-health";
-import { clearSignedPreviewStore } from "@/lib/session/signed-preview-store";
 
 export const DEV_SESSION = (sessionId: string) => `preview-${sessionId}`;
 
@@ -28,7 +17,7 @@ export function formatStartError(error: unknown): string {
     : "Daytona 预览启动失败，请稍后重试或联系作者。";
 }
 
-async function installDeps(
+export async function installDeps(
   sandbox: DaytonaProjectSandbox,
   sessionId: string,
 ): Promise<void> {
@@ -42,11 +31,14 @@ async function installDeps(
   }
 }
 
-/** Start remote pnpm dev and wait until preview responds (or timeout). */
-export async function startDevServer(
+/**
+ * Create remote dev session and start `pnpm dev`.
+ * Does not wait for preview readiness — reconciler + observer handle that.
+ */
+export async function startDevSession(
   sandbox: DaytonaProjectSandbox,
   sessionId: string,
-): Promise<AppServerStatus> {
+): Promise<{ sessionName: string; port: number }> {
   const sdk = sandbox.sdkSandbox;
   const port = getDaytonaDevPort();
   const pm = resolvePackageManager("daytona");
@@ -70,58 +62,14 @@ export async function startDevServer(
     30,
   );
 
-  const deadline = Date.now() + 90_000;
-  while (Date.now() < deadline) {
-    try {
-      const preview = await sdk.getPreviewLink(port);
-      const res = await fetch(preview.url, {
-        headers: { "x-daytona-preview-token": preview.token },
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (res.status < 600) {
-        const embed = await signedEmbedUrl(sessionId, sdk, port);
-        return { status: "ready", url: embed ?? preview.url, port };
-      }
-    } catch {
-      // warming up
-    }
-    await new Promise((r) => setTimeout(r, 2_000));
-  }
-
-  return {
-    status: "error",
-    error: "Timed out waiting for Daytona preview to become ready",
-  };
+  return { sessionName, port };
 }
 
-/** Install if needed + start dev. Reuses healthy preview when present. */
-export async function runStart(sessionId: string): Promise<AppServerStatus> {
-  const already = await probePreview(sessionId);
-  if (already) {
-    return { status: "ready", url: already.url, port: already.port };
-  }
-
-  const sandbox = await getOrCreateDaytonaSandbox(sessionId);
-
-  if (!(await remoteFileExists(sandbox, "package.json"))) {
-    return { status: "needs_install" };
-  }
-
-  if (!(await remoteFileExists(sandbox, "node_modules/next/package.json"))) {
-    await installDeps(sandbox, sessionId);
-  }
-
-  const again = await probePreview(sessionId);
-  if (again) {
-    return { status: "ready", url: again.url, port: again.port };
-  }
-
-  return startDevServer(sandbox, sessionId);
-}
-
-export async function stopDevSession(sessionId: string): Promise<void> {
-  await clearSignedPreviewStore(sessionId);
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
+/** Stop remote preview session. Does not clear runtime preview cache. */
+export async function stopDevSession(
+  sandbox: DaytonaProjectSandbox | null,
+  sessionId: string,
+): Promise<void> {
   if (!sandbox) {
     return;
   }
@@ -131,3 +79,6 @@ export async function stopDevSession(sessionId: string): Promise<void> {
     // best effort
   }
 }
+
+/** @deprecated Use startDevSession — kept name alias during migration. */
+export const startDevServer = startDevSession;

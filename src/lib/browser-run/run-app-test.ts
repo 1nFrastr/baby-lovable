@@ -273,7 +273,7 @@ export async function runAppTest(
       timeout: 60_000,
     });
 
-    // Daytona signed preview often shows a "Loading …" interstitial first.
+    // Daytona preview proxy may show a "Loading …" interstitial first.
     await page
       .waitForFunction(
         () => {

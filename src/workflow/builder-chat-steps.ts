@@ -89,18 +89,6 @@ export async function getSessionStep(sessionId: string) {
   return session;
 }
 
-export async function getBuildErrorStep(
-  sessionId: string,
-): Promise<string | null> {
-  "use step";
-
-  const { startPreview, getBuildError } = await import(
-    "@/lib/sandbox/preview"
-  );
-  startPreview(sessionId);
-  return getBuildError(sessionId);
-}
-
 export async function saveSessionMessagesStep(
   sessionId: string,
   uiMessages: UIMessage[],

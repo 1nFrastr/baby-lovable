@@ -1,63 +1,126 @@
-/** Sandbox layer: getExisting / getOrCreate / delete / status. */
-import type { Session } from "@/lib/session/types";
-import { getSession } from "@/lib/session/store";
-
-import { getDaytonaClient } from "./client";
-import { ensureDaytonaWorkspace } from "./workspace-bootstrap";
-import { commitWorkspaceTurn } from "../workspace-git";
+/** Sandbox layer shim: getExisting / getOrCreate / delete / status → reconciler. */
 import type { SandboxStatus } from "../preview-types";
 import type { DaytonaProjectSandbox } from "./provider";
-import { clearSignedPreviewStore } from "@/lib/session/signed-preview-store";
 import {
-  createSandbox,
-  persistSandboxId,
-  reconnectSandbox,
-  wrapSandbox,
-} from "./vm";
+  deriveSandboxStatus,
+  isDesiredSatisfied,
+  type DaytonaRuntimeSnapshot,
+} from "./runtime-state";
+import { ensureDesiredState } from "./runtime-reconciler";
+import { getRuntimeSnapshot } from "./runtime-store";
+import { getSession } from "@/lib/session/store";
+import { reconnectSandbox, wrapSandbox } from "./vm";
 
-/** In-flight ensure only — cleared when the promise settles. */
-const ensurePromises = new Map<string, Promise<DaytonaProjectSandbox>>();
+/**
+ * Process-local FS attach cache.
+ * Parallel tool steps in one isolate share one reconnect; sequential tools reuse it.
+ * Durable snapshot remains source of truth across isolates.
+ */
+const attachBySession = new Map<string, Promise<DaytonaProjectSandbox>>();
 
-function mapSdkState(state: string | undefined): SandboxStatus {
-  switch (state) {
-    case "started":
-      return "running";
-    case "starting":
-    case "restoring":
-    case "pulling_image":
-      return "starting";
-    case "stopped":
-    case "stopping":
-    case "archived":
-    case "archiving":
-      return "stopped";
-    case "error":
-    case "build_failed":
-      return "error";
-    default:
-      return state ? "stopped" : "missing";
+/** Snapshot already has a usable workspace — skip reconcile + workspace bootstrap. */
+export function canFastAttachSandbox(
+  snapshot: DaytonaRuntimeSnapshot,
+): boolean {
+  if (!snapshot.sandboxId) {
+    return false;
   }
+  if (snapshot.desired === "deleted") {
+    return false;
+  }
+  return isDesiredSatisfied({ ...snapshot, desired: "sandbox-ready" });
 }
 
-/** Read-only — never starts or creates. */
-export async function getDaytonaSandboxStatus(
+async function reconnectProject(
   sessionId: string,
-): Promise<SandboxStatus> {
-  const session = await getSession(sessionId);
-  if (!session?.daytonaSandboxId || session.sandboxMode !== "daytona") {
-    return "missing";
+  sandboxId: string,
+  wake: boolean,
+): Promise<DaytonaProjectSandbox | null> {
+  const sdk = await reconnectSandbox(sessionId, sandboxId, wake);
+  if (!sdk) {
+    return null;
   }
-
-  try {
-    const sandbox = await getDaytonaClient().get(session.daytonaSandboxId);
-    return mapSdkState(sandbox.state);
-  } catch {
-    return "missing";
-  }
+  return wrapSandbox(sessionId, sdk);
 }
 
 /**
- * Reconnect to session.daytonaSandboxId — never create.
+ * Attach for FS / process tools.
+ * Fast path: runtime says sandbox-ready → one Daytona get (no ensureDesiredState,
+ * no workspace check). Cold path: ensure once, then attach.
+ */
+async function attachDaytonaSandboxForFsOnce(
+  sessionId: string,
+): Promise<DaytonaProjectSandbox> {
+  const session = await getSession(sessionId);
+  if (!session || session.sandboxMode !== "daytona") {
+    throw new Error(`Session ${sessionId} is not a Daytona sandbox session`);
+  }
+
+  let snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+
+  if (canFastAttachSandbox(snapshot) && snapshot.sandboxId) {
+    const project = await reconnectProject(
+      sessionId,
+      snapshot.sandboxId,
+      true,
+    );
+    if (project) {
+      return project;
+    }
+  }
+
+  snapshot = await ensureDesiredState(sessionId, "sandbox-ready", {
+    wait: true,
+  });
+  if (!snapshot.sandboxId) {
+    throw new Error(`Daytona sandbox not ready for session ${sessionId}`);
+  }
+
+  const project = await reconnectProject(sessionId, snapshot.sandboxId, true);
+  if (!project) {
+    throw new Error(`Failed to attach Daytona sandbox ${snapshot.sandboxId}`);
+  }
+  return project;
+}
+
+/**
+ * Coalesced FS attach for the current isolate.
+ * Prefer this over ensureDesiredState + getExisting for tool I/O.
+ */
+export function attachDaytonaSandboxForFs(
+  sessionId: string,
+): Promise<DaytonaProjectSandbox> {
+  const pending = attachBySession.get(sessionId);
+  if (pending) {
+    return pending;
+  }
+
+  const promise = attachDaytonaSandboxForFsOnce(sessionId).catch((error) => {
+    if (attachBySession.get(sessionId) === promise) {
+      attachBySession.delete(sessionId);
+    }
+    throw error;
+  });
+
+  attachBySession.set(sessionId, promise);
+  return promise;
+}
+
+export function clearDaytonaAttachCache(sessionId: string): void {
+  attachBySession.delete(sessionId);
+}
+
+/** Read-only — durable snapshot only (no Daytona observe / get). */
+export async function getDaytonaSandboxStatus(
+  sessionId: string,
+): Promise<SandboxStatus> {
+  const snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  return deriveSandboxStatus(snapshot);
+}
+
+/**
+ * Reconnect to runtime sandboxId — never create, never re-bootstrap workspace.
+ * Workspace seeding belongs to the reconciler (`actionBootstrapWorkspace`).
  * wake=false: do not start stopped VMs.
  */
 export async function getExistingDaytonaSandbox(
@@ -66,108 +129,26 @@ export async function getExistingDaytonaSandbox(
 ): Promise<DaytonaProjectSandbox | null> {
   const wake = options?.wake ?? false;
   const session = await getSession(sessionId);
-  if (!session?.daytonaSandboxId || session.sandboxMode !== "daytona") {
+  if (!session || session.sandboxMode !== "daytona") {
     return null;
   }
 
-  const sandbox = await reconnectSandbox(
-    sessionId,
-    session.daytonaSandboxId,
-    wake,
-  );
-  if (!sandbox) {
+  const snapshot = await getRuntimeSnapshot(sessionId);
+  if (!snapshot.sandboxId) {
     return null;
   }
 
-  const project = wrapSandbox(sessionId, sandbox);
-  if (wake) {
-    await ensureDaytonaWorkspace(project, session);
-  }
-  return project;
+  return reconnectProject(sessionId, snapshot.sandboxId, wake);
 }
 
-async function ensureSandbox(session: Session): Promise<DaytonaProjectSandbox> {
-  session = (await getSession(session.id)) ?? session;
-
-  let sandbox = session.daytonaSandboxId
-    ? await reconnectSandbox(session.id, session.daytonaSandboxId, true)
-    : null;
-
-  if (!sandbox && session.daytonaSandboxId) {
-    await persistSandboxId(session.id, null);
-    session = (await getSession(session.id)) ?? session;
-  }
-
-  if (!sandbox) {
-    sandbox = await createSandbox(session);
-  }
-
-  const project = wrapSandbox(session.id, sandbox);
-  await ensureDaytonaWorkspace(project, session);
-  return project;
-}
-
-/** Reconnect or create. Agent turn / POST start only. */
+/** Reconnect or create via reconciler. Agent turn / export / cold start. */
 export async function getOrCreateDaytonaSandbox(
   sessionId: string,
 ): Promise<DaytonaProjectSandbox> {
-  const pending = ensurePromises.get(sessionId);
-  if (pending) {
-    return pending;
-  }
-
-  const promise = (async () => {
-    const session = await getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-    if (session.sandboxMode !== "daytona") {
-      throw new Error(`Session ${sessionId} is not in daytona mode`);
-    }
-    return ensureSandbox(session);
-  })();
-
-  ensurePromises.set(sessionId, promise);
-  try {
-    return await promise;
-  } finally {
-    ensurePromises.delete(sessionId);
-  }
+  return attachDaytonaSandboxForFs(sessionId);
 }
 
 export async function deleteDaytonaSandbox(sessionId: string): Promise<void> {
-  await clearSignedPreviewStore(sessionId);
-
-  const session = await getSession(sessionId);
-  const sandboxId = session?.daytonaSandboxId;
-  if (!sandboxId) {
-    return;
-  }
-
-  const project = await getExistingDaytonaSandbox(sessionId, { wake: true });
-
-  if (project) {
-    try {
-      await commitWorkspaceTurn(project, {
-        turnIndex: 0,
-        userPrompt: "",
-        messageOverride: "checkpoint: sandbox destroy",
-      });
-    } catch {
-      // best-effort
-    }
-    try {
-      await project.sdkSandbox.delete(60);
-    } catch {
-      // already gone
-    }
-  } else {
-    try {
-      await (await getDaytonaClient().get(sandboxId)).delete(60);
-    } catch {
-      // already gone
-    }
-  }
-
-  await persistSandboxId(sessionId, null);
+  clearDaytonaAttachCache(sessionId);
+  await ensureDesiredState(sessionId, "deleted", { wait: true });
 }
