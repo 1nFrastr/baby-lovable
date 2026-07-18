@@ -151,7 +151,40 @@ export async function upsertRuntimeSnapshot(
     durable ? current.revision : null,
   );
   memory.set(sessionId, saved);
+
+  // Publish UI projection only when derived preview fields change (lease-only CAS no-ops).
+  void publishPreviewFromSnapshot(saved, ownerId);
+
   return { ...saved };
+}
+
+async function publishPreviewFromSnapshot(
+  snapshot: DaytonaRuntimeSnapshot,
+  userId: string | null,
+): Promise<void> {
+  try {
+    const { deriveAllStatus } = await import("./runtime-state");
+    const { previewFromAllStatus } = await import(
+      "@/lib/session/runtime-projection"
+    );
+    const { publishRuntimeUpdate } = await import(
+      "@/lib/session/runtime-projection-store"
+    );
+    const all = deriveAllStatus(snapshot);
+    await publishRuntimeUpdate(
+      snapshot.sessionId,
+      {
+        preview: previewFromAllStatus(
+          all,
+          snapshot.generation,
+          new Date().toISOString(),
+        ),
+      },
+      userId,
+    );
+  } catch {
+    // Best-effort — durable daytona runtime remains source of truth.
+  }
 }
 
 export async function acquireRuntimeLease(

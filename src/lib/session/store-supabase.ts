@@ -221,24 +221,41 @@ export async function updateSessionSupabase(
     updated.lastRunId = lastRunId;
   }
 
-  const supabase = getSupabaseAdminClient();
-  const row = sessionToRow(updated);
+  // Patch only fields present in the input — never rewrite messages/title/etc.
+  // on a runStatus reconcile (GET detail). Full-row updates were large enough to
+  // hit intermittent UND_ERR_SOCKET under refresh storms and 500 the page.
+  const patch: Record<string, unknown> = {
+    updated_at: updated.updatedAt,
+  };
+  if (input.title !== undefined) {
+    patch.title = updated.title;
+  }
+  if (input.messages !== undefined) {
+    patch.messages = updated.messages;
+  }
+  if (input.runStatus !== undefined) {
+    patch.run_status = updated.runStatus;
+  }
+  if (input.sandboxMode !== undefined) {
+    patch.sandbox_mode = updated.sandboxMode;
+  }
+  if (input.gitRemote !== undefined) {
+    patch.git_remote = updated.gitRemote ?? null;
+  }
+  if (input.lastCommitSha !== undefined) {
+    patch.last_commit_sha = updated.lastCommitSha ?? null;
+  }
+  if (input.deletedAt !== undefined) {
+    patch.deleted_at = updated.deletedAt ?? null;
+  }
+  if (lastRunId !== undefined) {
+    patch.last_run_id = updated.lastRunId ?? null;
+  }
 
+  const supabase = getSupabaseAdminClient();
   const { error } = await supabase
     .from("sessions")
-    .update({
-      schema_version: row.schema_version,
-      title: row.title,
-      updated_at: row.updated_at,
-      messages: row.messages,
-      last_run_id: row.last_run_id,
-      run_status: row.run_status,
-      sandbox_mode: row.sandbox_mode,
-      git_remote: row.git_remote,
-      daytona_sandbox_id: null,
-      last_commit_sha: row.last_commit_sha,
-      deleted_at: row.deleted_at,
-    })
+    .update(patch)
     .eq("id", sessionId);
 
   if (error) {

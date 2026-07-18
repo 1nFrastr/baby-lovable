@@ -29,14 +29,31 @@ export {
   ensureDependencies,
 } from "./app-server-boot";
 
+async function publishLocalPreview(
+  sessionId: string,
+  options?: { bumpGeneration?: boolean },
+): Promise<void> {
+  try {
+    const { syncPreviewRuntimeProjection } = await import(
+      "@/lib/session/runtime-projection-store"
+    );
+    await syncPreviewRuntimeProjection(sessionId, options);
+  } catch {
+    // Best-effort
+  }
+}
+
 export async function stopLocalAppServer(sessionId: string): Promise<void> {
   await stopDevSession(sessionId);
+  void publishLocalPreview(sessionId);
 }
 
 export async function startLocalAppServer(
   sessionId: string,
 ): Promise<AppServerStatus> {
-  return runStart(sessionId);
+  const status = await runStart(sessionId);
+  void publishLocalPreview(sessionId);
+  return status;
 }
 
 /**
@@ -46,6 +63,12 @@ export async function startLocalAppServer(
  */
 export function startLocalPreview(sessionId: string): void {
   kickOffBootstrap(sessionId);
+  // Bootstrap mutates status asynchronously — sync once kicked, again when ready.
+  void publishLocalPreview(sessionId);
+  void (async () => {
+    await waitForInFlightStart(sessionId, getLocalAppServerStatus);
+    await publishLocalPreview(sessionId);
+  })();
 }
 
 export async function restartLocalAppServer(
@@ -53,7 +76,9 @@ export async function restartLocalAppServer(
 ): Promise<AppServerStatus> {
   await stopDevSession(sessionId);
   await clearNextCache(sessionId);
-  return runStart(sessionId);
+  const status = await runStart(sessionId);
+  void publishLocalPreview(sessionId, { bumpGeneration: true });
+  return status;
 }
 
 /**

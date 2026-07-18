@@ -13,6 +13,9 @@ const TERMINAL_STATUSES = new Set<SessionRunStatus>([
 /**
  * Reconcile persisted `runStatus` with the Workflow DevKit runtime so page
  * refresh sees an accurate in-flight vs finished state.
+ *
+ * Persistence failures must not 500 GET /session — return an in-memory
+ * reconciled view and best-effort write.
  */
 export async function resolveSessionRunState(
   session: Session,
@@ -20,6 +23,11 @@ export async function resolveSessionRunState(
   if (!session.lastRunId || !isActiveRunStatus(session.runStatus)) {
     return session;
   }
+
+  let patch: {
+    runStatus: SessionRunStatus;
+    lastRunId?: string | null;
+  };
 
   try {
     const run = await getRun(session.lastRunId);
@@ -29,22 +37,32 @@ export async function resolveSessionRunState(
       return session;
     }
 
-    const patch: {
-      runStatus: SessionRunStatus;
-      lastRunId?: string | null;
-    } = {
-      runStatus: liveStatus,
-    };
-
+    patch = { runStatus: liveStatus };
     if (TERMINAL_STATUSES.has(liveStatus)) {
       patch.lastRunId = null;
     }
-
-    return updateSession(session.id, patch);
   } catch {
-    return updateSession(session.id, {
-      runStatus: "idle",
-      lastRunId: null,
-    });
+    // Missing / unreachable run (common after local workflow restart).
+    patch = { runStatus: "idle", lastRunId: null };
+  }
+
+  try {
+    return await updateSession(session.id, patch);
+  } catch (error) {
+    console.warn(
+      `[run-status] reconcile persist failed session=${session.id}:`,
+      error instanceof Error ? error.message : error,
+    );
+    const fallback: Session = {
+      ...session,
+      runStatus: patch.runStatus,
+      updatedAt: new Date().toISOString(),
+    };
+    if (patch.lastRunId === null) {
+      delete fallback.lastRunId;
+    } else if (patch.lastRunId !== undefined) {
+      fallback.lastRunId = patch.lastRunId;
+    }
+    return fallback;
   }
 }

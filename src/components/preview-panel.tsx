@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AppServerStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 import type { SandboxMode } from "@/lib/sandbox/types";
+import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
+import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
 /** Mirrors AppTestLatestStatus — kept local so the client bundle does not pull Node fs. */
 interface AppTestLatestStatus {
@@ -22,6 +24,8 @@ interface AppTestLatestStatus {
 interface PreviewPanelProps {
   sessionId: string;
   sandboxMode?: SandboxMode;
+  /** From AppShell useSessionRuntime — sole page-level runtime subscription. */
+  runtimeProjection?: SessionRuntimeProjection | null;
   /** Live View from streamed testPreview tool output (agent path). */
   chatAppTest?: AppTestLatestStatus | null;
   /** True after Chat has reported an extract for this session (including none). */
@@ -33,16 +37,8 @@ interface PreviewPanelProps {
   previewReloadKey?: string | null;
 }
 
-const POLL_MS_READY = 15_000;
-const POLL_MS_ACTIVE = 2_000;
-const APP_TEST_POLL_MS = 1_500;
-const APP_TEST_POLL_MS_RUNNING = 800;
 /** Keep PiP visible briefly after the run ends so the final frame is usable. */
 const PIP_HOLD_AFTER_DONE_MS = 10_000;
-
-function pollDelay(status: AppServerStatus["status"]): number {
-  return status === "ready" ? POLL_MS_READY : POLL_MS_ACTIVE;
-}
 
 function mergeChatAndPolledAppTest(
   polled: AppTestLatestStatus,
@@ -78,41 +74,83 @@ function mergeChatAndPolledAppTest(
   };
 }
 
+function appServerFromProjection(
+  preview: SessionRuntimeProjection["preview"],
+): AppServerStatus {
+  switch (preview.appServerStatus) {
+    case "ready":
+      return {
+        status: "ready",
+        url: preview.url ?? "",
+        port: 0,
+      };
+    case "starting":
+      return {
+        status: "starting",
+        port: 0,
+        url: preview.url,
+      };
+    case "error":
+      return {
+        status: "error",
+        error: preview.error ?? "Dev server failed",
+      };
+    case "installing":
+      return { status: "installing" };
+    case "needs_install":
+      return { status: "needs_install" };
+    case "stopped":
+    default:
+      return { status: "stopped" };
+  }
+}
+
+function appTestFromProjection(
+  appTest: SessionRuntimeProjection["appTest"],
+): AppTestLatestStatus {
+  return {
+    status: appTest.status,
+    runId: appTest.runId,
+    liveViewUrl: appTest.liveViewUrl,
+    ok: appTest.ok,
+    summary: appTest.summary,
+  };
+}
+
 export function PreviewPanel({
   sessionId,
   sandboxMode = "local",
+  runtimeProjection = null,
   chatAppTest = null,
   chatAppTestReady = false,
   previewReloadKey = null,
 }: PreviewPanelProps) {
-  const [preview, setPreview] = useState<AppServerStatus>({ status: "stopped" });
-  const [sandboxStatus, setSandboxStatus] =
-    useState<SandboxStatus>("missing");
+  const invalidateRuntime = useInvalidateSessionRuntime();
+  const projection = runtimeProjection;
+
+  const preview: AppServerStatus = projection
+    ? appServerFromProjection(projection.preview)
+    : { status: "stopped" };
+  const sandboxStatus: SandboxStatus =
+    projection?.preview.sandbox ?? "missing";
+  const runtimeAppTest = projection
+    ? appTestFromProjection(projection.appTest)
+    : { status: "idle" as const };
+  const previewGeneration = projection?.preview.generation ?? 0;
+
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [iframeEpoch, setIframeEpoch] = useState(0);
-  const [polledAppTest, setPolledAppTest] = useState<AppTestLatestStatus>({
-    status: "idle",
-  });
   /** PiP only opens for a live chat-driven run — never on hydrate/refresh. */
   const [pipOpen, setPipOpen] = useState(false);
   const [pipDismissed, setPipDismissed] = useState(false);
-  const [pipHoldUntil, setPipHoldUntil] = useState(0);
-  const [pipHoldTick, setPipHoldTick] = useState(0);
-  const previewRef = useRef(preview);
-  const appTestPollBusyRef = useRef(false);
+  const [pipHoldActive, setPipHoldActive] = useState(false);
   const pipHydratedRef = useRef(false);
   const prevChatStatusRef = useRef<AppTestLatestStatus["status"] | null>(null);
   const pendingPipOpenRef = useRef(false);
   const lastPipRunIdRef = useRef<string | undefined>(undefined);
+  const pipHoldTimerRef = useRef(0);
 
-  const appTest = mergeChatAndPolledAppTest(polledAppTest, chatAppTest);
-  appTestPollBusyRef.current =
-    appTest.status === "running" || chatAppTest?.status === "running";
-
-  useEffect(() => {
-    previewRef.current = preview;
-  }, [preview]);
+  const appTest = mergeChatAndPolledAppTest(runtimeAppTest, chatAppTest);
 
   // Open Live View only when the chat stream transitions into a running
   // testPreview after Chat has hydrated history. Refresh / session switch
@@ -136,12 +174,12 @@ export function PreviewPanel({
     const runId = appTest.runId ?? chatAppTest?.runId;
     if (runId && runId !== lastPipRunIdRef.current) {
       lastPipRunIdRef.current = runId;
-      setPipDismissed(false);
+      queueMicrotask(() => setPipDismissed(false));
     }
 
     if (chatStatus === "running" && prevChatStatus !== "running") {
       pendingPipOpenRef.current = true;
-      setPipDismissed(false);
+      queueMicrotask(() => setPipDismissed(false));
     }
 
     if (
@@ -151,7 +189,7 @@ export function PreviewPanel({
       !pipDismissed
     ) {
       pendingPipOpenRef.current = false;
-      setPipOpen(true);
+      queueMicrotask(() => setPipOpen(true));
     }
 
     if (
@@ -161,13 +199,21 @@ export function PreviewPanel({
       !pipDismissed &&
       liveViewUrl
     ) {
-      setPipHoldUntil(Date.now() + PIP_HOLD_AFTER_DONE_MS);
+      window.clearTimeout(pipHoldTimerRef.current);
+      queueMicrotask(() => setPipHoldActive(true));
+      pipHoldTimerRef.current = window.setTimeout(() => {
+        setPipHoldActive(false);
+        setPipOpen(false);
+      }, PIP_HOLD_AFTER_DONE_MS);
     }
 
     if (chatStatus === "idle") {
       pendingPipOpenRef.current = false;
-      setPipOpen(false);
-      setPipHoldUntil(0);
+      window.clearTimeout(pipHoldTimerRef.current);
+      queueMicrotask(() => {
+        setPipHoldActive(false);
+        setPipOpen(false);
+      });
     }
 
     prevChatStatusRef.current = chatStatus;
@@ -181,217 +227,54 @@ export function PreviewPanel({
   ]);
 
   useEffect(() => {
-    if (pipHoldUntil <= Date.now()) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      setPipHoldTick((n) => n + 1);
-      if (Date.now() >= pipHoldUntil) {
-        setPipOpen(false);
-      }
-    }, pipHoldUntil - Date.now() + 50);
-    return () => window.clearTimeout(timeoutId);
-  }, [pipHoldUntil, pipHoldTick]);
+    return () => {
+      window.clearTimeout(pipHoldTimerRef.current);
+    };
+  }, []);
 
-  const loadPreview = useCallback(async (): Promise<AppServerStatus | null> => {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/preview`);
-      if (!response.ok) {
-        return null;
-      }
-
-      const data = (await response.json()) as {
-        preview?: AppServerStatus;
-        appServer?: AppServerStatus;
-        sandbox?: SandboxStatus;
-      };
-      const appServer = data.appServer ?? data.preview;
-      if (!appServer) {
-        return null;
-      }
-      setPreview(appServer);
-      if (data.sandbox) {
-        setSandboxStatus(data.sandbox);
-      }
-      return appServer;
-    } catch {
-      return null;
-    }
-  }, [sessionId]);
-
-  // After agent checkPreview ok: refresh status URL then remount iframe.
-  // Cross-origin Daytona preview cannot use contentWindow.reload().
+  // After agent checkPreview ok: refresh runtime snapshot (iframe remounts via key).
   useEffect(() => {
     if (!previewReloadKey) {
       return;
     }
+    invalidateRuntime(sessionId);
+  }, [previewReloadKey, invalidateRuntime, sessionId]);
 
-    let cancelled = false;
-    void (async () => {
-      await loadPreview();
-      if (!cancelled) {
-        setIframeEpoch((n) => n + 1);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [previewReloadKey, loadPreview]);
-
-  const loadAppTest = useCallback(async () => {
-    if (sandboxMode !== "daytona") {
-      return;
-    }
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/app-test`);
-      if (!response.ok) {
-        return;
-      }
-      const data = (await response.json()) as AppTestLatestStatus & {
-        error?: string;
-      };
-      setPolledAppTest({
-        status: data.status ?? "idle",
-        runId: data.runId,
-        liveViewUrl: data.liveViewUrl,
-        ok: data.ok,
-        summary: data.summary,
-        artifactDir: data.artifactDir,
-        startedAt: data.startedAt,
-        finishedAt: data.finishedAt,
-        error: data.error,
-        usedScriptedActions: data.usedScriptedActions,
-      });
-    } catch {
-      // next poll
-    }
-  }, [sandboxMode, sessionId]);
-
-  // Enter / re-enter session: kick the same startPreview path as agent turns.
+  // Enter / re-enter session once: kick startPreview. invalidateRuntime must stay
+  // referentially stable (useCallback) or this effect loops with POST /preview.
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
-        const response = await fetch(`/api/sessions/${sessionId}/preview`, {
+        await fetch(`/api/sessions/${sessionId}/preview`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "warm" }),
         });
-        if (!response.ok || cancelled) {
-          return;
-        }
-        const data = (await response.json()) as {
-          preview?: AppServerStatus;
-          appServer?: AppServerStatus;
-          sandbox?: SandboxStatus;
-        };
-        if (cancelled) {
-          return;
-        }
-        const appServer = data.appServer ?? data.preview;
-        if (appServer) {
-          setPreview(appServer);
-        }
-        if (data.sandbox) {
-          setSandboxStatus(data.sandbox);
+        if (!cancelled) {
+          invalidateRuntime(sessionId);
         }
       } catch {
-        // GET poll will reflect stopped / error
+        // runtime subscription / invalidate will reflect stopped / error
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timeoutId = 0;
-
-    const schedule = (delayMs: number) => {
-      if (cancelled) {
-        return;
-      }
-      timeoutId = window.setTimeout(() => {
-        void poll();
-      }, delayMs);
-    };
-
-    const poll = async () => {
-      if (cancelled) {
-        return;
-      }
-
-      const next = await loadPreview();
-      if (cancelled) {
-        return;
-      }
-
-      const status = next?.status ?? previewRef.current.status;
-      schedule(pollDelay(status));
-    };
-
-    void poll();
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadPreview, sessionId]);
-
-  useEffect(() => {
-    if (sandboxMode !== "daytona") {
-      return;
-    }
-
-    let cancelled = false;
-    let timeoutId = 0;
-
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      await loadAppTest();
-      if (cancelled) {
-        return;
-      }
-      timeoutId = window.setTimeout(() => {
-        void tick();
-      }, appTestPollBusyRef.current
-        ? APP_TEST_POLL_MS_RUNNING
-        : APP_TEST_POLL_MS);
-    };
-
-    void tick();
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadAppTest, sandboxMode, sessionId]);
+  }, [sessionId, invalidateRuntime]);
 
   const handleRestart = async () => {
-    setPreview((prev) => {
-      if (prev.status === "ready") {
-        return { status: "starting", port: prev.port, url: prev.url };
-      }
-      if (prev.status === "starting") {
-        return prev;
-      }
-      return { status: "starting", port: 0 };
-    });
     try {
       await fetch(`/api/sessions/${sessionId}/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "restart" }),
       });
-      await loadPreview();
+      invalidateRuntime(sessionId);
     } catch {
-      // next poll will pick up status
+      // runtime subscription will pick up status
     }
   };
 
@@ -430,7 +313,6 @@ export function PreviewPanel({
   };
 
   const appTestBusy = appTest.status === "running";
-  const pipHoldActive = pipHoldUntil > Date.now();
   const showPip =
     sandboxMode === "daytona" &&
     Boolean(appTest.liveViewUrl) &&
@@ -444,6 +326,9 @@ export function PreviewPanel({
       : preview.status === "starting"
         ? preview.url
         : undefined;
+  // Remount when generation advances or checkPreview toolCallId changes.
+  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${previewReloadKey ?? ""}`;
+
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
@@ -525,7 +410,7 @@ export function PreviewPanel({
       <div className="relative min-h-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
         {previewEmbedUrl ? (
           <iframe
-            key={`${previewEmbedUrl}::${iframeEpoch}`}
+            key={previewIframeKey}
             src={previewEmbedUrl}
             title="App preview"
             className="h-full w-full border-0 bg-white"
@@ -605,7 +490,8 @@ export function PreviewPanel({
                   onClick={() => {
                     setPipDismissed(true);
                     setPipOpen(false);
-                    setPipHoldUntil(0);
+                    window.clearTimeout(pipHoldTimerRef.current);
+                    setPipHoldActive(false);
                     pendingPipOpenRef.current = false;
                   }}
                   className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
