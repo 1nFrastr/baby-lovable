@@ -461,6 +461,12 @@ async function reconcileLoop(
   sessionId: string,
   owner: string,
   deadline: number,
+  /**
+   * Caller wait target. FS attach asks for sandbox-ready even when durable
+   * desired stays preview-ready — return as soon as workspace is usable, do
+   * not block on pnpm install / next dev.
+   */
+  returnWhen: DaytonaDesiredState,
 ): Promise<DaytonaRuntimeSnapshot> {
   while (Date.now() < deadline) {
     await renewRuntimeLease(sessionId, owner, LEASE_TTL_MS);
@@ -501,6 +507,11 @@ async function reconcileLoop(
       continue;
     }
 
+    // Prefer caller's wait target (sandbox-ready) over durable preview-ready.
+    if (isDesiredSatisfied({ ...snapshot, desired: returnWhen })) {
+      return snapshot;
+    }
+
     if (isDesiredSatisfied(snapshot)) {
       return snapshot;
     }
@@ -516,6 +527,9 @@ async function reconcileLoop(
   }
 
   const timedOut = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  if (isDesiredSatisfied({ ...timedOut, desired: returnWhen })) {
+    return timedOut;
+  }
   if (!isDesiredSatisfied(timedOut)) {
     return upsertRuntimeSnapshot(sessionId, {
       expectedRevision: timedOut.revision,
@@ -526,6 +540,15 @@ async function reconcileLoop(
     });
   }
   return timedOut;
+}
+
+/** Continue preview warm after FS attach returned early at sandbox-ready. */
+function continuePreviewInBackground(sessionId: string): void {
+  void ensureDesiredState(sessionId, "preview-ready", { wait: false }).catch(
+    () => {
+      // logged inside
+    },
+  );
 }
 
 /**
@@ -549,14 +572,17 @@ export async function ensureDesiredState(
 
   let snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
 
+  // What the caller needs vs what we write as durable desired.
+  // FS attach requests sandbox-ready; UI warm may already have preview-ready —
+  // never demote desired, but also never make FS wait for full preview boot.
+  const requestedDesired = desired;
   let targetDesired: DaytonaDesiredState = desired;
 
-  // Already converged — skip generation bump / lease / observe (re-enter warm).
+  // Already have what the caller asked for (e.g. workspace ready while preview installs).
   if (
     !options?.restart &&
-    snapshot.desired === targetDesired &&
-    isDesiredSatisfied(snapshot) &&
-    (targetDesired !== "preview-ready" || hasFreshPreviewEmbed(snapshot))
+    isDesiredSatisfied({ ...snapshot, desired: requestedDesired }) &&
+    (requestedDesired !== "preview-ready" || hasFreshPreviewEmbed(snapshot))
   ) {
     return snapshot;
   }
@@ -564,12 +590,9 @@ export async function ensureDesiredState(
   // Never demote preview-ready → sandbox-ready (FS attach used to clobber warm).
   if (
     !options?.restart &&
-    targetDesired === "sandbox-ready" &&
+    requestedDesired === "sandbox-ready" &&
     snapshot.desired === "preview-ready"
   ) {
-    if (isDesiredSatisfied({ ...snapshot, desired: "sandbox-ready" })) {
-      return snapshot;
-    }
     // Keep preview intent; converge under preview-ready instead.
     targetDesired = "preview-ready";
   }
@@ -615,6 +638,54 @@ export async function ensureDesiredState(
     leaseOwner: owner,
   });
 
+  const afterSandboxReadyForPreview = (
+    result: DaytonaRuntimeSnapshot,
+  ): void => {
+    // Returned at sandbox-ready while durable desired is still preview-ready —
+    // hand warm-up to a background writer (must run after lease release).
+    if (
+      requestedDesired === "sandbox-ready" &&
+      result.desired === "preview-ready" &&
+      !isDesiredSatisfied(result)
+    ) {
+      continuePreviewInBackground(sessionId);
+    }
+  };
+
+  const runWithLease = async (
+    deadline: number,
+  ): Promise<DaytonaRuntimeSnapshot> => {
+    let result: DaytonaRuntimeSnapshot;
+    try {
+      result = await reconcileLoop(
+        sessionId,
+        owner,
+        deadline,
+        requestedDesired,
+      );
+    } catch (error) {
+      const detail = formatStartError(error);
+      logDaytonaBootstrap(sessionId, "reconcile", `failed: ${detail.slice(0, 200)}`, {
+        generation: snapshot.generation,
+        leaseOwner: owner,
+      });
+      try {
+        const cur = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+        result = await upsertRuntimeSnapshot(sessionId, {
+          expectedRevision: cur.revision,
+          observed: "error",
+          lastError: detail,
+        });
+      } catch {
+        result = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+      }
+    } finally {
+      await releaseRuntimeLease(sessionId, owner);
+    }
+    afterSandboxReadyForPreview(result);
+    return result;
+  };
+
   const run = async (): Promise<DaytonaRuntimeSnapshot> => {
     const leased = await acquireRuntimeLease(sessionId, owner, LEASE_TTL_MS);
     if (!leased) {
@@ -627,51 +698,21 @@ export async function ensureDesiredState(
         const current = await getRuntimeSnapshot(sessionId, null, {
           fresh: true,
         });
-        if (
-          current.desired === targetDesired &&
-          isDesiredSatisfied(current)
-        ) {
+        // Wait for what the caller asked for, not necessarily full preview-ready.
+        if (isDesiredSatisfied({ ...current, desired: requestedDesired })) {
           return current;
         }
         // Try to steal expired lease
         const again = await acquireRuntimeLease(sessionId, owner, LEASE_TTL_MS);
         if (again) {
-          try {
-            return await reconcileLoop(sessionId, owner, deadline);
-          } finally {
-            await releaseRuntimeLease(sessionId, owner);
-          }
+          return runWithLease(deadline);
         }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       }
       return getRuntimeSnapshot(sessionId, null, { fresh: true });
     }
 
-    try {
-      return await reconcileLoop(
-        sessionId,
-        owner,
-        Date.now() + RECONCILE_TIMEOUT_MS,
-      );
-    } catch (error) {
-      const detail = formatStartError(error);
-      logDaytonaBootstrap(sessionId, "reconcile", `failed: ${detail.slice(0, 200)}`, {
-        generation: snapshot.generation,
-        leaseOwner: owner,
-      });
-      try {
-        const cur = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-        return await upsertRuntimeSnapshot(sessionId, {
-          expectedRevision: cur.revision,
-          observed: "error",
-          lastError: detail,
-        });
-      } catch {
-        return getRuntimeSnapshot(sessionId, null, { fresh: true });
-      }
-    } finally {
-      await releaseRuntimeLease(sessionId, owner);
-    }
+    return runWithLease(Date.now() + RECONCILE_TIMEOUT_MS);
   };
 
   if (!wait) {
