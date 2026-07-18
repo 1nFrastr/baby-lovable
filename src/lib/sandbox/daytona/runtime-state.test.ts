@@ -214,7 +214,6 @@ describe("hasFreshPreviewEmbed", () => {
           observed: "preview-ready",
           previewUrl: "https://preview.example",
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 60_000,
         }),
       ),
     ).toBe(true);

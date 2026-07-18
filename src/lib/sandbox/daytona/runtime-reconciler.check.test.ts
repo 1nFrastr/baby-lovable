@@ -83,9 +83,7 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
     hasNodeModules: false,
     previewUrl: null,
     previewPort: null,
-    previewExpiresAtMs: null,
     probeUrl: null,
-    previewToken: null,
     buildError: null,
     httpStatus: null,
     lastError: null,
@@ -116,7 +114,6 @@ describe("checkRuntimePreview", () => {
           sandboxId: "sb_1",
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
-          previewExpiresAtMs: null,
         }),
       );
 

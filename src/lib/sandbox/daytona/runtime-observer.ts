@@ -28,9 +28,7 @@ export interface ObservedRuntime {
   hasNodeModules: boolean;
   previewUrl: string | null;
   previewPort: number | null;
-  previewExpiresAtMs: number | null;
   probeUrl: string | null;
-  previewToken: string | null;
   buildError: string | null;
   httpStatus: number | null;
   lastError: string | null;
@@ -45,9 +43,7 @@ function emptyObserved(lastError: string | null = null): ObservedRuntime {
     hasNodeModules: false,
     previewUrl: null,
     previewPort: null,
-    previewExpiresAtMs: null,
     probeUrl: null,
-    previewToken: null,
     buildError: null,
     httpStatus: null,
     lastError,
@@ -170,9 +166,7 @@ export async function observeRuntime(
         hasNodeModules,
         previewUrl: preview.url,
         previewPort: preview.port,
-        previewExpiresAtMs: null,
         probeUrl: preview.probeUrl,
-        previewToken: null,
         buildError,
         httpStatus: preview.http,
         lastError: null,
@@ -199,7 +193,6 @@ export async function observeRuntime(
       hasNodeModules,
       previewPort: getDaytonaDevPort(),
       probeUrl: preview.probeUrl,
-      previewToken: null,
       httpStatus: preview.http,
     };
   };

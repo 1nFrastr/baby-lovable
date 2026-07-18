@@ -99,7 +99,6 @@ function applyObservation(
     previewUrl: observed.previewUrl ?? (sandboxGone ? null : snapshot.previewUrl),
     previewPort:
       observed.previewPort ?? (sandboxGone ? null : snapshot.previewPort),
-    previewExpiresAtMs: null,
     lastError:
       observed.lastError ?? (phase === "error" ? snapshot.lastError : null),
     lastObservedAt: new Date().toISOString(),
@@ -321,7 +320,6 @@ async function actionStopPreview(
     devSessionName: null,
     previewUrl: null,
     previewPort: null,
-    previewExpiresAtMs: null,
     lastError: null,
   });
 }
@@ -370,7 +368,6 @@ async function actionDelete(
     devSessionName: null,
     previewUrl: null,
     previewPort: null,
-    previewExpiresAtMs: null,
     lastError: null,
     generation: snapshot.generation,
     clearNextCache: false,
@@ -740,7 +737,6 @@ export async function readRuntime(
         ? {
             previewUrl: observed.previewUrl,
             previewPort: observed.previewPort,
-            previewExpiresAtMs: null,
           }
         : {}),
     });
@@ -816,7 +812,6 @@ export async function checkRuntimePreview(sessionId: string) {
           ? {
               previewUrl: observed.previewUrl,
               previewPort: observed.previewPort,
-              previewExpiresAtMs: null,
             }
           : {}),
       });

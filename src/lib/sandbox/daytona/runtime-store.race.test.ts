@@ -159,7 +159,6 @@ describe("runtime-store serverless isolate races", () => {
           observed: "preview-ready",
           previewUrl: "https://preview.example/embed",
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 3_600_000,
         });
       });
 

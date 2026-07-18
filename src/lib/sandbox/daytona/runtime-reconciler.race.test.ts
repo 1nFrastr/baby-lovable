@@ -91,9 +91,7 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
     hasNodeModules: false,
     previewUrl: null,
     previewPort: null,
-    previewExpiresAtMs: null,
     probeUrl: null,
-    previewToken: null,
     buildError: null,
     httpStatus: null,
     lastError: null,
@@ -207,7 +205,6 @@ describe("runtime-reconciler isolate / UI races", () => {
           hasNodeModules: true,
           previewUrl: "https://embed.example/x",
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 60_000,
         });
       });
 
@@ -266,7 +263,6 @@ describe("runtime-reconciler isolate / UI races", () => {
             hasNodeModules: true,
             previewUrl: "https://embed.example/x",
             previewPort: 3000,
-            previewExpiresAtMs: Date.now() + 60_000,
           });
         }
         return observed({
@@ -289,7 +285,6 @@ describe("runtime-reconciler isolate / UI races", () => {
           devSessionName: "preview-sess",
           previewUrl: "https://embed.example/x",
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 60_000,
         }),
       );
 
@@ -380,7 +375,6 @@ describe("runtime-reconciler isolate / UI races", () => {
           hasNodeModules: true,
           previewUrl: "https://old.example",
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 60_000,
         }),
       );
 
@@ -393,7 +387,6 @@ describe("runtime-reconciler isolate / UI races", () => {
           sandboxId: "sb_1",
           previewUrl: "https://old.example",
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 60_000,
           generation: 3,
         });
       });
@@ -419,7 +412,6 @@ describe("runtime-reconciler isolate / UI races", () => {
           hasNodeModules: true,
           previewUrl: null,
           previewPort: 3000,
-          previewExpiresAtMs: null,
         }),
       );
 

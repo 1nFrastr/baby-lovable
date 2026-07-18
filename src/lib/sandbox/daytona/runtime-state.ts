@@ -42,7 +42,6 @@ export interface DaytonaRuntimeSnapshot {
 
   previewUrl: string | null;
   previewPort: number | null;
-  previewExpiresAtMs: number | null;
 
   lastError: string | null;
   lastObservedAt: string | null;
@@ -74,7 +73,6 @@ export function emptyRuntimeSnapshot(
     devSessionName: null,
     previewUrl: null,
     previewPort: null,
-    previewExpiresAtMs: null,
     lastError: null,
     lastObservedAt: null,
     leaseOwner: null,

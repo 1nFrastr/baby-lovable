@@ -16,7 +16,6 @@ interface RuntimeRow {
   dev_session_name: string | null;
   preview_url: string | null;
   preview_port: number | null;
-  preview_expires_at_ms: number | null;
   last_error: string | null;
   last_observed_at: string | null;
   lease_owner: string | null;
@@ -36,7 +35,6 @@ function rowToSnapshot(row: RuntimeRow): DaytonaRuntimeSnapshot {
     devSessionName: row.dev_session_name,
     previewUrl: row.preview_url,
     previewPort: row.preview_port,
-    previewExpiresAtMs: row.preview_expires_at_ms,
     lastError: row.last_error,
     lastObservedAt: row.last_observed_at,
     leaseOwner: row.lease_owner,
@@ -60,7 +58,6 @@ function snapshotToRow(
     dev_session_name: snapshot.devSessionName,
     preview_url: snapshot.previewUrl,
     preview_port: snapshot.previewPort,
-    preview_expires_at_ms: snapshot.previewExpiresAtMs,
     last_error: snapshot.lastError,
     last_observed_at: snapshot.lastObservedAt,
     lease_owner: snapshot.leaseOwner,
