@@ -75,6 +75,22 @@ export async function writeLatestAppTestStatus(
   userId: UserId = null,
 ): Promise<void> {
   await writeDurableStatus(sessionId, status, userId);
+
+  try {
+    const { appTestFromLatest } = await import(
+      "@/lib/session/runtime-projection"
+    );
+    const { publishRuntimeUpdate } = await import(
+      "@/lib/session/runtime-projection-store"
+    );
+    await publishRuntimeUpdate(
+      sessionId,
+      { appTest: appTestFromLatest(status) },
+      userId,
+    );
+  } catch {
+    // Projection publish is best-effort; durable app-test status is source of truth.
+  }
 }
 
 /**

@@ -61,10 +61,35 @@ export async function updateSession(
   input: UpdateSessionInput,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  if (!isLocalFileStorageMode()) {
-    return updateSessionSupabase(sessionId, input, auth);
+  const session = !isLocalFileStorageMode()
+    ? await updateSessionSupabase(sessionId, input, auth)
+    : await updateSessionLocal(sessionId, input, auth);
+
+  if (input.runStatus !== undefined || input.lastRunId !== undefined) {
+    void publishRunRuntime(session);
   }
-  return updateSessionLocal(sessionId, input, auth);
+
+  return session;
+}
+
+async function publishRunRuntime(session: Session): Promise<void> {
+  try {
+    const { mapSessionRunStatus } = await import("./runtime-projection");
+    const { publishRuntimeUpdate } = await import("./runtime-projection-store");
+    await publishRuntimeUpdate(
+      session.id,
+      {
+        run: {
+          status: mapSessionRunStatus(session.runStatus),
+          runId: session.lastRunId,
+          updatedAt: session.updatedAt,
+        },
+      },
+      session.userId,
+    );
+  } catch {
+    // Best-effort — session row remains source of truth for runStatus.
+  }
 }
 
 export async function replaceMessages(

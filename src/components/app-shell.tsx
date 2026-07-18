@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   useCreateSessionMutation,
@@ -12,6 +12,8 @@ import {
   useSyncSessionSummary,
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
+import { toSessionRunStatus } from "@/lib/session/runtime-projection";
+import { useSessionRuntime } from "@/lib/session/runtime-query";
 
 import { Chat } from "./chat";
 import { PreviewPanel } from "./preview-panel";
@@ -26,6 +28,7 @@ export function AppShell() {
 
   const sessionsQuery = useSessionsQuery();
   const sessionQuery = useSessionQuery(activeSessionId);
+  const runtimeQuery = useSessionRuntime(activeSessionId);
   const createSessionMutation = useCreateSessionMutation();
   const invalidateSessionDetail = useInvalidateSessionDetail();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -35,35 +38,52 @@ export function AppShell() {
   );
   /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
-  /** Bumps preview iframe remount after a new successful checkPreview. */
-  const [previewReloadKey, setPreviewReloadKey] = useState<string | null>(null);
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const sandboxMode = sessionsQuery.data?.features.sandboxMode ?? "local";
   const activeSession = sessionQuery.data?.session ?? null;
   const activeDraft = sessionQuery.data?.draft ?? null;
   const activeSummary = sessions.find((session) => session.id === activeSessionId);
+  /** Live run status from runtime projection; fall back to session detail. */
+  const liveRunStatus = runtimeQuery.data?.projection.run
+    ? toSessionRunStatus(runtimeQuery.data.projection.run.status)
+    : (activeSession?.runStatus ?? "idle");
 
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
 
+  const prevRuntimeRunStatus = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     setChatAppTest(null);
     setChatAppTestReady(false);
-    setPreviewReloadKey(null);
+    prevRuntimeRunStatus.current = undefined;
   }, [activeSessionId]);
+
+  // Runtime SSE can flip run→done before onChatEnd's detail invalidate lands.
+  // Refetch session.json as soon as the projection leaves "running".
+  useEffect(() => {
+    const status = runtimeQuery.data?.projection.run?.status;
+    const prev = prevRuntimeRunStatus.current;
+    prevRuntimeRunStatus.current = status;
+
+    if (
+      activeSessionId &&
+      prev === "running" &&
+      (status === "done" || status === "error" || status === "idle")
+    ) {
+      invalidateSessionDetail(activeSessionId);
+    }
+  }, [
+    activeSessionId,
+    invalidateSessionDetail,
+    runtimeQuery.data?.projection.run?.status,
+  ]);
 
   const handleAppTestStatus = useCallback(
     (status: AppTestLatestStatus | null) => {
       setChatAppTest(status);
       setChatAppTestReady(true);
-    },
-    [],
-  );
-
-  const handleCheckPreviewOk = useCallback(
-    (signal: { toolCallId: string }) => {
-      setPreviewReloadKey(signal.toolCallId);
     },
     [],
   );
@@ -205,22 +225,21 @@ export function AppShell() {
                   sessionId={activeSessionId}
                   messages={activeSession.messages}
                   draft={activeDraft?.message ?? null}
-                  runStatus={activeSession.runStatus}
+                  runStatus={liveRunStatus}
                   sandboxMode={activeSession.sandboxMode}
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                   }}
                   onAppTestStatus={handleAppTestStatus}
-                  onCheckPreviewOk={handleCheckPreviewOk}
                 />
               </div>
               <PreviewPanel
                 key={activeSessionId}
                 sessionId={activeSessionId}
                 sandboxMode={activeSession.sandboxMode}
+                runtimeProjection={runtimeQuery.data?.projection ?? null}
                 chatAppTest={chatAppTest}
                 chatAppTestReady={chatAppTestReady}
-                previewReloadKey={previewReloadKey}
               />
             </div>
           )}

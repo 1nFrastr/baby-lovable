@@ -11,12 +11,9 @@ import {
 } from "@/lib/chat/format-tool-label";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
-  extractLatestSuccessfulCheckPreview,
-  type CheckPreviewOkSignal,
-} from "@/lib/chat/check-preview-from-messages";
-import {
   hasAssistantParts,
   mergeDisplayMessages,
+  persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
 import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
 import type { SandboxMode } from "@/lib/sandbox/types";
@@ -39,8 +36,6 @@ interface ChatProps {
   onAppTestStatus?: (
     status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
   ) => void;
-  /** Fires when a new successful checkPreview appears (skips history on hydrate). */
-  onCheckPreviewOk?: (signal: CheckPreviewOkSignal) => void;
 }
 
 export function Chat({
@@ -51,7 +46,6 @@ export function Chat({
   sandboxMode = "local",
   onSessionRefresh,
   onAppTestStatus,
-  onCheckPreviewOk,
 }: ChatProps) {
   const transport = useMemo(
     () =>
@@ -97,29 +91,6 @@ export function Chat({
     onAppTestStatus(extractAppTestStatusFromMessages(displayMessages));
   }, [displayMessages, onAppTestStatus]);
 
-  const checkPreviewSeededRef = useRef(false);
-  const lastCheckPreviewOkIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!onCheckPreviewOk) {
-      return;
-    }
-
-    const signal = extractLatestSuccessfulCheckPreview(displayMessages);
-    if (!checkPreviewSeededRef.current) {
-      checkPreviewSeededRef.current = true;
-      lastCheckPreviewOkIdRef.current = signal?.toolCallId ?? null;
-      return;
-    }
-
-    if (!signal || signal.toolCallId === lastCheckPreviewOkIdRef.current) {
-      return;
-    }
-
-    lastCheckPreviewOkIdRef.current = signal.toolCallId;
-    onCheckPreviewOk(signal);
-  }, [displayMessages, onCheckPreviewOk]);
-
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -133,6 +104,12 @@ export function Chat({
       return;
     }
 
+    // Runtime projection can mark the run idle before session detail refetch
+    // returns the committed assistant — never clobber the live thread with that.
+    if (persistedMessagesLagChat(messages, chatMessages)) {
+      return;
+    }
+
     const fingerprint = messages.map((message) => message.id).join("|");
     if (fingerprint === lastSyncedPersistedRef.current) {
       return;
@@ -142,7 +119,7 @@ export function Chat({
     // Persisted history is authoritative between turns; merging would keep a
     // stale SSE assistant id alongside the saved draft id.
     setMessages(messages);
-  }, [isLiveTurn, messages, setMessages]);
+  }, [chatMessages, isLiveTurn, messages, setMessages]);
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;

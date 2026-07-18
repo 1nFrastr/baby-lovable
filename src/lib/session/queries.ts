@@ -9,18 +9,12 @@ import { useEffect } from "react";
 
 import type { SessionDraft } from "@/lib/session/draft-store";
 import type { SandboxMode } from "@/lib/sandbox/types";
-import {
-  isActiveRunStatus,
-  type Session,
-  type SessionSummary,
-} from "@/lib/session/types";
+import type { Session, SessionSummary } from "@/lib/session/types";
 
 export type SessionsFeatures = {
   daytona: boolean;
   sandboxMode: SandboxMode;
 };
-
-const POLL_ACTIVE_SESSION_MS = 800;
 
 export const sessionKeys = {
   all: ["sessions"] as const,
@@ -116,14 +110,9 @@ export function useSessionQuery(sessionId: string | null) {
     enabled: Boolean(sessionId),
     // Detail must always revalidate when revisiting — cached empty messages
     // after the first chat turn caused blank history on session switch-back.
+    // runStatus is no longer polled here — use useSessionRuntime instead.
     staleTime: 0,
     refetchOnMount: "always",
-    refetchInterval: (query) => {
-      const runStatus = query.state.data?.session.runStatus;
-      return runStatus && isActiveRunStatus(runStatus)
-        ? POLL_ACTIVE_SESSION_MS
-        : false;
-    },
   });
 }
 

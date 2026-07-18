@@ -78,9 +78,33 @@ export function mergeClientMessagesWithPersisted(
 }
 
 /**
+ * Session detail can lag the in-memory useChat thread when runStatus flips
+ * idle via runtime SSE before `invalidateSessionDetail` lands.
+ */
+export function persistedMessagesLagChat(
+  persisted: UIMessage[],
+  chatMessages: UIMessage[],
+): boolean {
+  if (chatMessages.length === 0) {
+    return false;
+  }
+
+  if (chatMessages.length > persisted.length) {
+    return true;
+  }
+
+  const lastPersisted = lastMessage(persisted);
+  const lastChat = lastMessage(chatMessages);
+  return lastChat?.role === "assistant" && lastPersisted?.role !== "assistant";
+}
+
+/**
  * Live-turn display: keep completed history from session.json, overlay the
  * in-flight useChat thread, then fall back to draft.json when SSE has not
  * produced assistant parts yet (e.g. refresh mid-run).
+ *
+ * When the turn is no longer live but persisted history has not caught up yet,
+ * keep overlaying chatMessages so the assistant bubble does not vanish.
  */
 export function mergeDisplayMessages(
   persisted: UIMessage[],
@@ -88,7 +112,10 @@ export function mergeDisplayMessages(
   draft: UIMessage | null,
   isLiveTurn: boolean,
 ): UIMessage[] {
-  if (!isLiveTurn) {
+  const treatAsLive =
+    isLiveTurn || persistedMessagesLagChat(persisted, chatMessages);
+
+  if (!treatAsLive) {
     return dedupeConsecutiveAssistants(persisted);
   }
 

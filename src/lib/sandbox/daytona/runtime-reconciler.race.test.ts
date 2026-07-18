@@ -76,6 +76,7 @@ import {
   ensureDesiredState,
   readRuntime,
 } from "./runtime-reconciler";
+import { isDesiredSatisfied } from "./runtime-state";
 import {
   getRuntimeSnapshot,
   withFreshIsolate,
@@ -242,6 +243,115 @@ describe("runtime-reconciler isolate / UI races", () => {
       const final = await getRuntimeSnapshot(sessionId, null, { fresh: true });
       expect(final.observed).toBe("preview-ready");
       expect(final.sandboxId).toBe("sb_1");
+    });
+  });
+
+  it("FS attach (sandbox-ready) returns before preview install finishes", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+
+      let sandboxId: string | null = null;
+      let hasPkg = false;
+      let hasNode = false;
+      let previewReady = false;
+      let installEntered = 0;
+      let releaseInstall: () => void = () => {};
+      const installGate = new Promise<void>((resolve) => {
+        releaseInstall = resolve;
+      });
+
+      createSandbox.mockImplementation(async () => {
+        sandboxId = "sb_1";
+        return { id: "sb_1", state: "started" };
+      });
+      ensureDaytonaWorkspace.mockImplementation(async () => {
+        hasPkg = true;
+        return { seeded: true, gitInitSha: "abc" };
+      });
+      installDeps.mockImplementation(async () => {
+        installEntered += 1;
+        await installGate;
+        hasNode = true;
+      });
+      startDevSession.mockImplementation(async () => {
+        previewReady = true;
+        return { sessionName: "preview-sess", port: 3000 };
+      });
+
+      observeRuntime.mockImplementation(async () => {
+        if (!sandboxId) {
+          return observed({ phase: "missing" });
+        }
+        if (!hasPkg) {
+          return observed({
+            phase: "bootstrapping-workspace",
+            sandboxId,
+            hasPackageJson: false,
+          });
+        }
+        if (!hasNode) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId,
+            hasPackageJson: true,
+            hasNodeModules: false,
+          });
+        }
+        if (!previewReady) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId,
+            hasPackageJson: true,
+            hasNodeModules: true,
+          });
+        }
+        return observed({
+          phase: "preview-ready",
+          sandboxId,
+          hasPackageJson: true,
+          hasNodeModules: true,
+          previewUrl: "https://embed.example/x",
+          previewPort: 3000,
+        });
+      });
+
+      // UI already wants preview-ready (durable intent) before agent FS attach.
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await withFreshIsolate(sessionId, () =>
+        upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "missing",
+          generation: 1,
+        }),
+      );
+
+      const fsPromise = withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "sandbox-ready", {
+          wait: true,
+          owner: "agent-fs",
+        }),
+      );
+
+      const fsSnap = await fsPromise;
+
+      expect(
+        isDesiredSatisfied({ ...fsSnap, desired: "sandbox-ready" }),
+      ).toBe(true);
+      expect(fsSnap.desired).toBe("preview-ready");
+      expect(previewReady).toBe(false);
+      // Must not block the agent on pnpm install / next start.
+      expect(installEntered).toBe(0);
+
+      // Background continue should pick up preview warm after FS returns.
+      await vi.waitFor(() => {
+        expect(installEntered).toBe(1);
+      });
+      releaseInstall();
+      await vi.waitFor(async () => {
+        enterIsolate(sessionId);
+        const final = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+        expect(final.observed).toBe("preview-ready");
+      });
     });
   });
 

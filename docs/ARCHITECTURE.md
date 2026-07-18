@@ -202,7 +202,36 @@ ProjectSandbox {
 
 ---
 
-## 7. 待细化大纲钩子
+## 7. ADR — SessionRuntimeProjection（命令 / 状态分离）
+
+### 选择了什么
+
+- **唯一读模型** `SessionRuntimeProjection`（`run` / `preview` / `appTest` + 单调 `version`）
+- 写路径在域更新成功后 `publishRuntimeUpdate`（UI 字段无变化不 bump）
+- 输送层**跟 persist backend**，不跟「是否 laptop」：
+  - file store → host `GET /api/sessions/:id/events` SSE
+  - Supabase（本机连云或 Vercel）→ Realtime `session_runtime_projection`
+- 前端 `useSessionRuntime`：进页 `GET /runtime`，其后整份 projection 替换（`version` 门闸）；React Query 作缓存
+
+关键路径：`src/lib/session/runtime-projection*.ts`、`runtime-query.ts`、`/api/sessions/[sessionId]/runtime|events`
+
+### 为什么不用「每次 GET 拼三域」或客户端域级 patch
+
+| 方案 | 问题 |
+| --- | --- |
+| GET 现场拼 peek + app-test + run | host 仍是高频聚合器；与 Realtime 整行推送不契合 |
+| 客户端 `preview.updated` 手工 merge | 易与服务端真相分叉；Realtime 天然是整行 |
+| Ably / Redis / Vercel WS | 多一层运维；本阶段不需要 |
+
+### 刻意不做
+
+- 完整 event log / replay
+- 把 chat token 并进 runtime 通道（仍走 Workflow SSE）
+- Sandbox / Daytona / Browser Run 直推浏览器
+
+---
+
+## 8. 待细化大纲钩子
 
 - [ ] 是否补「与 Lovable / v0 / Cursor 的定位对比」半页？
 - [ ] WorkflowAgent 是否画「一次 chat turn 的 sequence diagram」？
