@@ -2,8 +2,6 @@
  * Observe remote Daytona reality — no persistence orchestration.
  */
 
-import type { Sandbox } from "@daytona/sdk";
-
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
 import {
@@ -18,10 +16,8 @@ import {
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
 import { getRuntimeSnapshot } from "./runtime-store";
-import { isAsleep, reconnectSandbox, wrapSandbox } from "./vm";
+import { ensureSandboxPublic, isAsleep, reconnectSandbox, wrapSandbox } from "./vm";
 
-const SIGNED_TTL_SEC = 3600;
-const SIGNED_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 15_000;
 
 export interface ObservedRuntime {
@@ -59,83 +55,43 @@ function emptyObserved(lastError: string | null = null): ObservedRuntime {
 }
 
 /**
- * Mint or reuse a stable signed embed URL; returns cache fields for runtime store.
+ * Probe public getPreviewLink URL (no signed embed / token).
+ * Ensures the sandbox is public so the iframe can load without auth headers.
  */
-export async function resolveSignedEmbedUrl(
-  snapshot: DaytonaRuntimeSnapshot,
-  sdk: Sandbox,
-  port: number,
-): Promise<{
-  url: string;
-  expiresAtMs: number;
-} | null> {
-  const now = Date.now();
-  if (
-    snapshot.previewUrl &&
-    snapshot.sandboxId === sdk.id &&
-    snapshot.previewPort === port &&
-    snapshot.previewExpiresAtMs != null &&
-    snapshot.previewExpiresAtMs - SIGNED_REFRESH_BUFFER_MS > now
-  ) {
-    return {
-      url: snapshot.previewUrl,
-      expiresAtMs: snapshot.previewExpiresAtMs,
-    };
-  }
-
-  try {
-    const signed = await sdk.getSignedPreviewUrl(port, SIGNED_TTL_SEC);
-    return {
-      url: signed.url,
-      expiresAtMs: now + SIGNED_TTL_SEC * 1000,
-    };
-  } catch {
-    return null;
-  }
-}
-
 async function probePreviewLink(
   sandbox: DaytonaProjectSandbox,
-  snapshot: DaytonaRuntimeSnapshot,
 ): Promise<{
   ready: boolean;
   url: string | null;
   port: number;
-  expiresAtMs: number | null;
   probeUrl: string | null;
-  token: string | null;
   http: number | null;
 }> {
   const sdk = sandbox.sdkSandbox;
   const port = getDaytonaDevPort();
 
   try {
+    await ensureSandboxPublic(sdk);
     const preview = await sdk.getPreviewLink(port);
     const res = await fetch(preview.url, {
-      headers: { "x-daytona-preview-token": preview.token },
       signal: AbortSignal.timeout(5_000),
     });
 
-    if (res.status >= 600) {
+    if (res.status >= 500) {
       return {
         ready: false,
-        url: null,
+        url: preview.url,
         port,
-        expiresAtMs: null,
         probeUrl: preview.url,
-        token: preview.token,
         http: res.status,
       };
     }
 
-    const embed = await resolveSignedEmbedUrl(snapshot, sdk, port);
     return {
       ready: true,
-      url: embed?.url ?? preview.url,
+      url: preview.url,
       port,
-      expiresAtMs: embed?.expiresAtMs ?? null,
       probeUrl: preview.url,
-      token: preview.token,
       http: res.status,
     };
   } catch {
@@ -143,9 +99,7 @@ async function probePreviewLink(
       ready: false,
       url: null,
       port,
-      expiresAtMs: null,
       probeUrl: null,
-      token: null,
       http: null,
     };
   }
@@ -203,7 +157,7 @@ export async function observeRuntime(
       };
     }
 
-    const preview = await probePreviewLink(project, snapshot);
+    const preview = await probePreviewLink(project);
     let buildError: string | null = null;
     if (preview.ready) {
       buildError = extractCompileError(await readDevLog(project));
@@ -216,9 +170,9 @@ export async function observeRuntime(
         hasNodeModules,
         previewUrl: preview.url,
         previewPort: preview.port,
-        previewExpiresAtMs: preview.expiresAtMs,
+        previewExpiresAtMs: null,
         probeUrl: preview.probeUrl,
-        previewToken: preview.token,
+        previewToken: null,
         buildError,
         httpStatus: preview.http,
         lastError: null,
@@ -245,7 +199,7 @@ export async function observeRuntime(
       hasNodeModules,
       previewPort: getDaytonaDevPort(),
       probeUrl: preview.probeUrl,
-      previewToken: preview.token,
+      previewToken: null,
       httpStatus: preview.http,
     };
   };
@@ -283,14 +237,14 @@ export async function observePreviewHealth(
   }
 
   const project = wrapSandbox(sessionId, sdk);
-  let http = await httpStatus(observed.probeUrl, observed.previewToken ?? undefined);
+  let http = await httpStatus(observed.probeUrl);
   let buildError = extractCompileError(await readDevLog(project));
 
   if (!buildError && http < 500) {
     buildError = null;
   } else if (!buildError && http >= 500) {
     await new Promise((r) => setTimeout(r, 2_000));
-    http = await httpStatus(observed.probeUrl, observed.previewToken ?? undefined);
+    http = await httpStatus(observed.probeUrl);
     buildError =
       http < 500
         ? null

@@ -18,7 +18,6 @@ const {
   startDevSession,
   stopDevSession,
   observeRuntime,
-  observePreviewHealth,
   commitWorkspaceTurn,
 } = vi.hoisted(() => {
   const ctx = { sessionId: "" };
@@ -33,7 +32,6 @@ const {
     startDevSession: vi.fn(),
     stopDevSession: vi.fn(),
     observeRuntime: vi.fn(),
-    observePreviewHealth: vi.fn(),
     commitWorkspaceTurn: vi.fn(),
   };
 });
@@ -72,7 +70,6 @@ vi.mock("./app-server-boot", () => ({
 
 vi.mock("./runtime-observer", () => ({
   observeRuntime,
-  observePreviewHealth,
 }));
 
 import {
@@ -128,10 +125,6 @@ describe("runtime-reconciler isolate / UI races", () => {
     stopDevSession.mockResolvedValue(undefined);
     deleteSandboxById.mockResolvedValue(undefined);
     commitWorkspaceTurn.mockResolvedValue(undefined);
-    observePreviewHealth.mockResolvedValue({
-      httpStatus: 200,
-      buildError: null,
-    });
   });
 
   it("readRuntime never creates a sandbox (UI poll isolate)", async () => {
@@ -413,21 +406,20 @@ describe("runtime-reconciler isolate / UI races", () => {
         return { exitCode: 0 };
       });
 
-      let previewUrl = "https://old.example";
       startDevSession.mockImplementation(async () => {
-        previewUrl = "https://new.example";
         return { sessionName: "preview-sess", port: 3000 };
       });
 
+      // Observer may omit URL while probing; reconciler must keep the public preview URL.
       observeRuntime.mockImplementation(async () =>
         observed({
           phase: "preview-ready",
           sandboxId: "sb_1",
           hasPackageJson: true,
           hasNodeModules: true,
-          previewUrl,
+          previewUrl: null,
           previewPort: 3000,
-          previewExpiresAtMs: Date.now() + 60_000,
+          previewExpiresAtMs: null,
         }),
       );
 
@@ -442,8 +434,9 @@ describe("runtime-reconciler isolate / UI races", () => {
       expect(snap.generation).toBe(4);
       expect(cleared).toBe(true);
       expect(startDevSession).toHaveBeenCalled();
-      // After restart reconcile, preview should be ready again
+      // After restart reconcile, preview should be ready again with same URL
       expect(snap.observed).toBe("preview-ready");
+      expect(snap.previewUrl).toBe("https://old.example");
     });
   });
 

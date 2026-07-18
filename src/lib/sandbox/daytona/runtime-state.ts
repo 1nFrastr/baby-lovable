@@ -110,11 +110,16 @@ export function deriveAppServerStatus(
     return { status: "error", error: snapshot.lastError };
   }
 
+  const starting = (): AppServerStatus =>
+    snapshot.previewUrl
+      ? { status: "starting", port, url: snapshot.previewUrl }
+      : { status: "starting", port };
+
   switch (snapshot.observed) {
     case "installing-deps":
       return { status: "installing" };
     case "starting-devserver":
-      return { status: "starting", port };
+      return starting();
     case "preview-ready":
       if (snapshot.previewUrl && snapshot.previewPort != null) {
         return {
@@ -123,16 +128,16 @@ export function deriveAppServerStatus(
           port: snapshot.previewPort,
         };
       }
-      return { status: "starting", port };
+      return starting();
     case "bootstrapping-workspace":
     case "creating-sandbox":
       if (snapshot.desired === "preview-ready") {
-        return { status: "starting", port };
+        return starting();
       }
       return { status: "stopped" };
     case "workspace-ready":
       if (snapshot.desired === "preview-ready") {
-        return { status: "starting", port };
+        return starting();
       }
       return { status: "stopped" };
     case "missing":
@@ -151,6 +156,10 @@ export function derivePreviewUrlStatus(
   if (app.status === "ready") {
     return { status: "ready", url: app.url };
   }
+  // Public preview URL stays valid across Next restarts (502 while down).
+  if (app.status === "starting" && app.url) {
+    return { status: "ready", url: app.url };
+  }
   return { status: "none" };
 }
 
@@ -160,6 +169,16 @@ export function deriveAllStatus(snapshot: DaytonaRuntimeSnapshot): AllStatus {
     appServer: deriveAppServerStatus(snapshot),
     previewUrl: derivePreviewUrlStatus(snapshot),
   };
+}
+
+/** Cached public preview URL is present — safe to show iframe without re-probe. */
+export function hasFreshPreviewEmbed(
+  snapshot: DaytonaRuntimeSnapshot,
+): boolean {
+  if (snapshot.observed !== "preview-ready") {
+    return false;
+  }
+  return Boolean(snapshot.previewUrl) && snapshot.previewPort != null;
 }
 
 /** True when observed reality satisfies the desired target. */

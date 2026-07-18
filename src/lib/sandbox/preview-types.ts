@@ -19,7 +19,7 @@ export type SandboxStatus =
 export type AppServerStatus =
   | { status: "installing" }
   | { status: "needs_install" }
-  | { status: "starting"; port: number }
+  | { status: "starting"; port: number; url?: string }
   | { status: "ready"; url: string; port: number }
   | { status: "error"; error: string }
   | { status: "stopped" };

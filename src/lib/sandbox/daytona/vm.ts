@@ -9,6 +9,13 @@ import type { Sandbox } from "@daytona/sdk";
 
 const RECONNECT_ATTEMPTS = 3;
 
+type SandboxApiClient = {
+  updatePublicStatus: (
+    sandboxIdOrName: string,
+    isPublic: boolean,
+  ) => Promise<unknown>;
+};
+
 export function isAsleep(state: string | undefined): boolean {
   return state === "stopped" || state === "archived";
 }
@@ -18,6 +25,27 @@ export function wrapSandbox(
   sandbox: Sandbox,
 ): DaytonaProjectSandbox {
   return new DaytonaProjectSandbox(sessionId, sandbox);
+}
+
+/**
+ * Public preview ports need no signed URL / token header.
+ * Creates are public; migrate older private sandboxes in place.
+ */
+export async function ensureSandboxPublic(sandbox: Sandbox): Promise<void> {
+  if (sandbox.public) {
+    return;
+  }
+  try {
+    // SDK Sandbox keeps sandboxApi private; create uses public:true, this migrates older VMs.
+    const api = (sandbox as unknown as { sandboxApi: SandboxApiClient }).sandboxApi;
+    await api.updatePublicStatus(sandbox.id, true);
+    sandbox.public = true;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to set Daytona sandbox public: ${detail.slice(0, 200)}`,
+    );
+  }
 }
 
 /** Get sandbox by id. wake=false never starts stopped/archived VMs. */
@@ -87,6 +115,8 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
     language: "typescript" as const,
     labels: { "baby-lovable-session": session.id },
     autoStopInterval: idleMinutes > 0 ? idleMinutes : 0,
+    // Public port preview — iframe uses getPreviewLink URL (no signed token).
+    public: true,
   };
 
   logDaytonaBootstrap(
@@ -115,6 +145,9 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
   }
 
   await sandbox.waitUntilStarted(180);
+  if (!sandbox.public) {
+    await ensureSandboxPublic(sandbox);
+  }
   logDaytonaBootstrap(session.id, "sandbox", `started ${sandbox.id}`);
   return sandbox;
 }

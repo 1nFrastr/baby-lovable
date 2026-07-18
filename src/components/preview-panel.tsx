@@ -268,6 +268,45 @@ export function PreviewPanel({
     }
   }, [sandboxMode, sessionId]);
 
+  // Enter / re-enter session: kick the same startPreview path as agent turns.
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "warm" }),
+        });
+        if (!response.ok || cancelled) {
+          return;
+        }
+        const data = (await response.json()) as {
+          preview?: AppServerStatus;
+          appServer?: AppServerStatus;
+          sandbox?: SandboxStatus;
+        };
+        if (cancelled) {
+          return;
+        }
+        const appServer = data.appServer ?? data.preview;
+        if (appServer) {
+          setPreview(appServer);
+        }
+        if (data.sandbox) {
+          setSandboxStatus(data.sandbox);
+        }
+      } catch {
+        // GET poll will reflect stopped / error
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
   useEffect(() => {
     let cancelled = false;
     let timeoutId = 0;
@@ -335,7 +374,15 @@ export function PreviewPanel({
   }, [loadAppTest, sandboxMode, sessionId]);
 
   const handleRestart = async () => {
-    setPreview({ status: "starting", port: 0 });
+    setPreview((prev) => {
+      if (prev.status === "ready") {
+        return { status: "starting", port: prev.port, url: prev.url };
+      }
+      if (prev.status === "starting") {
+        return prev;
+      }
+      return { status: "starting", port: 0 };
+    });
     try {
       await fetch(`/api/sessions/${sessionId}/preview`, {
         method: "POST",
@@ -390,6 +437,13 @@ export function PreviewPanel({
     pipOpen &&
     (appTest.status === "running" || pipHoldActive) &&
     !pipDismissed;
+  // Keep iframe mounted across restart — public preview URL is stable; Next down is 502.
+  const previewEmbedUrl =
+    preview.status === "ready"
+      ? preview.url
+      : preview.status === "starting"
+        ? preview.url
+        : undefined;
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
@@ -469,10 +523,10 @@ export function PreviewPanel({
       </div>
 
       <div className="relative min-h-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
-        {preview.status === "ready" ? (
+        {previewEmbedUrl ? (
           <iframe
-            key={`${preview.url}::${iframeEpoch}`}
-            src={preview.url}
+            key={`${previewEmbedUrl}::${iframeEpoch}`}
+            src={previewEmbedUrl}
             title="App preview"
             className="h-full w-full border-0 bg-white"
             allow="accelerometer; camera; microphone; clipboard-write"

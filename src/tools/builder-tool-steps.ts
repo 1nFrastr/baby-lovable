@@ -365,10 +365,10 @@ export async function checkPreviewStep(
 
   if (input.restart) {
     await restartAppServer(context.sessionId);
-    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
   } else {
-    // Give HMR a moment to settle after the agent's last edit.
-    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    // Brief HMR settle after the agent's last edit.
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 
   let report = await checkAppServer(context.sessionId);
@@ -376,17 +376,17 @@ export async function checkPreviewStep(
 
   for (
     let attempt = 0;
-    attempt < 8 &&
+    attempt < 4 &&
     (report.status === "starting" || report.status === "installing");
     attempt++
   ) {
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
     report = await checkAppServer(context.sessionId);
     retried = true;
   }
 
   if (!input.restart && isTempFailure(report)) {
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
     report = await checkAppServer(context.sessionId);
     retried = true;
   }

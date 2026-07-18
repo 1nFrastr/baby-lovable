@@ -4,9 +4,11 @@ import {
   deleteSandbox,
   getAllStatus,
   hasNodeModules,
+  peekAllStatus,
   restartAppServer,
   startAppServer,
   stopAppServer,
+  warmPreview,
 } from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
@@ -26,7 +28,7 @@ async function resolveAuth(request: Request) {
   }
 }
 
-/** Read-only: three-layer status. Never starts anything. */
+/** Status for UI poll: durable peek (no blocking Daytona observe). */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -44,7 +46,7 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const all = await getAllStatus(sessionId);
+    const all = await peekAllStatus(sessionId);
     return NextResponse.json({
       sandbox: all.sandbox,
       appServer: all.appServer,
@@ -61,7 +63,7 @@ export async function GET(
   }
 }
 
-/** Write: start or restart app server. */
+/** Write: warm (fire-and-forget startPreview), start, or restart app server. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -80,8 +82,20 @@ export async function POST(
     }
 
     const body = (await request.json().catch(() => ({}))) as {
-      action?: "start" | "restart";
+      action?: "warm" | "start" | "restart";
     };
+
+    // Kick startPreview if needed; return cached/peek status immediately.
+    if (body.action === "warm") {
+      const all = await warmPreview(sessionId);
+      return NextResponse.json({
+        sandbox: all.sandbox,
+        appServer: all.appServer,
+        previewUrl: all.previewUrl,
+        preview: all.appServer,
+        sandboxMode: session.sandboxMode,
+      });
+    }
 
     if (session.sandboxMode === "local") {
       const hasDeps = await hasNodeModules(sessionId);

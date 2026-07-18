@@ -5,6 +5,7 @@ import {
   deriveAppServerStatus,
   deriveSandboxStatus,
   emptyRuntimeSnapshot,
+  hasFreshPreviewEmbed,
   isDesiredSatisfied,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
@@ -45,6 +46,19 @@ describe("runtime-state derive*", () => {
         snap({ observed: "starting-devserver", previewPort: 3000 }),
       ),
     ).toMatchObject({ status: "starting", port: 3000 });
+    expect(
+      deriveAppServerStatus(
+        snap({
+          observed: "starting-devserver",
+          previewPort: 3000,
+          previewUrl: "https://embed.example",
+        }),
+      ),
+    ).toEqual({
+      status: "starting",
+      port: 3000,
+      url: "https://embed.example",
+    });
   });
 
   it("shows starting while desired=preview-ready during create/bootstrap", () => {
@@ -174,6 +188,42 @@ describe("isDesiredSatisfied", () => {
           previewUrl: "https://x",
           previewPort: 3000,
           clearNextCache: true,
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("hasFreshPreviewEmbed", () => {
+  it("accepts preview-ready with public preview url", () => {
+    expect(
+      hasFreshPreviewEmbed(
+        snap({
+          observed: "preview-ready",
+          previewUrl: "https://preview.example",
+          previewPort: 3000,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores legacy expiry field; rejects missing url", () => {
+    expect(
+      hasFreshPreviewEmbed(
+        snap({
+          observed: "preview-ready",
+          previewUrl: "https://preview.example",
+          previewPort: 3000,
+          previewExpiresAtMs: Date.now() + 60_000,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasFreshPreviewEmbed(
+        snap({
+          observed: "preview-ready",
+          previewUrl: null,
+          previewPort: 3000,
         }),
       ),
     ).toBe(false);
