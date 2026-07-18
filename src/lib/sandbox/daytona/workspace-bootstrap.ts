@@ -1,5 +1,4 @@
 import type { Session } from "@/lib/session/types";
-import { updateSession } from "@/lib/session/store";
 
 import type { DaytonaProjectSandbox } from "./provider";
 import { resolvePackageManager } from "../package-manager";
@@ -10,6 +9,11 @@ import { readStarterTemplateFiles } from "./template-seed";
 
 const PNPM_BOOTSTRAP =
   "corepack enable && corepack prepare pnpm@10.12.1 --activate || npm install -g pnpm@10.12.1";
+
+export interface WorkspaceBootstrapResult {
+  seeded: boolean;
+  gitInitSha?: string;
+}
 
 async function pathExists(
   sandbox: DaytonaProjectSandbox,
@@ -66,12 +70,9 @@ async function seedFromTemplate(sandbox: DaytonaProjectSandbox): Promise<void> {
 
 async function ensureGitInitialized(
   sandbox: DaytonaProjectSandbox,
-  session: Session,
-): Promise<void> {
+): Promise<string | undefined> {
   const init = await initWorkspaceGit(sandbox);
-  if (init.sha) {
-    await updateSession(session.id, { lastCommitSha: init.sha });
-  }
+  return init.sha ?? undefined;
 }
 
 async function ensurePnpmAvailable(sandbox: DaytonaProjectSandbox, sessionId: string) {
@@ -90,14 +91,12 @@ async function ensurePnpmAvailable(sandbox: DaytonaProjectSandbox, sessionId: st
 
 /**
  * Prepare the sandbox local workspace.
- * Snapshot-backed sandboxes may already have starter + node_modules;
- * otherwise seed from the Next.js starter template.
- * Persistence is the sandbox disk for now (freestyle git later).
+ * Returns bootstrap result only — caller persists session / runtime state.
  */
 export async function ensureDaytonaWorkspace(
   sandbox: DaytonaProjectSandbox,
   session: Session,
-): Promise<void> {
+): Promise<WorkspaceBootstrapResult> {
   logDaytonaBootstrap(session.id, "workspace", "checking workspace state");
   const [empty, hasPackageJson] = await Promise.all([
     isWorkspaceEmpty(sandbox),
@@ -109,14 +108,16 @@ export async function ensureDaytonaWorkspace(
     await seedFromTemplate(sandbox);
     logDaytonaBootstrap(session.id, "workspace", "installing pnpm");
     await installPnpm(sandbox);
-    await ensureGitInitialized(sandbox, session);
+    const gitInitSha = await ensureGitInitialized(sandbox);
     logDaytonaBootstrap(session.id, "workspace", "workspace ready (seeded)");
-    return;
+    return { seeded: true, gitInitSha };
   }
 
   await ensurePnpmAvailable(sandbox, session.id);
+  let gitInitSha: string | undefined;
   if (!session.lastCommitSha) {
-    await ensureGitInitialized(sandbox, session);
+    gitInitSha = await ensureGitInitialized(sandbox);
   }
   logDaytonaBootstrap(session.id, "workspace", "workspace ready (existing project)");
+  return { seeded: false, gitInitSha };
 }

@@ -16,10 +16,8 @@ loadEnv({ path: ".env.local", quiet: true });
 loadEnv({ path: ".env", quiet: true });
 
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
-import {
-  deleteDaytonaSandbox,
-  getOrCreateDaytonaSandbox,
-} from "@/lib/sandbox/daytona/sandbox";
+import { deleteDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
+import { ensureDesiredState } from "@/lib/sandbox/daytona/runtime-reconciler";
 import {
   exportWorkspaceArchive,
   type ExportArchiveResult,
@@ -128,7 +126,7 @@ async function main() {
   let failed = false;
   try {
     console.log("Bootstrapping / reconnecting sandbox …");
-    await getOrCreateDaytonaSandbox(session.id);
+    await ensureDesiredState(session.id, "sandbox-ready", { wait: true });
 
     console.log("\nExport via sandbox-git …");
     const result = await exportWorkspaceArchive(session.id);

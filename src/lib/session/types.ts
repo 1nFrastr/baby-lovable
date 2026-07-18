@@ -40,8 +40,6 @@ export interface Session {
   runStatus: SessionRunStatus;
   sandboxMode: SandboxMode;
   gitRemote?: string;
-  /** Active Daytona sandbox id (ephemeral compute). */
-  daytonaSandboxId?: string | null;
   /** Last successful git commit in the workspace. */
   lastCommitSha?: string;
   /** Soft-delete timestamp — reserved for Supabase row lifecycle. */
@@ -74,7 +72,6 @@ export interface UpdateSessionInput {
   runStatus?: SessionRunStatus;
   sandboxMode?: SandboxMode;
   gitRemote?: string;
-  daytonaSandboxId?: string | null;
   lastCommitSha?: string;
   deletedAt?: string | null;
 }

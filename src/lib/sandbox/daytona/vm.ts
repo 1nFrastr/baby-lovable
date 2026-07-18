@@ -1,6 +1,5 @@
-/** Daytona VM: get / wake / create one sandbox (SDK only). */
+/** Daytona VM: get / wake / create / delete (SDK only — no session persistence). */
 import type { Session } from "@/lib/session/types";
-import { getSession, updateSession } from "@/lib/session/store";
 
 import { getDaytonaSnapshotName } from "./config";
 import { getDaytonaClient } from "./client";
@@ -19,16 +18,6 @@ export function wrapSandbox(
   sandbox: Sandbox,
 ): DaytonaProjectSandbox {
   return new DaytonaProjectSandbox(sessionId, sandbox);
-}
-
-export async function persistSandboxId(
-  sessionId: string,
-  sandboxId: string | null,
-): Promise<void> {
-  if (!(await getSession(sessionId))) {
-    return;
-  }
-  await updateSession(sessionId, { daytonaSandboxId: sandboxId });
 }
 
 /** Get sandbox by id. wake=false never starts stopped/archived VMs. */
@@ -126,7 +115,19 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
   }
 
   await sandbox.waitUntilStarted(180);
-  await persistSandboxId(session.id, sandbox.id);
   logDaytonaBootstrap(session.id, "sandbox", `started ${sandbox.id}`);
   return sandbox;
+}
+
+export async function deleteSandboxById(
+  sessionId: string,
+  sandboxId: string,
+): Promise<void> {
+  logDaytonaBootstrap(sessionId, "sandbox", `delete ${sandboxId}`);
+  try {
+    const sandbox = await getDaytonaClient().get(sandboxId);
+    await sandbox.delete(60);
+  } catch {
+    // already gone
+  }
 }

@@ -1,4 +1,5 @@
-import { getOrCreateDaytonaSandbox } from "./sandbox";
+import { ensureDesiredState } from "./runtime-reconciler";
+import { getExistingDaytonaSandbox } from "./sandbox";
 import { DAYTONA_WORKSPACE_ROOT } from "./config";
 import type { DaytonaProjectSandbox } from "./provider";
 import { getSession } from "@/lib/session/store";
@@ -134,7 +135,11 @@ async function exportDaytonaArchive(
   sessionId: string,
   title?: string,
 ): Promise<ExportArchiveResult> {
-  const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+  await ensureDesiredState(sessionId, "sandbox-ready", { wait: true });
+  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: true });
+  if (!sandbox) {
+    throw new Error(`Daytona sandbox not available for export: ${sessionId}`);
+  }
   const filename = archiveFilename(sessionId, title);
 
   try {

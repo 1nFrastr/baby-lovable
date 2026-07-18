@@ -177,7 +177,7 @@ export async function updateSessionLocal(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const { lastRunId, daytonaSandboxId, ...rest } = input;
+  const { lastRunId, ...rest } = input;
 
   const updated: Session = {
     ...existing,
@@ -190,12 +190,6 @@ export async function updateSessionLocal(
     delete updated.lastRunId;
   } else if (lastRunId !== undefined) {
     updated.lastRunId = lastRunId;
-  }
-
-  if (daytonaSandboxId === null) {
-    delete updated.daytonaSandboxId;
-  } else if (daytonaSandboxId !== undefined) {
-    updated.daytonaSandboxId = daytonaSandboxId;
   }
 
   await writeSessionFile(updated);

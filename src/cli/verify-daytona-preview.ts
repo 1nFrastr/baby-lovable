@@ -3,8 +3,9 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local", quiet: true });
 loadEnv({ path: ".env", quiet: true });
 
-import { getOrCreateDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
 import { checkDaytonaAppServer } from "@/lib/sandbox/daytona/app-server";
+import { ensureDesiredState } from "@/lib/sandbox/daytona/runtime-reconciler";
+import { getExistingDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
 
 async function main() {
   const sessionId = process.argv[2];
@@ -13,7 +14,11 @@ async function main() {
     process.exit(1);
   }
 
-  const sandbox = await getOrCreateDaytonaSandbox(sessionId);
+  await ensureDesiredState(sessionId, "preview-ready", { wait: true });
+  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: true });
+  if (!sandbox) {
+    throw new Error(`Daytona sandbox not available for ${sessionId}`);
+  }
   const page = await sandbox.fs.readTextFile("src/app/page.tsx");
   console.log("--- workspace src/app/page.tsx ---");
   console.log(page);
