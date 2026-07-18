@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   useCreateSessionMutation,
@@ -54,11 +54,34 @@ export function AppShell() {
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
 
+  const prevRuntimeRunStatus = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     setChatAppTest(null);
     setChatAppTestReady(false);
     setPreviewReloadKey(null);
+    prevRuntimeRunStatus.current = undefined;
   }, [activeSessionId]);
+
+  // Runtime SSE can flip run→done before onChatEnd's detail invalidate lands.
+  // Refetch session.json as soon as the projection leaves "running".
+  useEffect(() => {
+    const status = runtimeQuery.data?.projection.run?.status;
+    const prev = prevRuntimeRunStatus.current;
+    prevRuntimeRunStatus.current = status;
+
+    if (
+      activeSessionId &&
+      prev === "running" &&
+      (status === "done" || status === "error" || status === "idle")
+    ) {
+      invalidateSessionDetail(activeSessionId);
+    }
+  }, [
+    activeSessionId,
+    invalidateSessionDetail,
+    runtimeQuery.data?.projection.run?.status,
+  ]);
 
   const handleAppTestStatus = useCallback(
     (status: AppTestLatestStatus | null) => {

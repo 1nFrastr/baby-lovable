@@ -17,6 +17,7 @@ import {
 import {
   hasAssistantParts,
   mergeDisplayMessages,
+  persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
 import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
 import type { SandboxMode } from "@/lib/sandbox/types";
@@ -133,6 +134,12 @@ export function Chat({
       return;
     }
 
+    // Runtime projection can mark the run idle before session detail refetch
+    // returns the committed assistant — never clobber the live thread with that.
+    if (persistedMessagesLagChat(messages, chatMessages)) {
+      return;
+    }
+
     const fingerprint = messages.map((message) => message.id).join("|");
     if (fingerprint === lastSyncedPersistedRef.current) {
       return;
@@ -142,7 +149,7 @@ export function Chat({
     // Persisted history is authoritative between turns; merging would keep a
     // stale SSE assistant id alongside the saved draft id.
     setMessages(messages);
-  }, [isLiveTurn, messages, setMessages]);
+  }, [chatMessages, isLiveTurn, messages, setMessages]);
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
