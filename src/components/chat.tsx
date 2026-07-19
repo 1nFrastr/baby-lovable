@@ -15,7 +15,7 @@ import {
   mergeDisplayMessages,
   persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
-import { isActiveRunStatus, type SessionRunStatus } from "@/lib/session/types";
+import { isLiveChatTurn, type SessionRunStatus } from "@/lib/session/types";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
@@ -74,10 +74,7 @@ export function Chat({
     },
   });
 
-  const isLiveTurn =
-    status === "streaming" ||
-    status === "submitted" ||
-    isActiveRunStatus(runStatus);
+  const isLiveTurn = isLiveChatTurn(status, runStatus);
 
   const displayMessages = useMemo(
     () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),

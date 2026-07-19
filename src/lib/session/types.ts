@@ -39,9 +39,6 @@ export interface Session {
   /** Whether a workflow turn is in-flight; drives client resume behaviour. */
   runStatus: SessionRunStatus;
   sandboxMode: SandboxMode;
-  gitRemote?: string;
-  /** Last successful git commit in the workspace. */
-  lastCommitSha?: string;
   /** Soft-delete timestamp — reserved for Supabase row lifecycle. */
   deletedAt?: string | null;
 }
@@ -71,12 +68,43 @@ export interface UpdateSessionInput {
   lastRunId?: string | null;
   runStatus?: SessionRunStatus;
   sandboxMode?: SandboxMode;
-  gitRemote?: string;
-  lastCommitSha?: string;
   deletedAt?: string | null;
 }
 
 /** Returns true when the client should attempt stream reconnection. */
 export function isActiveRunStatus(status: SessionRunStatus): boolean {
   return status === "pending" || status === "running";
+}
+
+/** Turn finished on the server (messages persisted); post-turn work may still run. */
+export function isTerminalRunStatus(status: SessionRunStatus): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled"
+  );
+}
+
+/**
+ * Whether the composer should stay disabled for an in-flight turn.
+ *
+ * Unlock as soon as session/runtime reports a terminal runStatus — even if
+ * useChat is still `streaming`. WorkflowChatTransport keeps the HTTP stream
+ * open until the whole workflow returns, which can lag the persisted
+ * "completed" signal by a noticeable amount.
+ */
+export function isLiveChatTurn(
+  chatStatus: string,
+  runStatus: SessionRunStatus,
+): boolean {
+  if (isActiveRunStatus(runStatus)) {
+    return true;
+  }
+
+  const chatBusy =
+    chatStatus === "submitted" || chatStatus === "streaming";
+
+  // Idle + just-submitted: lock until the server marks the run active/terminal.
+  // Completed/failed while transport still draining: unlock immediately.
+  return chatBusy && !isTerminalRunStatus(runStatus);
 }

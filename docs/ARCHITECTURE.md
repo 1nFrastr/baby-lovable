@@ -25,8 +25,7 @@ flowchart TB
 
   subgraph Remote["Daytona"]
     WS["workspace + pnpm dev"]
-    Vol["Volume persist"]
-    Prev["Signed Preview URL"]
+    Prev["Preview URL"]
   end
 
   subgraph BR["Cloudflare Browser Run"]
@@ -87,9 +86,8 @@ flowchart TB
 ### 选择了什么
 
 - `@daytona/sdk` 实现 `ProjectSandbox`
-- 双盘：快速 workspace 跑构建；Volume（S3-backed FUSE）只做源码持久化
-- Snapshot：构建时预装 git + 系统 pnpm + starter + `node_modules`（`npm run build:daytona-snapshot`）；冷启动不再 seed 源码、不再 runtime 装依赖，直接 `pnpm dev`
-- `getPreviewLink` / signed embed URL：给 iframe 与 Browser Run
+- Snapshot：构建时预装系统 pnpm + starter + `node_modules`（`npm run build:daytona-snapshot`）；冷启动不再 seed 源码、不再 runtime 装依赖，直接 `pnpm dev`
+- `getPreviewLink` / Preview URL：给 iframe 与 Browser Run
 
 关键路径：`src/lib/sandbox/daytona/**`、`src/lib/sandbox/local/**`
 
@@ -99,10 +97,8 @@ Agent 需要的不是「能跑一段 Python」的 notebook，而是：
 
 1. **文件系统 API**（读写/搜索，与 local 对称）
 2. **进程 API**（`pnpm` / `next dev`）
-3. **Git API**（每 turn checkpoint）
-4. **可公网访问的 Preview**（否则云端浏览器测不到）
-5. **会话级持久化**（sandbox 可停，代码不能丢）
-6. **Snapshot**（否则每次 `pnpm install` 拖垮体验）
+3. **可公网访问的 Preview**（否则云端浏览器测不到）
+4. **Snapshot**（否则每次 `pnpm install` 拖垮体验）
 
 Daytona 在同一 SDK 表面覆盖上述能力，使 `factory.ts` 可以 `local | daytona` 切换而不改 tools。
 
@@ -110,12 +106,12 @@ Daytona 在同一 SDK 表面覆盖上述能力，使 `factory.ts` 可以 `local 
 
 | 维度 | 本项目立场 |
 | --- | --- |
-| 未做双后端适配 | 面试周期内只深做一条远程路径，避免两套 preview/volume 语义 |
+| 未做双后端适配 | 面试周期内只深做一条远程路径，避免两套 preview 语义 |
 | E2B 优势场景 | 短生命周期 code exec、模板丰富；本项目更偏「长存活 dev workspace」 |
 | 成本 / 配额 | Daytona idle stop + 配额错误 surfacing；未做完整计费产品 |
-| 复杂度 | Volume FUSE 不适合直接跑 build → 必须「双盘」——这是有意设计，不是意外 |
+| 代码持久化 | 不做独立 Volume；代码真相源是 sandbox/local workspace，需要副本时 zip 导出 |
 
-**若重选**：仍会优先「preview URL + fs/git/process 一体」的厂商；接口层已预留，换后端主要是 provider 工作量。
+**若重选**：仍会优先「preview URL + fs/process 一体」的厂商；接口层已预留，换后端主要是 provider 工作量。
 
 ---
 
@@ -163,12 +159,11 @@ Daytona signed Preview URL
 ProjectSandbox {
   fs: SandboxFileSystem
   process: SandboxProcessRunner
-  git: SandboxGitRunner
 }
 ```
 
-- Local：Node `fs` + `spawn` + shell git
-- Daytona：SDK fs / process / git
+- Local：Node `fs` + `spawn`
+- Daytona：SDK fs / process
 
 上层 tools **只依赖接口**。这是渐进加 Daytona 时没有重写 Agent 的前提。
 

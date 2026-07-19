@@ -72,12 +72,11 @@
 
 ### Phase 6 — Daytona（可隔离）
 
-代表提交：Daytona sandbox、snapshot、Web iframe、volume sync
+代表提交：Daytona sandbox、snapshot、Web iframe
 
 - 同一 `ProjectSandbox` 换后端
-- Volume：计算盘 ephemeral，持久盘只存源码
 - Snapshot 预装依赖，缩短冷启动
-- Signed Preview URL 供 iframe
+- Preview URL 供 iframe
 
 **验收**：云端隔离跑 Next；预览可嵌。
 

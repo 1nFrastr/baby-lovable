@@ -61,10 +61,6 @@ vi.mock("./app-server-boot", () => ({
   stopDevSession: vi.fn(),
 }));
 
-vi.mock("../workspace-git", () => ({
-  commitWorkspaceTurn: vi.fn(),
-}));
-
 import { checkRuntimePreview } from "./runtime-reconciler";
 import { upsertRuntimeSnapshot, withFreshIsolate } from "./runtime-store";
 import type { ObservedRuntime } from "./runtime-observer";

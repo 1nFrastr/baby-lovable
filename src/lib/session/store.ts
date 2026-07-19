@@ -66,7 +66,10 @@ export async function updateSession(
     : await updateSessionLocal(sessionId, input, auth);
 
   if (input.runStatus !== undefined || input.lastRunId !== undefined) {
-    void publishRunRuntime(session);
+    // Await so SSE/Realtime clients see terminal runStatus before post-turn
+    // work (e.g. git) continues — otherwise the composer stays locked on a
+    // stale "running" projection while useChat drains the workflow stream.
+    await publishRunRuntime(session);
   }
 
   return session;

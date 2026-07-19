@@ -12,10 +12,8 @@ import {
   type FileInfo,
   type ProjectSandbox,
   type SandboxFileSystem,
-  type SandboxGitRunner,
   type SandboxProcessRunner,
 } from "../types";
-import { createGitRunner } from "../git-runner";
 import { getWorkspaceRoot, resolveWorkspacePath } from "../paths";
 
 function globToRegExp(pattern: string): RegExp {
@@ -215,7 +213,6 @@ export class LocalProjectSandbox implements ProjectSandbox {
   readonly description: string;
   readonly fs: SandboxFileSystem;
   readonly process: SandboxProcessRunner;
-  readonly git: SandboxGitRunner;
 
   constructor(sessionId: string) {
     this.id = sessionId;
@@ -223,6 +220,5 @@ export class LocalProjectSandbox implements ProjectSandbox {
     this.description = `Local workspace at ${this.rootDir}`;
     this.fs = new LocalSandboxFileSystem(sessionId);
     this.process = new LocalSandboxProcessRunner(sessionId, this.rootDir);
-    this.git = createGitRunner(this);
   }
 }
