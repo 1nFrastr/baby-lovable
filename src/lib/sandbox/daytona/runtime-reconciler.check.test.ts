@@ -45,7 +45,6 @@ vi.mock("./vm", () => ({
 
 vi.mock("./runtime-observer", () => ({
   observeRuntime,
-  observePreviewHealth: vi.fn(),
 }));
 
 vi.mock("./app-server-health", () => ({
@@ -78,7 +77,6 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
     previewUrl: null,
     previewPort: null,
     probeUrl: null,
-    buildError: null,
     httpStatus: null,
     lastError: null,
     ...partial,
@@ -176,7 +174,6 @@ describe("checkRuntimePreview", () => {
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
           probeUrl: PREVIEW_URL,
-          buildError: "should be ignored",
           httpStatus: 502,
         }),
       );
@@ -212,7 +209,6 @@ describe("checkRuntimePreview", () => {
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
           probeUrl: PREVIEW_URL,
-          buildError: "should be ignored",
           httpStatus: 200,
         }),
       );
@@ -253,7 +249,6 @@ describe("checkRuntimePreview", () => {
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
           probeUrl: PREVIEW_URL,
-          buildError: null,
           httpStatus: 200,
         }),
       );

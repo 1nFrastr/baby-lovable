@@ -127,6 +127,9 @@ function isTransientObserveFailure(observed: ObservedRuntime): boolean {
   if (observed.phase === "preview-ready") {
     return false;
   }
+  if (observed.transient) {
+    return true;
+  }
   if (!observed.lastError) {
     return false;
   }
@@ -543,15 +546,6 @@ async function reconcileLoop(
     // Always reload durable state — another isolate may have flipped desired.
     let snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
 
-    // If desired flipped to stopped/deleted mid-flight, prefer that over finishing start.
-    if (
-      (snapshot.desired === "stopped" || snapshot.desired === "deleted") &&
-      snapshot.observed !== "stopping" &&
-      snapshot.observed !== "deleting"
-    ) {
-      // fall through to observe + reconcileOnce for stop/delete
-    }
-
     const tObserve = Date.now();
     const observed = await observeRuntime(sessionId, {
       wake:
@@ -567,20 +561,33 @@ async function reconcileLoop(
       `phase=${observed.phase} http=${observed.httpStatus ?? "null"} err=${observed.lastError ?? "none"} durable=${snapshot.observed}`,
     );
 
-    const obsPatch = applyObservation(snapshot, observed);
-    try {
-      snapshot = await upsertRuntimeSnapshot(sessionId, {
-        expectedRevision: snapshot.revision,
-        ...obsPatch,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/CAS conflict/i.test(message)) {
-        throw error;
-      }
-      // Another isolate updated — reload and continue.
+    if (shouldPreserveSnapshotOnObserveMiss(observed, snapshot)) {
+      logDaytonaTiming(
+        sessionId,
+        "reconcile.observe",
+        0,
+        `preserved durable=${snapshot.observed} after transient miss`,
+      );
+      // The observe may have taken seconds. Reload even though we skip the
+      // observation write so a concurrent desired-state change is not hidden
+      // behind the preserved snapshot.
       snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-      continue;
+    } else {
+      const obsPatch = applyObservation(snapshot, observed);
+      try {
+        snapshot = await upsertRuntimeSnapshot(sessionId, {
+          expectedRevision: snapshot.revision,
+          ...obsPatch,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/CAS conflict/i.test(message)) {
+          throw error;
+        }
+        // Another isolate updated — reload and continue.
+        snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+        continue;
+      }
     }
 
     // Prefer caller's wait target (sandbox-ready) over durable preview-ready.
@@ -682,7 +689,6 @@ export async function ensureDesiredState(
 
   let intentGeneration = snapshot.generation + 1;
   const maxDesiredAttempts = 12;
-  let submitted = false;
   for (let attempt = 0; attempt < maxDesiredAttempts; attempt++) {
     try {
       const patch: Parameters<typeof upsertRuntimeSnapshot>[1] = {
@@ -696,7 +702,6 @@ export async function ensureDesiredState(
         patch.clearNextCache = true;
       }
       snapshot = await upsertRuntimeSnapshot(sessionId, patch);
-      submitted = true;
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -708,7 +713,6 @@ export async function ensureDesiredState(
         snapshot.desired === targetDesired &&
         snapshot.generation >= intentGeneration
       ) {
-        submitted = true;
         break;
       }
       // Another intent landed — claim a newer generation and retry.
@@ -1010,49 +1014,6 @@ export async function checkRuntimePreview(sessionId: string) {
     return {
       status: "ready" as const,
       url,
-      buildError: null,
-      httpStatus: probe,
-    };
-  }
-
-  // Transient probe failure but durable says ready — re-probe HTTP before
-  // claiming ready (undefined httpStatus must not count as ok).
-  if (
-    shouldPreserveSnapshotOnObserveMiss(observed, snapshot) &&
-    hasFreshPreviewEmbed(snapshot) &&
-    snapshot.previewUrl
-  ) {
-    const tHttp = Date.now();
-    const probe = await httpStatus(snapshot.previewUrl);
-    logDaytonaTiming(
-      sessionId,
-      "checkRuntimePreview.preserve.http",
-      Date.now() - tHttp,
-      `http=${probe}`,
-    );
-    if (probe >= 500) {
-      logDaytonaTiming(
-        sessionId,
-        "checkRuntimePreview.total",
-        Date.now() - t0,
-        "path=preserve status=starting",
-      );
-      return {
-        status: "starting" as const,
-        url: snapshot.previewUrl,
-        buildError: null,
-        httpStatus: probe,
-      };
-    }
-    logDaytonaTiming(
-      sessionId,
-      "checkRuntimePreview.total",
-      Date.now() - t0,
-      "path=preserve status=ready",
-    );
-    return {
-      status: "ready" as const,
-      url: snapshot.previewUrl,
       buildError: null,
       httpStatus: probe,
     };

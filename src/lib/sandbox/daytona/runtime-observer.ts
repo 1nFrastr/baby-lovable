@@ -5,12 +5,7 @@
 
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
-import {
-  extractCompileError,
-  httpStatus,
-  PREVIEW_HTTP_TIMEOUT_MS,
-  readDevLog,
-} from "./app-server-health";
+import { PREVIEW_HTTP_TIMEOUT_MS } from "./app-server-health";
 import type { DaytonaProjectSandbox } from "./provider";
 import {
   type DaytonaObservedPhase,
@@ -24,10 +19,29 @@ const PROBE_TIMEOUT_MS = 8_000;
 /** After soft deadline, wait this long for the in-flight pass to finish. */
 const PROBE_GRACE_MS = 3_000;
 
-/** In-flight observe per session — coalesce instead of stacking reconnects. */
-const inFlightObserve = new Map<string, Promise<ObservedRuntime>>();
+interface ObserveIdentity {
+  sessionId: string;
+  sandboxId: string;
+  generation: number;
+  wake: boolean;
+}
+
+interface InFlightObserve extends ObserveIdentity {
+  promise: Promise<ObservedRuntime>;
+}
+
+interface LateReadyObserve extends ObserveIdentity {
+  value: ObservedRuntime;
+}
+
+/**
+ * Coalesce only equivalent observations. Passive peeks must not suppress a
+ * wake request, and results from an old sandbox generation must not leak into
+ * a replacement runtime.
+ */
+const inFlightObserve = new Map<string, InFlightObserve>();
 /** Ready result that finished after a soft-timeout return — next tick adopts it. */
-const lateReadyMailbox = new Map<string, ObservedRuntime>();
+const lateReadyMailbox = new Map<string, LateReadyObserve>();
 
 export interface ObservedRuntime {
   phase: DaytonaObservedPhase;
@@ -36,12 +50,16 @@ export interface ObservedRuntime {
   previewUrl: string | null;
   previewPort: number | null;
   probeUrl: string | null;
-  buildError: string | null;
   httpStatus: number | null;
   lastError: string | null;
+  /** The failure is inconclusive and must not clobber known-good durable state. */
+  transient?: boolean;
 }
 
-function emptyObserved(lastError: string | null = null): ObservedRuntime {
+function emptyObserved(
+  lastError: string | null = null,
+  transient = false,
+): ObservedRuntime {
   return {
     phase: "missing",
     sandboxId: null,
@@ -49,9 +67,9 @@ function emptyObserved(lastError: string | null = null): ObservedRuntime {
     previewUrl: null,
     previewPort: null,
     probeUrl: null,
-    buildError: null,
     httpStatus: null,
     lastError,
+    transient,
   };
 }
 
@@ -64,14 +82,80 @@ function softTimeoutObserved(snapshot: DaytonaRuntimeSnapshot): ObservedRuntime 
     previewUrl: snapshot.previewUrl,
     previewPort: snapshot.previewPort ?? getDaytonaDevPort(),
     probeUrl: snapshot.previewUrl,
-    buildError: null,
     httpStatus: null,
     lastError: "observe timeout",
+    transient: true,
   };
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function observeKey(identity: ObserveIdentity): string {
+  return [
+    identity.sessionId,
+    identity.sandboxId,
+    identity.generation,
+    identity.wake ? "wake" : "peek",
+  ].join(":");
+}
+
+function matchesSnapshot(
+  identity: Pick<ObserveIdentity, "sandboxId" | "generation">,
+  snapshot: DaytonaRuntimeSnapshot,
+): boolean {
+  return (
+    identity.sandboxId === snapshot.sandboxId &&
+    identity.generation === snapshot.generation
+  );
+}
+
+type UrlProbe = {
+  ready: boolean;
+  http: number | null;
+  lastError: string | null;
+  transient: boolean;
+};
+
+function shouldRefreshPreviewLink(probe: UrlProbe): boolean {
+  return (
+    probe.http === 401 ||
+    probe.http === 403 ||
+    probe.http === 404 ||
+    probe.http === 410
+  );
+}
+
+async function probeUrl(url: string): Promise<UrlProbe> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(PREVIEW_HTTP_TIMEOUT_MS),
+    });
+    const http = res.status;
+    await res.body?.cancel().catch(() => {});
+
+    if (http >= 200 && http < 400) {
+      return { ready: true, http, lastError: null, transient: false };
+    }
+    if (http >= 500) {
+      return { ready: false, http, lastError: null, transient: false };
+    }
+    return {
+      ready: false,
+      http,
+      lastError: `Preview returned HTTP ${http}`,
+      transient: false,
+    };
+  } catch {
+    // Timeout / connection refused while Next boots.
+    return {
+      ready: false,
+      http: null,
+      lastError: "preview probe failed",
+      transient: true,
+    };
+  }
 }
 
 /**
@@ -87,57 +171,62 @@ async function probePreviewLink(
   port: number;
   probeUrl: string | null;
   http: number | null;
+  lastError: string | null;
+  transient: boolean;
 }> {
   const sdk = sandbox.sdkSandbox;
   const port = getDaytonaDevPort();
+  let url = cachedUrl ?? null;
+  let firstProbe: UrlProbe | null = null;
 
   try {
-    let url = cachedUrl ?? null;
-    if (!url) {
-      await ensureSandboxPublic(sdk);
-      const preview = await sdk.getPreviewLink(port);
-      url = preview.url;
-    }
-
-    try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(PREVIEW_HTTP_TIMEOUT_MS),
-      });
-
-      if (res.status >= 500) {
+    if (url) {
+      firstProbe = await probeUrl(url);
+      if (firstProbe.ready) {
         return {
-          ready: false,
+          ...firstProbe,
           url,
           port,
           probeUrl: url,
-          http: res.status,
         };
       }
+    }
 
+    // Refresh only when the proxy says the cached link itself is invalid.
+    // A 5xx or connection failure usually means Next is still booting; asking
+    // Daytona for the same link and probing it again only amplifies traffic.
+    if (!url || (firstProbe && shouldRefreshPreviewLink(firstProbe))) {
+      await ensureSandboxPublic(sdk);
+      const preview = await sdk.getPreviewLink(port);
+      url = preview.url;
+    } else if (firstProbe) {
       return {
-        ready: true,
+        ...firstProbe,
         url,
         port,
         probeUrl: url,
-        http: res.status,
-      };
-    } catch {
-      // Timeout / connection refused while Next boots — keep URL, not ready.
-      return {
-        ready: false,
-        url,
-        port,
-        probeUrl: url,
-        http: null,
       };
     }
-  } catch {
+
+    const probe = await probeUrl(url);
+    return {
+      ...probe,
+      url,
+      port,
+      probeUrl: url,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     return {
       ready: false,
-      url: null,
+      url,
       port,
-      probeUrl: null,
-      http: null,
+      probeUrl: url,
+      http: firstProbe?.http ?? null,
+      lastError:
+        firstProbe?.lastError ??
+        `preview link refresh failed: ${detail.slice(0, 200)}`,
+      transient: firstProbe?.transient ?? true,
     };
   }
 }
@@ -160,18 +249,20 @@ async function runObserve(
     try {
       const { getDaytonaClient } = await import("./client");
       const peek = await getDaytonaClient().get(snapshot.sandboxId!);
-      if (isAsleep(peek.state) && !wake) {
-        return {
-          ...emptyObserved(),
-          phase: "workspace-ready",
-          sandboxId: snapshot.sandboxId,
-          sandboxState: peek.state ?? null,
-        };
-      }
+      return {
+        ...emptyObserved(
+          isAsleep(peek.state) && !wake
+            ? null
+            : "sandbox reconnect failed but sandbox still exists",
+          !isAsleep(peek.state) || wake,
+        ),
+        phase: "workspace-ready",
+        sandboxId: snapshot.sandboxId,
+        sandboxState: peek.state ?? null,
+      };
     } catch {
       return emptyObserved();
     }
-    return emptyObserved();
   }
 
   const project = wrapSandbox(sessionId, sdk);
@@ -193,8 +284,6 @@ async function runObserve(
       previewUrl: preview.url,
       previewPort: preview.port,
       probeUrl: preview.probeUrl,
-      // Compile log is owned by write/edit peek — keep observe cheap.
-      buildError: null,
       httpStatus: preview.http,
       lastError: null,
     };
@@ -215,6 +304,8 @@ async function runObserve(
     previewPort: preview.port,
     probeUrl: preview.probeUrl,
     httpStatus: preview.http,
+    lastError: preview.lastError,
+    transient: preview.transient,
   };
 }
 
@@ -226,6 +317,7 @@ async function awaitWithSoftDeadline(
   sessionId: string,
   runPromise: Promise<ObservedRuntime>,
   snapshot: DaytonaRuntimeSnapshot,
+  identity: ObserveIdentity,
 ): Promise<ObservedRuntime> {
   const tRace = Date.now();
 
@@ -267,17 +359,27 @@ async function awaitWithSoftDeadline(
   );
 
   // Do not cancel — if this pass still finishes ready, next observe adopts it.
-  void runPromise.then((value) => {
-    if (value.phase === "preview-ready") {
-      lateReadyMailbox.set(sessionId, value);
-      logDaytonaTiming(
+  void runPromise.then(
+    (value) => {
+      if (value.phase === "preview-ready") {
+        lateReadyMailbox.set(sessionId, { ...identity, value });
+        logDaytonaTiming(
+          sessionId,
+          "observe.lateMailbox",
+          0,
+          `stashed phase=${value.phase} generation=${identity.generation}`,
+        );
+      }
+    },
+    (error) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      logDaytonaBootstrap(
         sessionId,
-        "observe.lateMailbox",
-        0,
-        `stashed phase=${value.phase}`,
+        "preview",
+        `late observe failed: ${detail.slice(0, 160)}`,
       );
-    }
-  });
+    },
+  );
 
   return softTimeoutObserved(snapshot);
 }
@@ -290,39 +392,73 @@ export async function observeRuntime(
   options?: { wake?: boolean; snapshot?: DaytonaRuntimeSnapshot },
 ): Promise<ObservedRuntime> {
   const wake = options?.wake ?? false;
-  const snapshot = options?.snapshot ?? (await getRuntimeSnapshot(sessionId));
+  const snapshot =
+    options?.snapshot ??
+    (await getRuntimeSnapshot(sessionId, null, { fresh: true }));
 
   if (!snapshot.sandboxId) {
+    lateReadyMailbox.delete(sessionId);
     return emptyObserved();
   }
 
   const mailed = lateReadyMailbox.get(sessionId);
-  if (mailed?.phase === "preview-ready") {
+  if (mailed && matchesSnapshot(mailed, snapshot)) {
     lateReadyMailbox.delete(sessionId);
     logDaytonaTiming(sessionId, "observe.total", 0, "adopted-late-mailbox");
-    return mailed;
+    return mailed.value;
+  }
+  if (mailed) {
+    lateReadyMailbox.delete(sessionId);
+    logDaytonaTiming(
+      sessionId,
+      "observe.lateMailbox",
+      0,
+      `dropped-stale mailboxGeneration=${mailed.generation} snapshotGeneration=${snapshot.generation}`,
+    );
   }
 
-  const existing = inFlightObserve.get(sessionId);
+  const identity: ObserveIdentity = {
+    sessionId,
+    sandboxId: snapshot.sandboxId,
+    generation: snapshot.generation,
+    wake,
+  };
+  const key = observeKey(identity);
+  const existing = inFlightObserve.get(key);
   if (existing) {
     logDaytonaTiming(sessionId, "observe.coalesce", 0, "join-in-flight");
     try {
-      return await awaitWithSoftDeadline(sessionId, existing, snapshot);
+      return await awaitWithSoftDeadline(
+        sessionId,
+        existing.promise,
+        snapshot,
+        existing,
+      );
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      logDaytonaBootstrap(
+        sessionId,
+        "preview",
+        `coalesced observe failed: ${detail.slice(0, 160)}`,
+      );
       return emptyObserved(detail.slice(0, 500));
     }
   }
 
   const runPromise = runObserve(sessionId, snapshot, wake).finally(() => {
-    if (inFlightObserve.get(sessionId) === runPromise) {
-      inFlightObserve.delete(sessionId);
+    if (inFlightObserve.get(key)?.promise === runPromise) {
+      inFlightObserve.delete(key);
     }
   });
-  inFlightObserve.set(sessionId, runPromise);
+  inFlightObserve.set(key, { ...identity, promise: runPromise });
 
   try {
-    return await awaitWithSoftDeadline(sessionId, runPromise, snapshot);
+    return await awaitWithSoftDeadline(
+      sessionId,
+      runPromise,
+      snapshot,
+      identity,
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     logDaytonaBootstrap(
@@ -338,36 +474,4 @@ export async function observeRuntime(
 export function resetObserveRuntimeForTests(): void {
   inFlightObserve.clear();
   lateReadyMailbox.clear();
-}
-
-/** HTTP + compile check against an already-observed ready preview. */
-export async function observePreviewHealth(
-  sessionId: string,
-  observed: ObservedRuntime,
-): Promise<{ httpStatus: number; buildError: string | null }> {
-  if (!observed.probeUrl || !observed.sandboxId) {
-    return { httpStatus: 503, buildError: null };
-  }
-
-  const sdk = await reconnectSandbox(sessionId, observed.sandboxId, false);
-  if (!sdk) {
-    return { httpStatus: 503, buildError: null };
-  }
-
-  const project = wrapSandbox(sessionId, sdk);
-  let http = await httpStatus(observed.probeUrl);
-  let buildError = extractCompileError(await readDevLog(project));
-
-  if (!buildError && http < 500) {
-    buildError = null;
-  } else if (!buildError && http >= 500) {
-    await new Promise((r) => setTimeout(r, 2_000));
-    http = await httpStatus(observed.probeUrl);
-    buildError =
-      http < 500
-        ? null
-        : `Preview returned HTTP ${http} but no compile error was captured.`;
-  }
-
-  return { httpStatus: http, buildError };
 }
