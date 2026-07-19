@@ -51,4 +51,11 @@ describe("isLiveChatTurn", () => {
     expect(isLiveChatTurn("ready", "idle")).toBe(false);
     expect(isLiveChatTurn("ready", "completed")).toBe(false);
   });
+
+  it("cannot alone lock turn-2+ submit while prior runStatus is still terminal", () => {
+    // Stale completed from the previous turn — Chat must optimistic-lock until
+    // the server projects pending/running (see awaitingRunStart).
+    expect(isLiveChatTurn("submitted", "completed")).toBe(false);
+    expect(isLiveChatTurn("streaming", "completed")).toBe(false);
+  });
 });

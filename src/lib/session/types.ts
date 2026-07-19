@@ -92,6 +92,11 @@ export function isTerminalRunStatus(status: SessionRunStatus): boolean {
  * useChat is still `streaming`. WorkflowChatTransport keeps the HTTP stream
  * open until the whole workflow returns, which can lag the persisted
  * "completed" signal by a noticeable amount.
+ *
+ * Caveat (turn 2+): after a completed turn, runStatus stays terminal until the
+ * next POST sets it back to running. During that gap, chatBusy+terminal would
+ * look like post-turn drain and unlock — Chat must optimistic-lock on send
+ * until `isActiveRunStatus(runStatus)` (see awaitingRunStart in chat.tsx).
  */
 export function isLiveChatTurn(
   chatStatus: string,
