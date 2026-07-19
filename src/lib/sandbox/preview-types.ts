@@ -17,7 +17,7 @@ export type SandboxStatus =
 
 /** Layer 2 */
 export type AppServerStatus =
-  | { status: "installing" }
+  | { status: "installing"; url?: string }
   | { status: "needs_install" }
   | { status: "starting"; port: number; url?: string }
   | { status: "ready"; url: string; port: number }

@@ -88,7 +88,7 @@ flowchart TB
 
 - `@daytona/sdk` 实现 `ProjectSandbox`
 - 双盘：快速 workspace 跑构建；Volume（S3-backed FUSE）只做源码持久化
-- Snapshot：预装 starter + `node_modules`，加速冷启动
+- Snapshot：构建时预装 git + 系统 pnpm + starter + `node_modules`（`npm run build:daytona-snapshot`）；冷启动不再 seed 源码、不再 runtime 装依赖，直接 `pnpm dev`
 - `getPreviewLink` / signed embed URL：给 iframe 与 Browser Run
 
 关键路径：`src/lib/sandbox/daytona/**`、`src/lib/sandbox/local/**`
@@ -184,7 +184,7 @@ ProjectSandbox {
 
 | 工具 | 级别 | 何时 |
 | --- | --- | --- |
-| `checkPreview` | L1 编译 / 就绪 | 大改后默认；Agent 应在结束前调用 |
+| `checkPreview` | L1 HTTP 就绪 | 首轮未 ready、装依赖/改配置、大改、或 write/edit 带回 `compileError` 时；小改依赖 HMR。编译诊断在 write/edit 的 `compileError`，不读 devlog |
 | `testPreview` | L2 UI 冒烟 | 用户明确要求或 Auto Test；需 Daytona + CF |
 
 不把 L2 设为默认，是为了避免：慢、贵、脆、在未就绪 Preview 上产生噪声失败。

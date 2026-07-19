@@ -95,7 +95,9 @@ export function previewFromAllStatus(
     sandbox: all.sandbox,
     appServerStatus: app.status,
     url:
-      app.status === "ready" || app.status === "starting"
+      app.status === "ready" ||
+      app.status === "starting" ||
+      app.status === "installing"
         ? app.url
         : undefined,
     error: app.status === "error" ? app.error : undefined,

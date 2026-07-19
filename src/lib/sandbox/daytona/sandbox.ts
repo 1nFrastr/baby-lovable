@@ -11,6 +11,22 @@ import { getRuntimeSnapshot } from "./runtime-store";
 import { getSession } from "@/lib/session/store";
 import { reconnectSandbox, wrapSandbox } from "./vm";
 
+/** If durable desired is still below preview, re-kick reconciler (non-blocking). */
+function kickPreviewWarmIfNeeded(snapshot: DaytonaRuntimeSnapshot): void {
+  if (snapshot.desired === "deleted" || snapshot.desired === "stopped") {
+    return;
+  }
+  if (isDesiredSatisfied({ ...snapshot, desired: "preview-ready" })) {
+    return;
+  }
+  // Same path as chat/preview prelude — no separate warm runner.
+  void ensureDesiredState(snapshot.sessionId, "preview-ready", {
+    wait: false,
+  }).catch(() => {
+    // best-effort
+  });
+}
+
 /**
  * Process-local FS attach cache.
  * Parallel tool steps in one isolate share one reconnect; sequential tools reuse it.
@@ -18,7 +34,11 @@ import { reconnectSandbox, wrapSandbox } from "./vm";
  */
 const attachBySession = new Map<string, Promise<DaytonaProjectSandbox>>();
 
-/** Snapshot already has a usable workspace — skip reconcile + workspace bootstrap. */
+/**
+ * Snapshot already has a usable workspace — skip reconcile.
+ * Once sandboxId is written, attach even while warm is still in
+ * bootstrapping/install (prebuilt Daytona snapshot ships the starter).
+ */
 export function canFastAttachSandbox(
   snapshot: DaytonaRuntimeSnapshot,
 ): boolean {
@@ -28,7 +48,17 @@ export function canFastAttachSandbox(
   if (snapshot.desired === "deleted") {
     return false;
   }
-  return isDesiredSatisfied({ ...snapshot, desired: "sandbox-ready" });
+  if (isDesiredSatisfied({ ...snapshot, desired: "sandbox-ready" })) {
+    return true;
+  }
+  return (
+    snapshot.observed === "creating-sandbox" ||
+    snapshot.observed === "bootstrapping-workspace" ||
+    snapshot.observed === "installing-deps" || // legacy persisted
+    snapshot.observed === "starting-devserver" ||
+    snapshot.observed === "workspace-ready" ||
+    snapshot.observed === "preview-ready"
+  );
 }
 
 async function reconnectProject(
@@ -65,6 +95,7 @@ async function attachDaytonaSandboxForFsOnce(
       true,
     );
     if (project) {
+      kickPreviewWarmIfNeeded(snapshot);
       return project;
     }
   }
@@ -80,6 +111,7 @@ async function attachDaytonaSandboxForFsOnce(
   if (!project) {
     throw new Error(`Failed to attach Daytona sandbox ${snapshot.sandboxId}`);
   }
+  kickPreviewWarmIfNeeded(snapshot);
   return project;
 }
 
@@ -119,8 +151,7 @@ export async function getDaytonaSandboxStatus(
 }
 
 /**
- * Reconnect to runtime sandboxId — never create, never re-bootstrap workspace.
- * Workspace seeding belongs to the reconciler (`actionBootstrapWorkspace`).
+ * Reconnect to runtime sandboxId — never create.
  * wake=false: do not start stopped VMs.
  */
 export async function getExistingDaytonaSandbox(

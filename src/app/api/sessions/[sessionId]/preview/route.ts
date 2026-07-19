@@ -1,14 +1,16 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 import {
+  awaitRuntimeDesired,
   deleteSandbox,
   getAllStatus,
   hasNodeModules,
+  kickRuntimeDesired,
   peekAllStatus,
   restartAppServer,
   startAppServer,
   stopAppServer,
-  warmPreview,
 } from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
@@ -16,6 +18,9 @@ import {
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
+
+/** Cover Daytona create + bootstrap under after(). */
+export const maxDuration = 300;
 
 async function resolveAuth(request: Request) {
   try {
@@ -85,9 +90,12 @@ export async function POST(
       action?: "warm" | "start" | "restart";
     };
 
-    // Kick startPreview if needed; return cached/peek status immediately.
+    // Prelude: preview-ready (non-blocking). after() keeps isolate for reconcile.
     if (body.action === "warm") {
-      const all = await warmPreview(sessionId);
+      const all = await kickRuntimeDesired(sessionId, "preview-ready");
+      if (session.sandboxMode === "daytona") {
+        after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
+      }
       return NextResponse.json({
         sandbox: all.sandbox,
         appServer: all.appServer,

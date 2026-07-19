@@ -1,9 +1,12 @@
 /** Daytona VM: get / wake / create / delete (SDK only — no session persistence). */
 import type { Session } from "@/lib/session/types";
 
-import { getDaytonaSnapshotName } from "./config";
+import {
+  allowDaytonaSnapshotFallback,
+  getDaytonaSnapshotName,
+} from "./config";
 import { getDaytonaClient } from "./client";
-import { logDaytonaBootstrap } from "./bootstrap-log";
+import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
 import { DaytonaProjectSandbox } from "./provider";
 import type { Sandbox } from "@daytona/sdk";
 
@@ -55,6 +58,7 @@ export async function fetchSandbox(
   wake: boolean,
 ): Promise<Sandbox | null> {
   const daytona = getDaytonaClient();
+  const t0 = Date.now();
   logDaytonaBootstrap(
     sessionId,
     "sandbox",
@@ -62,17 +66,25 @@ export async function fetchSandbox(
   );
 
   try {
+    const tGet = Date.now();
     const sandbox = await daytona.get(sandboxId);
+    logDaytonaTiming(sessionId, "fetchSandbox.get", Date.now() - tGet, `id=${sandboxId} state=${sandbox.state ?? "?"}`);
 
     if (isAsleep(sandbox.state)) {
       if (!wake) {
         logDaytonaBootstrap(sessionId, "sandbox", `${sandboxId} is ${sandbox.state}`);
+        logDaytonaTiming(sessionId, "fetchSandbox.total", Date.now() - t0, "asleep-no-wake");
         return null;
       }
+      const tStart = Date.now();
       await sandbox.start(120);
+      logDaytonaTiming(sessionId, "fetchSandbox.start", Date.now() - tStart);
     }
 
+    const tWait = Date.now();
     await sandbox.waitUntilStarted(120);
+    logDaytonaTiming(sessionId, "fetchSandbox.waitUntilStarted", Date.now() - tWait, `state=${sandbox.state ?? "?"}`);
+    logDaytonaTiming(sessionId, "fetchSandbox.total", Date.now() - t0, wake ? "wake" : "peek");
     return sandbox;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -81,6 +93,7 @@ export async function fetchSandbox(
       "sandbox",
       `${sandboxId} unavailable: ${detail.slice(0, 160)}`,
     );
+    logDaytonaTiming(sessionId, "fetchSandbox.total", Date.now() - t0, `error=${detail.slice(0, 80)}`);
     return null;
   }
 }
@@ -122,7 +135,9 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
   logDaytonaBootstrap(
     session.id,
     "sandbox",
-    snapshot ? `create snapshot=${snapshot}` : "create default image",
+    snapshot
+      ? `create snapshot=${snapshot} (pnpm + node_modules prebaked)`
+      : "create default image (runtime seed + install — set DAYTONA_SNAPSHOT)",
   );
 
   let sandbox: Sandbox;
@@ -136,10 +151,17 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
       throw error;
     }
     const detail = error instanceof Error ? error.message : String(error);
+    if (!allowDaytonaSnapshotFallback()) {
+      throw new Error(
+        `Daytona snapshot "${snapshot}" create failed: ${detail.slice(0, 300)}. ` +
+          `Rebuild with \`npm run build:daytona-snapshot -- --force\`, or set ` +
+          `DAYTONA_SNAPSHOT_FALLBACK=1 to boot a default image (slow path).`,
+      );
+    }
     logDaytonaBootstrap(
       session.id,
       "sandbox",
-      `snapshot failed (${detail.slice(0, 160)}) — default image`,
+      `snapshot failed (${detail.slice(0, 160)}) — default image (FALLBACK)`,
     );
     sandbox = await daytona.create(baseParams, { timeout: 180 });
   }
@@ -148,7 +170,11 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
   if (!sandbox.public) {
     await ensureSandboxPublic(sandbox);
   }
-  logDaytonaBootstrap(session.id, "sandbox", `started ${sandbox.id}`);
+  logDaytonaBootstrap(
+    session.id,
+    "sandbox",
+    `started ${sandbox.id}${snapshot ? ` from snapshot=${snapshot}` : ""}`,
+  );
   return sandbox;
 }
 

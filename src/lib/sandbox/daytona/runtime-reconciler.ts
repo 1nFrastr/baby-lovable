@@ -4,17 +4,16 @@
 
 import { randomUUID } from "node:crypto";
 
-import { getSession, updateSession } from "@/lib/session/store";
+import { getSession } from "@/lib/session/store";
 import { commitWorkspaceTurn } from "../workspace-git";
 
 import {
   formatStartError,
-  installDeps,
   startDevSession,
   stopDevSession,
 } from "./app-server-boot";
-import { extractCompileError, httpStatus, readDevLog } from "./app-server-health";
-import { logDaytonaBootstrap } from "./bootstrap-log";
+import { httpStatus } from "./app-server-health";
+import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
 import type { DaytonaProjectSandbox } from "./provider";
 import {
@@ -37,10 +36,10 @@ import {
   renewRuntimeLease,
   upsertRuntimeSnapshot,
 } from "./runtime-store";
-import { ensureDaytonaWorkspace } from "./workspace-bootstrap";
 import {
   createSandbox,
   deleteSandboxById,
+  ensureSandboxPublic,
   reconnectSandbox,
   wrapSandbox,
 } from "./vm";
@@ -54,6 +53,11 @@ export interface EnsureDesiredOptions {
   owner?: string;
   /** Bump generation and request .next clear (restart). */
   restart?: boolean;
+  /**
+   * When wait=false, default kicks reconcile in the background.
+   * Set kick=false to only persist desired (route schedules after() warm).
+   */
+  kick?: boolean;
 }
 
 function applyObservation(
@@ -62,8 +66,6 @@ function applyObservation(
 ): Partial<DaytonaRuntimeSnapshot> {
   const controllerPhases = new Set<string>([
     "creating-sandbox",
-    "bootstrapping-workspace",
-    "installing-deps",
     "starting-devserver",
     "stopping",
     "deleting",
@@ -71,21 +73,36 @@ function applyObservation(
 
   let phase = observed.phase;
 
-  if (snapshot.observed === "installing-deps" && observed.hasNodeModules) {
-    phase = "workspace-ready";
-  } else if (
+  if (
     snapshot.observed === "starting-devserver" &&
     observed.phase === "preview-ready"
   ) {
     phase = "preview-ready";
   } else if (
+    (snapshot.observed === "creating-sandbox" ||
+      snapshot.observed === "bootstrapping-workspace") &&
+    observed.phase !== "missing" &&
+    (observed.sandboxId ?? snapshot.sandboxId)
+  ) {
+    // Snapshot ships the workspace — promote as soon as the VM exists.
+    phase =
+      observed.phase === "preview-ready" ? "preview-ready" : "workspace-ready";
+  } else if (
     controllerPhases.has(snapshot.observed) &&
     snapshot.observed !== "error" &&
-    observed.phase !== "preview-ready" &&
-    observed.phase !== "missing"
+    observed.phase !== "preview-ready"
   ) {
     // Keep transitional controller phase while action is in flight.
-    phase = snapshot.observed;
+    // Critical: observe timeout returns phase=missing — must NOT clobber
+    // starting-devserver or we startDev twice and reset Next boot.
+    const sandboxStillKnown = Boolean(
+      observed.sandboxId ?? snapshot.sandboxId,
+    );
+    if (observed.phase === "missing" && !sandboxStillKnown) {
+      phase = "missing";
+    } else {
+      phase = snapshot.observed;
+    }
   }
 
   // Keep public preview URL across Next restarts (same sandbox + port;
@@ -131,7 +148,6 @@ function shouldPreserveSnapshotOnObserveMiss(
   return (
     snapshot.observed === "preview-ready" ||
     snapshot.observed === "starting-devserver" ||
-    snapshot.observed === "installing-deps" ||
     snapshot.observed === "workspace-ready" ||
     snapshot.desired === "preview-ready" ||
     hasFreshPreviewEmbed(snapshot)
@@ -176,6 +192,9 @@ async function upsertWithRetry(
     : new Error(String(lastError ?? "CAS retry exhausted"));
 }
 
+/** Process-local create lock — duplicate after()/lease stealers share one VM create. */
+const createInFlight = new Map<string, Promise<void>>();
+
 async function actionCreateSandbox(
   sessionId: string,
   snapshot: DaytonaRuntimeSnapshot,
@@ -184,86 +203,100 @@ async function actionCreateSandbox(
     return;
   }
 
-  const session = await getSession(sessionId);
-  if (!session) {
-    throw new Error(`Session not found: ${sessionId}`);
-  }
-
-  await upsertWithRetry(sessionId, {
-    observed: "creating-sandbox",
-    lastError: null,
-  });
-
-  // Re-check after claiming the creating phase — another isolate may have created.
-  const latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-  if (latest.sandboxId) {
+  const pending = createInFlight.get(sessionId);
+  if (pending) {
+    logDaytonaBootstrap(sessionId, "reconcile", "create coalesce — in flight");
+    await pending;
     return;
   }
 
-  const sdk = await createSandbox(session);
-  await upsertWithRetry(sessionId, {
-    sandboxId: sdk.id,
-    observed: "bootstrapping-workspace",
-  });
-}
+  const work = (async () => {
+    const t0 = Date.now();
+    const session = await getSession(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
 
-async function actionBootstrapWorkspace(
-  sessionId: string,
-  snapshot: DaytonaRuntimeSnapshot,
-): Promise<void> {
-  if (!snapshot.sandboxId) {
-    return;
-  }
-
-  const session = await getSession(sessionId);
-  if (!session) {
-    throw new Error(`Session not found: ${sessionId}`);
-  }
-
-  const project = await attachProject(sessionId, snapshot.sandboxId, true);
-  if (!project) {
     await upsertWithRetry(sessionId, {
-      sandboxId: null,
-      observed: "missing",
+      observed: "creating-sandbox",
+      lastError: null,
     });
-    return;
+
+    // Re-check after claiming the creating phase — another isolate may have created.
+    let latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+    if (latest.sandboxId) {
+      return;
+    }
+
+    const tCreate = Date.now();
+    const sdk = await createSandbox(session);
+    logDaytonaTiming(
+      sessionId,
+      "action.createSandbox",
+      Date.now() - tCreate,
+      `id=${sdk.id}`,
+    );
+
+    // CAS: only the first writer keeps the id; losers delete the orphan VM.
+    latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+    if (latest.sandboxId && latest.sandboxId !== sdk.id) {
+      logDaytonaBootstrap(
+        sessionId,
+        "reconcile",
+        `create orphan — peer won kept=${latest.sandboxId.slice(0, 12)}`,
+      );
+      await deleteSandboxById(sessionId, sdk.id);
+      return;
+    }
+
+    const previewPort = getDaytonaDevPort();
+    let previewUrl: string | null = null;
+    try {
+      await ensureSandboxPublic(sdk);
+      const link = await sdk.getPreviewLink(previewPort);
+      previewUrl = link.url;
+    } catch {
+      // iframe can wait until startDev; create still succeeds
+    }
+
+    const createdPatch = {
+      sandboxId: sdk.id,
+      // Snapshot already has starter + deps — no seed / bootstrap step.
+      observed: "workspace-ready" as const,
+      lastError: null,
+      previewPort,
+      ...(previewUrl ? { previewUrl } : {}),
+    };
+
+    try {
+      await upsertRuntimeSnapshot(sessionId, {
+        expectedRevision: latest.revision,
+        ...createdPatch,
+      });
+    } catch {
+      const again = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+      if (again.sandboxId && again.sandboxId !== sdk.id) {
+        logDaytonaBootstrap(
+          sessionId,
+          "reconcile",
+          `create orphan — CAS lost kept=${again.sandboxId.slice(0, 12)}`,
+        );
+        await deleteSandboxById(sessionId, sdk.id);
+        return;
+      }
+      await upsertWithRetry(sessionId, createdPatch);
+    }
+    logDaytonaTiming(sessionId, "action.createSandbox.total", Date.now() - t0);
+  })();
+
+  createInFlight.set(sessionId, work);
+  try {
+    await work;
+  } finally {
+    if (createInFlight.get(sessionId) === work) {
+      createInFlight.delete(sessionId);
+    }
   }
-
-  await upsertWithRetry(sessionId, {
-    observed: "bootstrapping-workspace",
-  });
-
-  const result = await ensureDaytonaWorkspace(project, session);
-  if (result.gitInitSha) {
-    await updateSession(sessionId, { lastCommitSha: result.gitInitSha });
-  }
-
-  await upsertWithRetry(sessionId, {
-    observed: "workspace-ready",
-  });
-}
-
-async function actionInstallDeps(
-  sessionId: string,
-  snapshot: DaytonaRuntimeSnapshot,
-): Promise<void> {
-  if (!snapshot.sandboxId) {
-    return;
-  }
-  const project = await attachProject(sessionId, snapshot.sandboxId, true);
-  if (!project) {
-    return;
-  }
-
-  await upsertWithRetry(sessionId, {
-    observed: "installing-deps",
-  });
-
-  await installDeps(project, sessionId);
-
-  await upsertWithRetry(sessionId, {
-    observed: "workspace-ready",
-  });
 }
 
 async function actionStartDev(
@@ -273,7 +306,14 @@ async function actionStartDev(
   if (!snapshot.sandboxId) {
     return;
   }
+  const t0 = Date.now();
   const project = await attachProject(sessionId, snapshot.sandboxId, true);
+  logDaytonaTiming(
+    sessionId,
+    "action.startDev.attach",
+    Date.now() - t0,
+    `ok=${Boolean(project)}`,
+  );
   if (!project) {
     return;
   }
@@ -292,12 +332,28 @@ async function actionStartDev(
     // Keep public previewUrl — same sandbox/port; Next down is 502 only.
   });
 
+  const tStart = Date.now();
   const started = await startDevSession(project, sessionId);
+  logDaytonaTiming(sessionId, "action.startDev.session", Date.now() - tStart);
+
+  // Publish the public proxy URL immediately so the UI can mount the iframe
+  // while Next is still booting (502 until ready). Do not wait for observe.
+  let previewUrl = snapshot.previewUrl;
+  try {
+    await ensureSandboxPublic(project.sdkSandbox);
+    const link = await project.sdkSandbox.getPreviewLink(started.port);
+    previewUrl = link.url;
+  } catch {
+    // keep prior url if any
+  }
+
   await upsertWithRetry(sessionId, {
     observed: "starting-devserver",
     devSessionName: started.sessionName,
     previewPort: started.port,
+    ...(previewUrl ? { previewUrl } : {}),
   });
+  logDaytonaTiming(sessionId, "action.startDev.total", Date.now() - t0);
 }
 
 async function actionStopPreview(
@@ -397,9 +453,8 @@ async function reconcileOnce(
     const needsStop =
       snapshot.observed === "preview-ready" ||
       snapshot.observed === "starting-devserver" ||
-      snapshot.observed === "installing-deps" ||
       snapshot.observed === "creating-sandbox" ||
-      snapshot.observed === "bootstrapping-workspace" ||
+      snapshot.observed === "bootstrapping-workspace" || // legacy
       Boolean(snapshot.devSessionName) ||
       Boolean(snapshot.previewUrl);
 
@@ -417,17 +472,31 @@ async function reconcileOnce(
     return true;
   }
 
-  if (!latest.sandboxId || observed.phase === "missing") {
+  // Observe timeout returns phase=missing with no sandboxId — do NOT treat that
+  // as "sandbox gone" when durable state already has an id (would noop-create
+  // forever and never reach startDev).
+  if (!latest.sandboxId) {
     await actionCreateSandbox(sessionId, latest);
     return true;
   }
+  if (observed.phase === "missing" && !observed.sandboxId) {
+    logDaytonaTiming(
+      sessionId,
+      "reconcile.skipMissingObserve",
+      0,
+      `durableSandbox=${latest.sandboxId.slice(0, 12)} err=${observed.lastError ?? "none"}`,
+    );
+    return false;
+  }
 
   if (
-    observed.phase === "bootstrapping-workspace" ||
-    !observed.hasPackageJson ||
-    snapshot.observed === "creating-sandbox"
+    latest.observed === "creating-sandbox" ||
+    latest.observed === "bootstrapping-workspace"
   ) {
-    await actionBootstrapWorkspace(sessionId, snapshot);
+    await upsertWithRetry(sessionId, {
+      observed: "workspace-ready",
+      lastError: null,
+    });
     return true;
   }
 
@@ -435,26 +504,26 @@ async function reconcileOnce(
     return false;
   }
 
-  // preview-ready
-  if (!observed.hasNodeModules) {
-    if (snapshot.observed === "installing-deps") {
-      return false;
-    }
-    await actionInstallDeps(sessionId, snapshot);
-    return true;
-  }
-
-  if (observed.phase === "preview-ready" && !snapshot.clearNextCache) {
+  // preview-ready — go straight to pnpm dev (workspace baked into snapshot).
+  if (observed.phase === "preview-ready" && !latest.clearNextCache) {
     return false;
   }
 
-  if (snapshot.observed !== "starting-devserver" || snapshot.clearNextCache) {
-    await actionStartDev(sessionId, snapshot);
+  // Idempotent: do not kill an in-flight Next boot (startDevSession deletes
+  // the old session first — a second call resets ~30s of progress).
+  if (latest.clearNextCache) {
+    await actionStartDev(sessionId, latest);
     return true;
   }
+  if (
+    latest.observed === "starting-devserver" ||
+    Boolean(latest.devSessionName)
+  ) {
+    return false;
+  }
 
-  // starting-devserver: wait for observer
-  return false;
+  await actionStartDev(sessionId, latest);
+  return true;
 }
 
 async function reconcileLoop(
@@ -463,8 +532,8 @@ async function reconcileLoop(
   deadline: number,
   /**
    * Caller wait target. FS attach asks for sandbox-ready even when durable
-   * desired stays preview-ready — return as soon as workspace is usable, do
-   * not block on pnpm install / next dev.
+   * desired stays preview-ready — return as soon as the VM exists; do not
+   * block on next dev.
    */
   returnWhen: DaytonaDesiredState,
 ): Promise<DaytonaRuntimeSnapshot> {
@@ -483,6 +552,7 @@ async function reconcileLoop(
       // fall through to observe + reconcileOnce for stop/delete
     }
 
+    const tObserve = Date.now();
     const observed = await observeRuntime(sessionId, {
       wake:
         snapshot.desired === "sandbox-ready" ||
@@ -490,6 +560,12 @@ async function reconcileLoop(
         snapshot.desired === "deleted",
       snapshot,
     });
+    logDaytonaTiming(
+      sessionId,
+      "reconcile.observe",
+      Date.now() - tObserve,
+      `phase=${observed.phase} http=${observed.httpStatus ?? "null"} err=${observed.lastError ?? "none"} durable=${snapshot.observed}`,
+    );
 
     const obsPatch = applyObservation(snapshot, observed);
     try {
@@ -520,7 +596,14 @@ async function reconcileLoop(
       return snapshot;
     }
 
+    const tAction = Date.now();
     const acted = await reconcileOnce(sessionId, snapshot, observed);
+    logDaytonaTiming(
+      sessionId,
+      "reconcile.action",
+      Date.now() - tAction,
+      `acted=${acted} desired=${snapshot.desired} observed=${snapshot.observed}`,
+    );
     if (!acted) {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
@@ -638,6 +721,11 @@ export async function ensureDesiredState(
     leaseOwner: owner,
   });
 
+  // Intent-only: persist desired, let the caller schedule after()/warm separately.
+  if (!wait && options?.kick === false) {
+    return snapshot;
+  }
+
   const afterSandboxReadyForPreview = (
     result: DaytonaRuntimeSnapshot,
   ): void => {
@@ -700,6 +788,15 @@ export async function ensureDesiredState(
         });
         // Wait for what the caller asked for, not necessarily full preview-ready.
         if (isDesiredSatisfied({ ...current, desired: requestedDesired })) {
+          return current;
+        }
+        // FS attach: once the VM id exists, do not sit on warm's lease through
+        // bootstrap/install. Prebuilt snapshot already has the starter tree.
+        if (
+          requestedDesired === "sandbox-ready" &&
+          current.sandboxId &&
+          current.desired !== "deleted"
+        ) {
           return current;
         }
         // Try to steal expired lease
@@ -799,50 +896,75 @@ export async function readRuntimeAllStatus(sessionId: string) {
 /**
  * Health check for the agent tool.
  *
- * Fast path (durable preview-ready + url): skip full observe; still require
- * compile log + HTTP < 500 (502 = Next/proxy not actually up).
- * Full observe when not ready / reconnect fails.
+ * Compile diagnosis lives on write/edit (`compileError` via peekCompileError).
+ * This probe only answers: is the preview URL up (HTTP < 500)?
+ *
+ * Fast path (durable preview-ready + url): HTTP probe only — no Daytona
+ * reconnect, no remote dev-log read.
+ * Full observe when embed is not fresh yet.
  */
 export async function checkRuntimePreview(sessionId: string) {
+  const t0 = Date.now();
   const snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  const fresh = hasFreshPreviewEmbed(snapshot);
+  logDaytonaTiming(
+    sessionId,
+    "checkRuntimePreview.start",
+    0,
+    `observed=${snapshot.observed} freshEmbed=${fresh} sandboxId=${snapshot.sandboxId ? "yes" : "no"}`,
+  );
 
-  if (hasFreshPreviewEmbed(snapshot) && snapshot.sandboxId && snapshot.previewUrl) {
-    try {
-      const sdk = await reconnectSandbox(sessionId, snapshot.sandboxId, false);
-      if (sdk) {
-        const project = wrapSandbox(sessionId, sdk);
-        const [logText, probe] = await Promise.all([
-          readDevLog(project),
-          httpStatus(snapshot.previewUrl),
-        ]);
-        const buildError = extractCompileError(logText);
+  if (fresh && snapshot.previewUrl) {
+    const tProbe = Date.now();
+    const probe = await httpStatus(snapshot.previewUrl);
+    logDaytonaTiming(
+      sessionId,
+      "checkRuntimePreview.fast.http",
+      Date.now() - tProbe,
+      `http=${probe}`,
+    );
 
-        // 502/5xx: durable said ready but proxy still unhealthy — keep waiting.
-        if (probe >= 500) {
-          return {
-            status: "starting" as const,
-            url: snapshot.previewUrl,
-            buildError,
-            httpStatus: probe,
-          };
-        }
-
-        return {
-          status: "ready" as const,
-          url: snapshot.previewUrl,
-          buildError,
-          httpStatus: probe,
-        };
-      }
-    } catch {
-      // fall through to full observe
+    // 502/5xx: durable said ready but proxy still unhealthy — keep waiting.
+    if (probe >= 500) {
+      logDaytonaTiming(
+        sessionId,
+        "checkRuntimePreview.total",
+        Date.now() - t0,
+        "path=fast status=starting http>=500",
+      );
+      return {
+        status: "starting" as const,
+        url: snapshot.previewUrl,
+        buildError: null,
+        httpStatus: probe,
+      };
     }
+
+    logDaytonaTiming(
+      sessionId,
+      "checkRuntimePreview.total",
+      Date.now() - t0,
+      "path=fast status=ready",
+    );
+    return {
+      status: "ready" as const,
+      url: snapshot.previewUrl,
+      buildError: null,
+      httpStatus: probe,
+    };
   }
 
+  const tObserve = Date.now();
   const observed = await observeRuntime(sessionId, {
     wake: false,
     snapshot,
   });
+  logDaytonaTiming(
+    sessionId,
+    "checkRuntimePreview.observe",
+    Date.now() - tObserve,
+    `phase=${observed.phase} http=${observed.httpStatus ?? "null"} err=${observed.lastError ?? "none"}`,
+  );
 
   if (!shouldPreserveSnapshotOnObserveMiss(observed, snapshot)) {
     try {
@@ -861,22 +983,34 @@ export async function checkRuntimePreview(sessionId: string) {
     }
   }
 
-  // observeRuntime already probed HTTP + readDevLog when preview-ready.
+  // observeRuntime already probed HTTP when preview-ready (no compile log).
   if (observed.phase === "preview-ready") {
     const url = observed.previewUrl ?? snapshot.previewUrl ?? undefined;
     const probe = observed.httpStatus ?? undefined;
     if (probe !== undefined && probe >= 500) {
+      logDaytonaTiming(
+        sessionId,
+        "checkRuntimePreview.total",
+        Date.now() - t0,
+        "path=observe status=starting http>=500",
+      );
       return {
         status: "starting" as const,
         url,
-        buildError: observed.buildError,
+        buildError: null,
         httpStatus: probe,
       };
     }
+    logDaytonaTiming(
+      sessionId,
+      "checkRuntimePreview.total",
+      Date.now() - t0,
+      "path=observe status=ready",
+    );
     return {
       status: "ready" as const,
       url,
-      buildError: observed.buildError,
+      buildError: null,
       httpStatus: probe,
     };
   }
@@ -888,8 +1022,21 @@ export async function checkRuntimePreview(sessionId: string) {
     hasFreshPreviewEmbed(snapshot) &&
     snapshot.previewUrl
   ) {
+    const tHttp = Date.now();
     const probe = await httpStatus(snapshot.previewUrl);
+    logDaytonaTiming(
+      sessionId,
+      "checkRuntimePreview.preserve.http",
+      Date.now() - tHttp,
+      `http=${probe}`,
+    );
     if (probe >= 500) {
+      logDaytonaTiming(
+        sessionId,
+        "checkRuntimePreview.total",
+        Date.now() - t0,
+        "path=preserve status=starting",
+      );
       return {
         status: "starting" as const,
         url: snapshot.previewUrl,
@@ -897,6 +1044,12 @@ export async function checkRuntimePreview(sessionId: string) {
         httpStatus: probe,
       };
     }
+    logDaytonaTiming(
+      sessionId,
+      "checkRuntimePreview.total",
+      Date.now() - t0,
+      "path=preserve status=ready",
+    );
     return {
       status: "ready" as const,
       url: snapshot.previewUrl,
@@ -908,6 +1061,12 @@ export async function checkRuntimePreview(sessionId: string) {
   const latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
   const app = deriveAppServerStatus(latest);
 
+  logDaytonaTiming(
+    sessionId,
+    "checkRuntimePreview.total",
+    Date.now() - t0,
+    `path=derive status=${app.status}`,
+  );
   return {
     status: app.status,
     url: app.status === "ready" ? app.url : undefined,

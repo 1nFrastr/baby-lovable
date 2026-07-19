@@ -1,5 +1,6 @@
 /**
- * checkRuntimePreview: ready requires HTTP < 500; fast path skips full observe.
+ * checkRuntimePreview: ready requires HTTP < 500; fast path is HTTP-only
+ * (no reconnect / no remote compile-log read).
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,14 +55,9 @@ vi.mock("./app-server-health", () => ({
   httpStatus,
 }));
 
-vi.mock("./workspace-bootstrap", () => ({
-  ensureDaytonaWorkspace: vi.fn(),
-}));
-
 vi.mock("./app-server-boot", () => ({
   formatStartError: (e: unknown) =>
     e instanceof Error ? e.message : String(e),
-  installDeps: vi.fn(),
   startDevSession: vi.fn(),
   stopDevSession: vi.fn(),
 }));
@@ -79,8 +75,6 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
     phase: "missing",
     sandboxId: null,
     sandboxState: null,
-    hasPackageJson: false,
-    hasNodeModules: false,
     previewUrl: null,
     previewPort: null,
     probeUrl: null,
@@ -103,7 +97,7 @@ describe("checkRuntimePreview", () => {
     httpStatus.mockResolvedValue(200);
   });
 
-  it("fast path: skips observeRuntime; ready only when HTTP < 500", async () => {
+  it("fast path: HTTP-only — no reconnect, no observe, no readDevLog", async () => {
     await withTempDataDir(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
@@ -128,7 +122,8 @@ describe("checkRuntimePreview", () => {
         httpStatus: 200,
       });
       expect(observeRuntime).not.toHaveBeenCalled();
-      expect(readDevLog).toHaveBeenCalledTimes(1);
+      expect(reconnectSandbox).not.toHaveBeenCalled();
+      expect(readDevLog).not.toHaveBeenCalled();
       expect(httpStatus).toHaveBeenCalledWith(PREVIEW_URL);
     });
   });
@@ -155,33 +150,10 @@ describe("checkRuntimePreview", () => {
       expect(report.status).toBe("starting");
       expect(report.httpStatus).toBe(502);
       expect(report.url).toBe(PREVIEW_URL);
+      expect(report.buildError).toBeNull();
       expect(observeRuntime).not.toHaveBeenCalled();
-    });
-  });
-
-  it("fast path surfaces compile error from log", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
-      ctx.sessionId = sessionId;
-      extractCompileError.mockReturnValue("Failed to compile\n...");
-
-      await withFreshIsolate(sessionId, () =>
-        upsertRuntimeSnapshot(sessionId, {
-          desired: "preview-ready",
-          observed: "preview-ready",
-          sandboxId: "sb_1",
-          previewUrl: PREVIEW_URL,
-          previewPort: 3000,
-        }),
-      );
-
-      const report = await withFreshIsolate(sessionId, () =>
-        checkRuntimePreview(sessionId),
-      );
-
-      expect(report.status).toBe("ready");
-      expect(report.buildError).toBe("Failed to compile\n...");
-      expect(report.httpStatus).toBe(200);
-      expect(observeRuntime).not.toHaveBeenCalled();
+      expect(reconnectSandbox).not.toHaveBeenCalled();
+      expect(readDevLog).not.toHaveBeenCalled();
     });
   });
 
@@ -201,12 +173,10 @@ describe("checkRuntimePreview", () => {
         observed({
           phase: "preview-ready",
           sandboxId: "sb_1",
-          hasPackageJson: true,
-          hasNodeModules: true,
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
           probeUrl: PREVIEW_URL,
-          buildError: null,
+          buildError: "should be ignored",
           httpStatus: 502,
         }),
       );
@@ -217,7 +187,9 @@ describe("checkRuntimePreview", () => {
 
       expect(report.status).toBe("starting");
       expect(report.httpStatus).toBe(502);
+      expect(report.buildError).toBeNull();
       expect(observeRuntime).toHaveBeenCalledTimes(1);
+      expect(readDevLog).not.toHaveBeenCalled();
     });
   });
 
@@ -237,12 +209,10 @@ describe("checkRuntimePreview", () => {
         observed({
           phase: "preview-ready",
           sandboxId: "sb_1",
-          hasPackageJson: true,
-          hasNodeModules: true,
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
           probeUrl: PREVIEW_URL,
-          buildError: null,
+          buildError: "should be ignored",
           httpStatus: 200,
         }),
       );
@@ -262,15 +232,14 @@ describe("checkRuntimePreview", () => {
     });
   });
 
-  it("falls back to full observe when reconnect fails on ready snapshot", async () => {
+  it("falls back to full observe when embed is not fresh", async () => {
     await withTempDataDir(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
-      reconnectSandbox.mockResolvedValue(null);
 
       await withFreshIsolate(sessionId, () =>
         upsertRuntimeSnapshot(sessionId, {
           desired: "preview-ready",
-          observed: "preview-ready",
+          observed: "workspace-ready",
           sandboxId: "sb_1",
           previewUrl: PREVIEW_URL,
           previewPort: 3000,
@@ -295,6 +264,7 @@ describe("checkRuntimePreview", () => {
 
       expect(report.status).toBe("ready");
       expect(observeRuntime).toHaveBeenCalledTimes(1);
+      expect(readDevLog).not.toHaveBeenCalled();
     });
   });
 });

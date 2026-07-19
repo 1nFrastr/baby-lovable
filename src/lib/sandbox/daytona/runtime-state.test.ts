@@ -37,10 +37,11 @@ describe("runtime-state derive*", () => {
     });
   });
 
-  it("maps installing / starting phases for UI polling", () => {
+  it("maps starting phases for UI polling", () => {
     expect(
-      deriveAppServerStatus(snap({ observed: "installing-deps" })).status,
-    ).toBe("installing");
+      deriveAppServerStatus(snap({ observed: "installing-deps", previewPort: 3000 }))
+        .status,
+    ).toBe("starting");
     expect(
       deriveAppServerStatus(
         snap({ observed: "starting-devserver", previewPort: 3000 }),
@@ -68,6 +69,21 @@ describe("runtime-state derive*", () => {
       sandboxId: null,
     });
     expect(deriveAppServerStatus(s).status).toBe("starting");
+  });
+
+  it("legacy installing-deps exposes previewUrl as starting for early iframe", () => {
+    const s = snap({
+      desired: "preview-ready",
+      observed: "installing-deps",
+      sandboxId: "sb_1",
+      previewUrl: "https://embed.example/early",
+      previewPort: 3000,
+    });
+    expect(deriveAppServerStatus(s)).toEqual({
+      status: "starting",
+      port: 3000,
+      url: "https://embed.example/early",
+    });
   });
 
   it("surfaces lastError when observed=error", () => {

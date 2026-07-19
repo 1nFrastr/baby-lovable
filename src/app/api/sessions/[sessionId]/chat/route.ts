@@ -1,8 +1,12 @@
 import { createModelCallToUIChunkTransform } from "@ai-sdk/workflow";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { start } from "workflow/api";
 
+import {
+  awaitRuntimeDesired,
+  kickRuntimeDesired,
+} from "@/lib/sandbox/preview";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
@@ -22,6 +26,9 @@ import {
   updateSession,
 } from "@/lib/session/store";
 import { builderChat } from "@/workflow/builder-chat";
+
+/** Preview warm under after() must outlive the chat response headers. */
+export const maxDuration = 300;
 
 export async function POST(
   request: Request,
@@ -67,6 +74,12 @@ export async function POST(
     }
 
     await deleteDraft(sessionId, auth.userId);
+
+    // Prelude: upgrade to preview-ready without blocking the AI loop.
+    if (session.sandboxMode === "daytona") {
+      await kickRuntimeDesired(sessionId, "preview-ready");
+      after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
+    }
 
     const run = await start(builderChat, [sessionId, messages]);
     await updateSession(

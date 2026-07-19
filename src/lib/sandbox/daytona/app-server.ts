@@ -2,7 +2,6 @@
 import type { AppServerCheck, AppServerStatus } from "../preview-types";
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { formatStartError } from "./app-server-boot";
-import { remoteFileExists } from "./app-server-health";
 import {
   checkRuntimePreview,
   ensureDesiredState,
@@ -14,13 +13,9 @@ import { getExistingDaytonaSandbox } from "./sandbox";
 import { extractCompileError, readDevLog } from "./app-server-health";
 import { getDaytonaDevPort } from "./config";
 
-/** Pure read — never create or wake. */
-export async function hasDaytonaNodeModules(sessionId: string): Promise<boolean> {
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
-  if (!sandbox) {
-    return false;
-  }
-  return remoteFileExists(sandbox, "node_modules/next/package.json");
+/** Snapshot bakes node_modules — Daytona never gates on runtime dep install. */
+export async function hasDaytonaNodeModules(_sessionId: string): Promise<boolean> {
+  return true;
 }
 
 export async function getDaytonaBuildError(
@@ -65,9 +60,6 @@ export async function startDaytonaAppServer(
       return current;
     }
     startDaytonaPreview(sessionId);
-    if (current.status === "needs_install") {
-      return current;
-    }
     return { status: "starting", port: getDaytonaDevPort() };
   }
 

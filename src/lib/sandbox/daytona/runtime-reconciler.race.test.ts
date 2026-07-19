@@ -13,8 +13,6 @@ const {
   deleteSandboxById,
   reconnectSandbox,
   wrapSandbox,
-  ensureDaytonaWorkspace,
-  installDeps,
   startDevSession,
   stopDevSession,
   observeRuntime,
@@ -27,8 +25,6 @@ const {
     deleteSandboxById: vi.fn(),
     reconnectSandbox: vi.fn(),
     wrapSandbox: vi.fn(),
-    ensureDaytonaWorkspace: vi.fn(),
-    installDeps: vi.fn(),
     startDevSession: vi.fn(),
     stopDevSession: vi.fn(),
     observeRuntime: vi.fn(),
@@ -56,14 +52,9 @@ vi.mock("./vm", () => ({
     state === "stopped" || state === "archived",
 }));
 
-vi.mock("./workspace-bootstrap", () => ({
-  ensureDaytonaWorkspace,
-}));
-
 vi.mock("./app-server-boot", () => ({
   formatStartError: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
-  installDeps,
   startDevSession,
   stopDevSession,
 }));
@@ -88,8 +79,6 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
     phase: "missing",
     sandboxId: null,
     sandboxState: null,
-    hasPackageJson: false,
-    hasNodeModules: false,
     previewUrl: null,
     previewPort: null,
     probeUrl: null,
@@ -115,8 +104,6 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
     reconnectSandbox.mockResolvedValue({ id: "sb_1", state: "started" });
     wrapSandbox.mockReturnValue(fakeProject);
-    ensureDaytonaWorkspace.mockResolvedValue({ seeded: false });
-    installDeps.mockResolvedValue(undefined);
     startDevSession.mockResolvedValue({
       sessionName: "preview-sess",
       port: 3000,
@@ -134,7 +121,6 @@ describe("runtime-reconciler isolate / UI races", () => {
       await withFreshIsolate(sessionId, () => readRuntime(sessionId));
 
       expect(createSandbox).not.toHaveBeenCalled();
-      expect(installDeps).not.toHaveBeenCalled();
       expect(startDevSession).not.toHaveBeenCalled();
     });
   });
@@ -144,8 +130,6 @@ describe("runtime-reconciler isolate / UI races", () => {
       ctx.sessionId = sessionId;
 
       let sandboxId: string | null = null;
-      let hasPkg = false;
-      let hasNode = false;
       let previewReady = false;
       let createEntered = 0;
       let releaseCreate: () => void = () => {};
@@ -159,14 +143,6 @@ describe("runtime-reconciler isolate / UI races", () => {
         sandboxId = "sb_1";
         return { id: "sb_1", state: "started" };
       });
-
-      ensureDaytonaWorkspace.mockImplementation(async () => {
-        hasPkg = true;
-        return { seeded: true, gitInitSha: "abc" };
-      });
-      installDeps.mockImplementation(async () => {
-        hasNode = true;
-      });
       startDevSession.mockImplementation(async () => {
         previewReady = true;
         return { sessionName: "preview-sess", port: 3000 };
@@ -176,34 +152,15 @@ describe("runtime-reconciler isolate / UI races", () => {
         if (!sandboxId) {
           return observed({ phase: "missing" });
         }
-        if (!hasPkg) {
-          return observed({
-            phase: "bootstrapping-workspace",
-            sandboxId,
-            hasPackageJson: false,
-          });
-        }
-        if (!hasNode) {
-          return observed({
-            phase: "workspace-ready",
-            sandboxId,
-            hasPackageJson: true,
-            hasNodeModules: false,
-          });
-        }
         if (!previewReady) {
           return observed({
             phase: "workspace-ready",
             sandboxId,
-            hasPackageJson: true,
-            hasNodeModules: true,
           });
         }
         return observed({
           phase: "preview-ready",
           sandboxId,
-          hasPackageJson: true,
-          hasNodeModules: true,
           previewUrl: "https://embed.example/x",
           previewPort: 3000,
         });
@@ -246,34 +203,73 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
   });
 
-  it("FS attach (sandbox-ready) returns before preview install finishes", async () => {
+  it("FS attach returns once sandbox exists (no seed)", async () => {
     await withTempDataDir(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let sandboxId: string | null = null;
-      let hasPkg = false;
-      let hasNode = false;
+
+      createSandbox.mockImplementation(async () => {
+        sandboxId = "sb_snap";
+        return { id: "sb_snap", state: "started" };
+      });
+      startDevSession.mockImplementation(async () => ({
+        sessionName: "preview-sess",
+        port: 3000,
+      }));
+
+      observeRuntime.mockImplementation(async () => {
+        if (!sandboxId) {
+          return observed({ phase: "missing" });
+        }
+        return observed({
+          phase: "workspace-ready",
+          sandboxId,
+        });
+      });
+
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await withFreshIsolate(sessionId, () =>
+        upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "missing",
+          generation: 1,
+        }),
+      );
+
+      const fsSnap = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "sandbox-ready", {
+          wait: true,
+          owner: "agent-fs",
+        }),
+      );
+
+      expect(
+        isDesiredSatisfied({ ...fsSnap, desired: "sandbox-ready" }),
+      ).toBe(true);
+      expect(fsSnap.sandboxId).toBe("sb_snap");
+    });
+  });
+
+  it("FS attach (sandbox-ready) returns before preview start finishes", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+
+      let sandboxId: string | null = null;
       let previewReady = false;
-      let installEntered = 0;
-      let releaseInstall: () => void = () => {};
-      const installGate = new Promise<void>((resolve) => {
-        releaseInstall = resolve;
+      let startEntered = 0;
+      let releaseStart: () => void = () => {};
+      const startGate = new Promise<void>((resolve) => {
+        releaseStart = resolve;
       });
 
       createSandbox.mockImplementation(async () => {
         sandboxId = "sb_1";
         return { id: "sb_1", state: "started" };
       });
-      ensureDaytonaWorkspace.mockImplementation(async () => {
-        hasPkg = true;
-        return { seeded: true, gitInitSha: "abc" };
-      });
-      installDeps.mockImplementation(async () => {
-        installEntered += 1;
-        await installGate;
-        hasNode = true;
-      });
       startDevSession.mockImplementation(async () => {
+        startEntered += 1;
+        await startGate;
         previewReady = true;
         return { sessionName: "preview-sess", port: 3000 };
       });
@@ -282,34 +278,15 @@ describe("runtime-reconciler isolate / UI races", () => {
         if (!sandboxId) {
           return observed({ phase: "missing" });
         }
-        if (!hasPkg) {
-          return observed({
-            phase: "bootstrapping-workspace",
-            sandboxId,
-            hasPackageJson: false,
-          });
-        }
-        if (!hasNode) {
-          return observed({
-            phase: "workspace-ready",
-            sandboxId,
-            hasPackageJson: true,
-            hasNodeModules: false,
-          });
-        }
         if (!previewReady) {
           return observed({
             phase: "workspace-ready",
             sandboxId,
-            hasPackageJson: true,
-            hasNodeModules: true,
           });
         }
         return observed({
           phase: "preview-ready",
           sandboxId,
-          hasPackageJson: true,
-          hasNodeModules: true,
           previewUrl: "https://embed.example/x",
           previewPort: 3000,
         });
@@ -339,14 +316,14 @@ describe("runtime-reconciler isolate / UI races", () => {
       ).toBe(true);
       expect(fsSnap.desired).toBe("preview-ready");
       expect(previewReady).toBe(false);
-      // Must not block the agent on pnpm install / next start.
-      expect(installEntered).toBe(0);
+      // Must not block the agent on next start.
+      expect(startEntered).toBe(0);
 
       // Background continue should pick up preview warm after FS returns.
       await vi.waitFor(() => {
-        expect(installEntered).toBe(1);
+        expect(startEntered).toBe(1);
       });
-      releaseInstall();
+      releaseStart();
       await vi.waitFor(async () => {
         enterIsolate(sessionId);
         const final = await getRuntimeSnapshot(sessionId, null, { fresh: true });
@@ -369,8 +346,6 @@ describe("runtime-reconciler isolate / UI races", () => {
           return observed({
             phase: "preview-ready",
             sandboxId: "sb_1",
-            hasPackageJson: true,
-            hasNodeModules: true,
             previewUrl: "https://embed.example/x",
             previewPort: 3000,
           });
@@ -378,8 +353,6 @@ describe("runtime-reconciler isolate / UI races", () => {
         return observed({
           phase: "workspace-ready",
           sandboxId: "sb_1",
-          hasPackageJson: true,
-          hasNodeModules: true,
         });
       });
 
@@ -449,8 +422,6 @@ describe("runtime-reconciler isolate / UI races", () => {
         return observed({
           phase: "workspace-ready",
           sandboxId,
-          hasPackageJson: true,
-          hasNodeModules: true,
         });
       });
 
@@ -481,8 +452,6 @@ describe("runtime-reconciler isolate / UI races", () => {
         observed({
           phase: "preview-ready",
           sandboxId: "sb_1",
-          hasPackageJson: true,
-          hasNodeModules: true,
           previewUrl: "https://old.example",
           previewPort: 3000,
         }),
@@ -518,8 +487,6 @@ describe("runtime-reconciler isolate / UI races", () => {
         observed({
           phase: "preview-ready",
           sandboxId: "sb_1",
-          hasPackageJson: true,
-          hasNodeModules: true,
           previewUrl: null,
           previewPort: 3000,
         }),
@@ -571,6 +538,87 @@ describe("runtime-reconciler isolate / UI races", () => {
       // Unblock background reconcile so the test process can exit cleanly.
       resolveCreate({ id: "sb_1", state: "started" });
       await new Promise((r) => setTimeout(r, 50));
+    });
+  });
+
+  it("wait=false kick=false only persists desired (no create)", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      observeRuntime.mockResolvedValue(observed({ phase: "missing" }));
+
+      const snap = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: false,
+          kick: false,
+          owner: "warm-intent",
+        }),
+      );
+
+      expect(snap.desired).toBe("preview-ready");
+      expect(createSandbox).not.toHaveBeenCalled();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(createSandbox).not.toHaveBeenCalled();
+    });
+  });
+
+  it("parallel create from two owners: only one sandboxId persists", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+
+      let createCount = 0;
+      let sandboxId: string | null = null;
+      let previewReady = false;
+
+      createSandbox.mockImplementation(async () => {
+        createCount += 1;
+        const id = `sb_${createCount}`;
+        await new Promise((r) => setTimeout(r, 40));
+        sandboxId = id;
+        return { id, state: "started" };
+      });
+      startDevSession.mockImplementation(async () => {
+        previewReady = true;
+        return { sessionName: "preview-sess", port: 3000 };
+      });
+
+      observeRuntime.mockImplementation(async () => {
+        if (!sandboxId) {
+          return observed({ phase: "missing" });
+        }
+        if (!previewReady) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId,
+          });
+        }
+        return observed({
+          phase: "preview-ready",
+          sandboxId,
+          previewUrl: "https://embed.example/x",
+          previewPort: 3000,
+        });
+      });
+
+      const [a, b] = await Promise.all([
+        withFreshIsolate(sessionId, () =>
+          ensureDesiredState(sessionId, "preview-ready", {
+            wait: true,
+            owner: "warm-aaaa",
+          }),
+        ),
+        withFreshIsolate(sessionId, () =>
+          ensureDesiredState(sessionId, "preview-ready", {
+            wait: true,
+            owner: "warm-bbbb",
+          }),
+        ),
+      ]);
+
+      expect(createCount).toBe(1);
+      expect(a.sandboxId).toBeTruthy();
+      expect(b.sandboxId).toBe(a.sandboxId);
+      expect(a.observed).toBe("preview-ready");
+      expect(deleteSandboxById).not.toHaveBeenCalled();
     });
   });
 });

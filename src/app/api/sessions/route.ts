@@ -1,6 +1,11 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
+import {
+  awaitRuntimeDesired,
+  kickRuntimeDesired,
+} from "@/lib/sandbox/preview";
 import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 import {
   requireSessionAuth,
@@ -8,6 +13,9 @@ import {
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { createSession, listSessions } from "@/lib/session/store";
+
+/** Cover Daytona create under after() when session is created. */
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   try {
@@ -64,6 +72,12 @@ export async function POST(request: Request) {
       },
       auth,
     );
+
+    // Prelude: sandbox-ready only (VM + files). Preview upgrades on open / first turn.
+    if (sandboxMode === "daytona") {
+      await kickRuntimeDesired(session.id, "sandbox-ready");
+      after(() => awaitRuntimeDesired(session.id, "sandbox-ready"));
+    }
 
     return NextResponse.json({ session }, { status: 201 });
   } catch (error) {

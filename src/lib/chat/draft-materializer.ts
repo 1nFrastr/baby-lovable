@@ -56,18 +56,31 @@ export async function materializeDraftFromRun(
 
   let lastWriteAt = 0;
   let pendingWrite: SessionDraft | null = null;
-  let writeChain = Promise.resolve();
+  let writeChain: Promise<void> = Promise.resolve();
 
   const flush = (draft: SessionDraft) => {
     pendingWrite = draft;
-    writeChain = writeChain.then(async () => {
-      const toWrite = pendingWrite;
-      pendingWrite = null;
-      if (!toWrite) {
-        return;
-      }
-      await writeDraft(sessionId, toWrite, userId);
-    });
+    // Always attach catch so a failed Supabase write cannot become an
+    // unhandledRejection before the final await (fire-and-forget chain).
+    writeChain = writeChain
+      .catch(() => {
+        // Prior write already logged; keep the chain alive for later drafts.
+      })
+      .then(async () => {
+        const toWrite = pendingWrite;
+        pendingWrite = null;
+        if (!toWrite) {
+          return;
+        }
+        try {
+          await writeDraft(sessionId, toWrite, userId);
+        } catch (error) {
+          console.error(
+            `[draft-materializer] session=${sessionId} run=${runId} write failed:`,
+            error,
+          );
+        }
+      });
   };
 
   try {
@@ -97,7 +110,7 @@ export async function materializeDraftFromRun(
       `[draft-materializer] session=${sessionId} run=${runId} failed:`,
       error,
     );
-    await writeChain;
+    await writeChain.catch(() => {});
     throw error;
   }
 }

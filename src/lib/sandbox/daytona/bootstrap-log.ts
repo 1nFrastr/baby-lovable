@@ -18,3 +18,17 @@ export function logDaytonaBootstrap(
     `[${ts}] BOOT      [daytona] session=${sessionId} ${phase}: ${message}${suffix}`,
   );
 }
+
+/** Fine-grained latency marks for bottleneck hunts (CLI + web stdout). */
+export function logDaytonaTiming(
+  sessionId: string,
+  mark: string,
+  ms: number,
+  detail?: string,
+): void {
+  const ts = new Date().toISOString().slice(11, 23);
+  const suffix = detail ? ` ${detail}` : "";
+  console.warn(
+    `[${ts}] TIMING   [daytona] session=${sessionId} ${mark} ms=${Math.round(ms)}${suffix}`,
+  );
+}

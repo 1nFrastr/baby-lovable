@@ -116,6 +116,77 @@ function createWebSink(sessionId: string): TraceSink {
   };
 }
 
+function toolResultEntries(
+  messages: ModelMessage[],
+): Array<{ toolName: string; output: unknown }> {
+  const entries: Array<{ toolName: string; output: unknown }> = [];
+
+  for (const message of messages) {
+    const content = Array.isArray(message.content)
+      ? message.content
+      : [message.content];
+
+    for (const part of content) {
+      if (
+        typeof part !== "object" ||
+        part === null ||
+        !("type" in part) ||
+        part.type !== "tool-result"
+      ) {
+        continue;
+      }
+
+      const toolName =
+        "toolName" in part && typeof part.toolName === "string"
+          ? part.toolName
+          : "unknown";
+      const output =
+        "output" in part
+          ? part.output
+          : "result" in part
+            ? part.result
+            : undefined;
+      entries.push({ toolName, output });
+    }
+  }
+
+  return entries;
+}
+
+function unwrapToolOutput(output: unknown): unknown {
+  if (
+    typeof output === "object" &&
+    output !== null &&
+    "type" in output &&
+    (output as { type: unknown }).type === "json" &&
+    "value" in output
+  ) {
+    return (output as { value: unknown }).value;
+  }
+  return output;
+}
+
+function hasCompileErrorOutput(output: unknown): boolean {
+  const value = unwrapToolOutput(output);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "compileError" in value &&
+    typeof (value as { compileError: unknown }).compileError === "string" &&
+    (value as { compileError: string }).compileError.length > 0
+  );
+}
+
+function isSuccessfulCheckPreview(output: unknown): boolean {
+  const value = unwrapToolOutput(output);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "ok" in value &&
+    (value as { ok: unknown }).ok === true
+  );
+}
+
 export function collectIncompleteWarnings(
   result: AgentStreamResult,
   assistantMessage: UIMessage | null,
@@ -125,9 +196,24 @@ export function collectIncompleteWarnings(
   const toolNames = result.steps.flatMap(
     (step) => step.toolCalls?.map((call) => call.toolName) ?? [],
   );
+  const toolResults = toolResultEntries(result.messages);
+  const mutated =
+    toolNames.includes("writeFile") || toolNames.includes("editFile");
+  const sawCompileError = toolResults.some((entry) =>
+    hasCompileErrorOutput(entry.output),
+  );
+  const checkPreviewOk = toolResults.some(
+    (entry) =>
+      entry.toolName === "checkPreview" &&
+      isSuccessfulCheckPreview(entry.output),
+  );
 
-  if (!toolNames.includes("checkPreview")) {
-    warnings.push("checkPreview was never called — preview may be unverified");
+  if (mutated && !checkPreviewOk) {
+    warnings.push(
+      sawCompileError
+        ? "compileError was returned after an edit but checkPreview did not succeed afterward"
+        : "edited files but checkPreview did not succeed — preview may still be warming; do not finish the first ready gate without ok:true",
+    );
   }
 
   if (result.finishReason === "tool-calls" && result.steps.length < maxSteps) {
