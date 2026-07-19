@@ -124,6 +124,65 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
   });
 
+  it("readRuntime preserves ready state after an inconclusive miss", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_1",
+        previewUrl: "https://embed.example/x",
+        previewPort: 3000,
+      });
+      observeRuntime.mockResolvedValue(
+        observed({
+          phase: "missing",
+          lastError: "preview probe failed",
+          transient: true,
+        }),
+      );
+
+      const result = await withFreshIsolate(sessionId, () =>
+        readRuntime(sessionId),
+      );
+
+      expect(result.observed).toBe("preview-ready");
+      expect(result.previewUrl).toBe("https://embed.example/x");
+    });
+  });
+
+  it("readRuntime applies a conclusive unhealthy observation", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_1",
+        previewUrl: "https://embed.example/x",
+        previewPort: 3000,
+      });
+      observeRuntime.mockResolvedValue(
+        observed({
+          phase: "workspace-ready",
+          sandboxId: "sb_1",
+          previewUrl: "https://embed.example/x",
+          previewPort: 3000,
+          httpStatus: 502,
+          transient: false,
+        }),
+      );
+
+      const result = await withFreshIsolate(sessionId, () =>
+        readRuntime(sessionId),
+      );
+
+      expect(result.observed).toBe("workspace-ready");
+      expect(result.previewUrl).toBe("https://embed.example/x");
+    });
+  });
+
   it("two isolates racing ensure(preview-ready): only lease holder creates", async () => {
     await withTempDataDir(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
@@ -505,6 +564,117 @@ describe("runtime-reconciler isolate / UI races", () => {
       // After restart reconcile, preview should be ready again with same URL
       expect(snap.observed).toBe("preview-ready");
       expect(snap.previewUrl).toBe("https://old.example");
+    });
+  });
+
+  it("keeps preview-ready durable state across a transient observe miss", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+
+      await withFreshIsolate(sessionId, async () => {
+        const { upsertRuntimeSnapshot } = await import("./runtime-store");
+        await upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "preview-ready",
+          sandboxId: "sb_1",
+          devSessionName: "preview-sess",
+          previewUrl: null,
+          previewPort: 3000,
+          generation: 1,
+        });
+      });
+
+      const observedPhases: string[] = [];
+      observeRuntime.mockImplementation(
+        async (
+          _sessionId: string,
+          options: { snapshot: { observed: string } },
+        ) => {
+          observedPhases.push(options.snapshot.observed);
+          if (observedPhases.length === 1) {
+            return observed({
+              phase: "missing",
+              lastError: "preview probe failed",
+              transient: true,
+            });
+          }
+          return observed({
+            phase: "preview-ready",
+            sandboxId: "sb_1",
+            previewUrl: "https://embed.example/x",
+            previewPort: 3000,
+            httpStatus: 200,
+          });
+        },
+      );
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "transient-observe",
+        }),
+      );
+
+      expect(observedPhases).toEqual(["preview-ready", "preview-ready"]);
+      expect(result.observed).toBe("preview-ready");
+      expect(result.previewUrl).toBe("https://embed.example/x");
+      expect(startDevSession).not.toHaveBeenCalled();
+    });
+  });
+
+  it("honors a desired stop written during a transient observe", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      await withFreshIsolate(sessionId, async () => {
+        const { upsertRuntimeSnapshot } = await import("./runtime-store");
+        await upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "preview-ready",
+          sandboxId: "sb_1",
+          devSessionName: "preview-sess",
+          previewUrl: null,
+          previewPort: 3000,
+          generation: 1,
+        });
+      });
+
+      observeRuntime
+        .mockImplementationOnce(async () => {
+          await withFreshIsolate(sessionId, async () => {
+            const { upsertRuntimeSnapshot } = await import("./runtime-store");
+            const current = await getRuntimeSnapshot(sessionId, null, {
+              fresh: true,
+            });
+            await upsertRuntimeSnapshot(sessionId, {
+              expectedRevision: current.revision,
+              desired: "stopped",
+              generation: current.generation + 1,
+            });
+          });
+          return observed({
+            phase: "missing",
+            lastError: "observe timeout",
+            transient: true,
+          });
+        })
+        .mockResolvedValue(
+          observed({
+            phase: "workspace-ready",
+            sandboxId: "sb_1",
+          }),
+        );
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "transient-desired-flip",
+        }),
+      );
+
+      expect(result.desired).toBe("stopped");
+      expect(result.observed).toBe("workspace-ready");
+      expect(stopDevSession).toHaveBeenCalled();
+      expect(startDevSession).not.toHaveBeenCalled();
     });
   });
 

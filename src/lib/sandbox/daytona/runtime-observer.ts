@@ -118,6 +118,15 @@ type UrlProbe = {
   transient: boolean;
 };
 
+function shouldRefreshPreviewLink(probe: UrlProbe): boolean {
+  return (
+    probe.http === 401 ||
+    probe.http === 403 ||
+    probe.http === 404 ||
+    probe.http === 410
+  );
+}
+
 async function probeUrl(url: string): Promise<UrlProbe> {
   try {
     const res = await fetch(url, {
@@ -183,12 +192,20 @@ async function probePreviewLink(
       }
     }
 
-    // A cached URL may expire or change permissions. Refresh it once after any
-    // failed cached probe instead of retrying the stale URL forever.
-    if (!url || firstProbe) {
+    // Refresh only when the proxy says the cached link itself is invalid.
+    // A 5xx or connection failure usually means Next is still booting; asking
+    // Daytona for the same link and probing it again only amplifies traffic.
+    if (!url || (firstProbe && shouldRefreshPreviewLink(firstProbe))) {
       await ensureSandboxPublic(sdk);
       const preview = await sdk.getPreviewLink(port);
       url = preview.url;
+    } else if (firstProbe) {
+      return {
+        ...firstProbe,
+        url,
+        port,
+        probeUrl: url,
+      };
     }
 
     const probe = await probeUrl(url);
