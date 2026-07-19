@@ -24,3 +24,129 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Compact highlight.js theme for the workspace file explorer (light + dark). */
+.explorer-code {
+  color: #24292f;
+}
+
+.explorer-code .hljs-comment,
+.explorer-code .hljs-quote {
+  color: #6e7781;
+  font-style: italic;
+}
+
+.explorer-code .hljs-keyword,
+.explorer-code .hljs-selector-tag,
+.explorer-code .hljs-addition {
+  color: #cf222e;
+}
+
+.explorer-code .hljs-string,
+.explorer-code .hljs-meta .hljs-string,
+.explorer-code .hljs-attr {
+  color: #0a3069;
+}
+
+.explorer-code .hljs-number,
+.explorer-code .hljs-literal,
+.explorer-code .hljs-variable,
+.explorer-code .hljs-template-variable {
+  color: #0550ae;
+}
+
+.explorer-code .hljs-title,
+.explorer-code .hljs-section,
+.explorer-code .hljs-selector-id {
+  color: #8250df;
+}
+
+.explorer-code .hljs-type,
+.explorer-code .hljs-class .hljs-title,
+.explorer-code .hljs-built_in {
+  color: #953800;
+}
+
+.explorer-code .hljs-meta,
+.explorer-code .hljs-doctag,
+.explorer-code .hljs-name,
+.explorer-code .hljs-attribute {
+  color: #116329;
+}
+
+.explorer-code .hljs-regexp,
+.explorer-code .hljs-link {
+  color: #0a3069;
+}
+
+.explorer-code .hljs-symbol,
+.explorer-code .hljs-bullet {
+  color: #0550ae;
+}
+
+.explorer-code .hljs-deletion {
+  color: #82071e;
+}
+
+@media (prefers-color-scheme: dark) {
+  .explorer-code {
+    color: #e6edf3;
+  }
+
+  .explorer-code .hljs-comment,
+  .explorer-code .hljs-quote {
+    color: #8b949e;
+  }
+
+  .explorer-code .hljs-keyword,
+  .explorer-code .hljs-selector-tag,
+  .explorer-code .hljs-addition {
+    color: #ff7b72;
+  }
+
+  .explorer-code .hljs-string,
+  .explorer-code .hljs-meta .hljs-string,
+  .explorer-code .hljs-attr {
+    color: #a5d6ff;
+  }
+
+  .explorer-code .hljs-number,
+  .explorer-code .hljs-literal,
+  .explorer-code .hljs-variable,
+  .explorer-code .hljs-template-variable {
+    color: #79c0ff;
+  }
+
+  .explorer-code .hljs-title,
+  .explorer-code .hljs-section,
+  .explorer-code .hljs-selector-id {
+    color: #d2a8ff;
+  }
+
+  .explorer-code .hljs-type,
+  .explorer-code .hljs-class .hljs-title,
+  .explorer-code .hljs-built_in {
+    color: #ffa657;
+  }
+
+  .explorer-code .hljs-meta,
+  .explorer-code .hljs-doctag,
+  .explorer-code .hljs-name,
+  .explorer-code .hljs-attribute {
+    color: #7ee787;
+  }
+
+  .explorer-code .hljs-regexp,
+  .explorer-code .hljs-link {
+    color: #a5d6ff;
+  }
+
+  .explorer-code .hljs-symbol,
+  .explorer-code .hljs-bullet {
+    color: #79c0ff;
+  }
+
+  .explorer-code .hljs-deletion {
+    color: #ffa198;
+  }
+}

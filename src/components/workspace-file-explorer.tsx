@@ -8,6 +8,8 @@ import type {
   ExplorerTreeResult,
 } from "@/lib/sandbox/workspace-explorer";
 
+import { CodeHighlight } from "./code-highlight";
+
 interface WorkspaceFileExplorerProps {
   sessionId: string;
   /** Bump after each agent turn (or manual refresh) to re-sync from sandbox. */
@@ -319,9 +321,10 @@ export function WorkspaceFileExplorer({
               二进制或非文本文件，暂不支持预览。
             </p>
           ) : (
-            <pre className="m-0 overflow-auto p-3 font-mono text-[12px] leading-5 text-zinc-800 dark:text-zinc-200">
-              <code className="whitespace-pre">{content?.content ?? ""}</code>
-            </pre>
+            <CodeHighlight
+              code={content?.content ?? ""}
+              filePath={selectedPath}
+            />
           )}
         </div>
       </div>
