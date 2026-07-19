@@ -136,16 +136,15 @@ function toolResultEntries(
         continue;
       }
 
+      // AI SDK uses `output`; older/persisted messages may still carry `result`.
+      const fields = part as {
+        toolName?: unknown;
+        output?: unknown;
+        result?: unknown;
+      };
       const toolName =
-        "toolName" in part && typeof part.toolName === "string"
-          ? part.toolName
-          : "unknown";
-      const output =
-        "output" in part
-          ? part.output
-          : "result" in part
-            ? part.result
-            : undefined;
+        typeof fields.toolName === "string" ? fields.toolName : "unknown";
+      const output = fields.output ?? fields.result;
       entries.push({ toolName, output });
     }
   }
