@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
 import { isToolUIPart, type UIMessage } from "ai";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   formatToolPartLabel,
@@ -15,7 +15,11 @@ import {
   mergeDisplayMessages,
   persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
-import { isLiveChatTurn, type SessionRunStatus } from "@/lib/session/types";
+import {
+  isActiveRunStatus,
+  isLiveChatTurn,
+  type SessionRunStatus,
+} from "@/lib/session/types";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
@@ -74,7 +78,36 @@ export function Chat({
     },
   });
 
-  const isLiveTurn = isLiveChatTurn(status, runStatus);
+  // After turn 1, runStatus stays "completed" until the next POST marks the
+  // run running. isLiveChatTurn intentionally unlocks on terminal+streaming
+  // (post-turn drain) — that same rule leaves the composer open for the whole
+  // weak-network gap before runStatus flips. Lock optimistically on send.
+  const [awaitingRunStart, setAwaitingRunStart] = useState(false);
+  const leftReadyDuringAwaitRef = useRef(false);
+
+  useEffect(() => {
+    if (!awaitingRunStart) {
+      leftReadyDuringAwaitRef.current = false;
+      return;
+    }
+
+    if (status === "submitted" || status === "streaming") {
+      leftReadyDuringAwaitRef.current = true;
+    }
+
+    if (isActiveRunStatus(runStatus) || status === "error") {
+      setAwaitingRunStart(false);
+      return;
+    }
+
+    // Send failed or finished without ever projecting "running".
+    if (leftReadyDuringAwaitRef.current && status === "ready") {
+      setAwaitingRunStart(false);
+    }
+  }, [awaitingRunStart, runStatus, status]);
+
+  const isLiveTurn =
+    awaitingRunStart || isLiveChatTurn(status, runStatus);
 
   const displayMessages = useMemo(
     () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
@@ -148,6 +181,7 @@ export function Chat({
 
       const trimmed = input.value.trim();
       stickToBottomRef.current = true;
+      setAwaitingRunStart(true);
       void sendMessage({ text: trimmed });
       input.value = "";
       onSessionRefresh?.();
@@ -160,6 +194,7 @@ export function Chat({
       return;
     }
     stickToBottomRef.current = true;
+    setAwaitingRunStart(true);
     void sendMessage({ text: APP_TEST_USER_PROMPT });
     if (inputRef.current) {
       inputRef.current.value = "";
