@@ -4,21 +4,33 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { reconnectSandbox, wrapSandbox, getRuntimeSnapshot } = vi.hoisted(() => ({
+const {
+  reconnectSandbox,
+  wrapSandbox,
+  getRuntimeSnapshot,
+  ensureSandboxPublic,
+  getDaytonaClient,
+} = vi.hoisted(() => ({
   reconnectSandbox: vi.fn(),
   wrapSandbox: vi.fn(),
   getRuntimeSnapshot: vi.fn(),
+  ensureSandboxPublic: vi.fn(async () => {}),
+  getDaytonaClient: vi.fn(),
 }));
 
 vi.mock("./vm", () => ({
   reconnectSandbox,
   wrapSandbox,
-  ensureSandboxPublic: vi.fn(async () => {}),
+  ensureSandboxPublic,
   isAsleep: () => false,
 }));
 
 vi.mock("./runtime-store", () => ({
   getRuntimeSnapshot,
+}));
+
+vi.mock("./client", () => ({
+  getDaytonaClient,
 }));
 
 vi.mock("./bootstrap-log", () => ({
@@ -64,6 +76,11 @@ describe("observeRuntime soft deadline", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     getRuntimeSnapshot.mockResolvedValue(snap());
+    getDaytonaClient.mockReturnValue({
+      get: vi.fn(async () => {
+        throw new Error("not found");
+      }),
+    });
     wrapSandbox.mockImplementation((_sid: string, sdk: unknown) => ({
       sdkSandbox: sdk,
     }));
@@ -175,12 +192,172 @@ describe("observeRuntime soft deadline", () => {
       wake: true,
       snapshot: snap(),
     });
-    await vi.advanceTimersByTimeAsync(1_500);
+    // Cached URL failure refreshes the Daytona link once and probes again.
+    await vi.advanceTimersByTimeAsync(3_000);
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await pending;
     expect(result.phase).toBe("workspace-ready");
     expect(result.sandboxId).toBe("sbx_1");
     expect(result.httpStatus).toBeNull();
+    expect(result.transient).toBe(true);
+  });
+
+  it("does not coalesce passive peek with a wake observation", async () => {
+    const fetchResolvers: Array<(value: { status: number }) => void> = [];
+    reconnectSandbox.mockImplementation(async (_sessionId, sandboxId) => ({
+      id: sandboxId,
+      state: "started",
+      getPreviewLink: async () => ({ url: "https://preview.example/app" }),
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<{ status: number }>((resolve) => {
+            fetchResolvers.push(resolve);
+          }),
+      ),
+    );
+
+    const passive = observeRuntime("sess_obs", {
+      wake: false,
+      snapshot: snap(),
+    });
+    await Promise.resolve();
+    const waking = observeRuntime("sess_obs", {
+      wake: true,
+      snapshot: snap(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(reconnectSandbox).toHaveBeenCalledTimes(2);
+    expect(reconnectSandbox).toHaveBeenNthCalledWith(
+      1,
+      "sess_obs",
+      "sbx_1",
+      false,
+    );
+    expect(reconnectSandbox).toHaveBeenNthCalledWith(
+      2,
+      "sess_obs",
+      "sbx_1",
+      true,
+    );
+
+    for (const resolve of fetchResolvers) {
+      resolve({ status: 200 });
+    }
+    await expect(passive).resolves.toMatchObject({ phase: "preview-ready" });
+    await expect(waking).resolves.toMatchObject({ phase: "preview-ready" });
+  });
+
+  it("drops late ready from an older sandbox generation", async () => {
+    reconnectSandbox.mockImplementation(
+      (_sessionId: string, sandboxId: string) =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                id: sandboxId,
+                state: "started",
+                getPreviewLink: async () => ({
+                  url: `https://preview.example/${sandboxId}`,
+                }),
+              }),
+            sandboxId === "sbx_1" ? 12_000 : 0,
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => ({ status: 200 })));
+
+    const first = observeRuntime("sess_obs", {
+      wake: true,
+      snapshot: snap({ sandboxId: "sbx_1", generation: 1 }),
+    });
+    await vi.advanceTimersByTimeAsync(11_000);
+    await first;
+    await vi.advanceTimersByTimeAsync(1_500);
+    await Promise.resolve();
+
+    const second = observeRuntime("sess_obs", {
+      wake: true,
+      snapshot: snap({
+        sandboxId: "sbx_2",
+        generation: 2,
+        previewUrl: null,
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(second).resolves.toMatchObject({
+      phase: "preview-ready",
+      sandboxId: "sbx_2",
+      previewUrl: "https://preview.example/sbx_2",
+    });
+    expect(reconnectSandbox).toHaveBeenCalledWith(
+      "sess_obs",
+      "sbx_2",
+      true,
+    );
+  });
+
+  it("refreshes a failed cached URL and only accepts 2xx or 3xx", async () => {
+    const getPreviewLink = vi.fn(async () => ({
+      url: "https://preview.example/refreshed",
+    }));
+    reconnectSandbox.mockResolvedValue({
+      id: "sbx_1",
+      state: "started",
+      getPreviewLink,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 404 })
+      .mockResolvedValueOnce({ status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await observeRuntime("sess_obs", {
+      wake: true,
+      snapshot: snap(),
+    });
+
+    expect(result).toMatchObject({
+      phase: "preview-ready",
+      previewUrl: "https://preview.example/refreshed",
+      httpStatus: 200,
+    });
+    expect(ensureSandboxPublic).toHaveBeenCalledTimes(1);
+    expect(getPreviewLink).toHaveBeenCalledWith(3000);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://preview.example/app",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://preview.example/refreshed",
+      expect.any(Object),
+    );
+  });
+
+  it("keeps workspace identity when reconnect fails but sandbox still exists", async () => {
+    reconnectSandbox.mockResolvedValue(null);
+    getDaytonaClient.mockReturnValue({
+      get: vi.fn(async () => ({ id: "sbx_1", state: "started" })),
+    });
+
+    const result = await observeRuntime("sess_obs", {
+      wake: false,
+      snapshot: snap(),
+    });
+
+    expect(result).toMatchObject({
+      phase: "workspace-ready",
+      sandboxId: "sbx_1",
+      sandboxState: "started",
+      transient: true,
+    });
   });
 });

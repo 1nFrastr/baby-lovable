@@ -127,6 +127,9 @@ function isTransientObserveFailure(observed: ObservedRuntime): boolean {
   if (observed.phase === "preview-ready") {
     return false;
   }
+  if (observed.transient) {
+    return true;
+  }
   if (!observed.lastError) {
     return false;
   }
@@ -682,7 +685,6 @@ export async function ensureDesiredState(
 
   let intentGeneration = snapshot.generation + 1;
   const maxDesiredAttempts = 12;
-  let submitted = false;
   for (let attempt = 0; attempt < maxDesiredAttempts; attempt++) {
     try {
       const patch: Parameters<typeof upsertRuntimeSnapshot>[1] = {
@@ -696,7 +698,6 @@ export async function ensureDesiredState(
         patch.clearNextCache = true;
       }
       snapshot = await upsertRuntimeSnapshot(sessionId, patch);
-      submitted = true;
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -708,7 +709,6 @@ export async function ensureDesiredState(
         snapshot.desired === targetDesired &&
         snapshot.generation >= intentGeneration
       ) {
-        submitted = true;
         break;
       }
       // Another intent landed — claim a newer generation and retry.

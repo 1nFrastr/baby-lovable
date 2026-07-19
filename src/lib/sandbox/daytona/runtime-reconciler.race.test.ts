@@ -82,7 +82,6 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
     previewUrl: null,
     previewPort: null,
     probeUrl: null,
-    buildError: null,
     httpStatus: null,
     lastError: null,
     ...partial,
