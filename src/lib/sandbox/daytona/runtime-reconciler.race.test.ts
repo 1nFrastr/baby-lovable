@@ -16,7 +16,6 @@ const {
   startDevSession,
   stopDevSession,
   observeRuntime,
-  commitWorkspaceTurn,
 } = vi.hoisted(() => {
   const ctx = { sessionId: "" };
   return {
@@ -28,7 +27,6 @@ const {
     startDevSession: vi.fn(),
     stopDevSession: vi.fn(),
     observeRuntime: vi.fn(),
-    commitWorkspaceTurn: vi.fn(),
   };
 });
 
@@ -37,10 +35,6 @@ vi.mock("@/lib/session/store", () => ({
     id === ctx.sessionId ? makeSession(id) : null,
   ),
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
-}));
-
-vi.mock("../workspace-git", () => ({
-  commitWorkspaceTurn,
 }));
 
 vi.mock("./vm", () => ({
@@ -109,7 +103,6 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
     stopDevSession.mockResolvedValue(undefined);
     deleteSandboxById.mockResolvedValue(undefined);
-    commitWorkspaceTurn.mockResolvedValue(undefined);
   });
 
   it("readRuntime never creates a sandbox (UI poll isolate)", async () => {

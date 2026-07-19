@@ -5,8 +5,6 @@
 import { randomUUID } from "node:crypto";
 
 import { getSession } from "@/lib/session/store";
-import { commitWorkspaceTurn } from "../workspace-git";
-
 import {
   formatStartError,
   startDevSession,
@@ -398,15 +396,6 @@ async function actionDelete(
     const project = await attachProject(sessionId, sandboxId, true);
     if (project) {
       await stopDevSession(project, sessionId);
-      try {
-        await commitWorkspaceTurn(project, {
-          turnIndex: 0,
-          userPrompt: "",
-          messageOverride: "checkpoint: sandbox destroy",
-        });
-      } catch {
-        // best-effort
-      }
       try {
         await project.sdkSandbox.delete(60);
       } catch {

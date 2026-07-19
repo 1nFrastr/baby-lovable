@@ -196,46 +196,7 @@ async function runTurn(
 
   session.messages = mergedMessages;
 
-  await commitTurnWorkspace(session, mergedMessages);
-
   return mergedMessages;
-}
-
-async function commitTurnWorkspace(
-  session: Session,
-  messages: UIMessage[],
-): Promise<void> {
-  const { getProjectSandbox } = await import("@/lib/sandbox/factory");
-  const { commitWorkspaceTurn, buildTurnCommitInput } = await import(
-    "@/lib/sandbox/workspace-git"
-  );
-
-  let sandbox;
-  try {
-    sandbox = await getProjectSandbox(session.id, session.sandboxMode);
-  } catch (error) {
-    logger.warn(
-      `Sandbox unavailable for post-turn checkpoint: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return;
-  }
-
-  try {
-    const result = await commitWorkspaceTurn(
-      sandbox,
-      buildTurnCommitInput(session, messages),
-    );
-    if (result.sha) {
-      await updateSession(session.id, { lastCommitSha: result.sha });
-    } else if (result.skippedReason) {
-      logger.warn(`Workspace git skipped: ${result.skippedReason}`);
-    }
-  } catch (error) {
-    logger.warn(
-      `Git commit failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
 }
 
 async function interactiveLoop(

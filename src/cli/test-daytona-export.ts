@@ -1,5 +1,5 @@
 /**
- * Test workspace git-archive export for Daytona (sandbox local FS).
+ * Test Daytona workspace zip export (sandbox local FS, no git).
  *
  * Usage:
  *   npm run test:daytona-export
@@ -128,13 +128,13 @@ async function main() {
     console.log("Bootstrapping / reconnecting sandbox …");
     await ensureDesiredState(session.id, "sandbox-ready", { wait: true });
 
-    console.log("\nExport via sandbox-git …");
+    console.log("\nExport via sandbox-zip …");
     const result = await exportWorkspaceArchive(session.id);
-    if (result.source !== "sandbox-git") {
-      throw new Error(`expected source=sandbox-git, got ${result.source}`);
+    if (result.source !== "sandbox-zip") {
+      throw new Error(`expected source=sandbox-zip, got ${result.source}`);
     }
-    assertZipLooksValid(result, "sandbox-git");
-    await saveZip(opts.outDir, `${session.id}-sandbox-git.zip`, result);
+    assertZipLooksValid(result, "sandbox-zip");
+    await saveZip(opts.outDir, `${session.id}-sandbox-zip.zip`, result);
 
     console.log("\nPASS");
   } catch (error) {

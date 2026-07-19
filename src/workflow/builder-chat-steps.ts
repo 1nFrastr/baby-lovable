@@ -132,57 +132,7 @@ export async function saveSessionMessagesStep(
   });
   await deleteDraft(sessionId, session.userId);
 
-  await commitWorkspaceTurnStep(sessionId, mergedMessages);
-
   return { messageCount: mergedMessages.length };
-}
-
-export async function commitWorkspaceTurnStep(
-  sessionId: string,
-  messages: UIMessage[],
-) {
-  "use step";
-
-  const { getProjectSandbox } = await import("@/lib/sandbox/factory");
-  const { getSession, updateSession } = await import("@/lib/session/store");
-  const { commitWorkspaceTurn, buildTurnCommitInput } = await import(
-    "@/lib/sandbox/workspace-git"
-  );
-
-  const session = await getSession(sessionId);
-  if (!session) {
-    return;
-  }
-
-  try {
-    const sandbox = await getProjectSandbox(sessionId, session.sandboxMode);
-
-    try {
-      const result = await commitWorkspaceTurn(
-        sandbox,
-        buildTurnCommitInput(session, messages),
-      );
-
-      if (result.sha) {
-        await updateSession(sessionId, { lastCommitSha: result.sha });
-      } else if (result.skippedReason) {
-        console.warn(
-          `[agent-trace] session=${sessionId} INFO workspace git skipped: ${result.skippedReason}`,
-        );
-      }
-    } catch (error) {
-      console.warn(
-        `[agent-trace] session=${sessionId} WARN git commit failed:`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-
-  } catch (error) {
-    console.warn(
-      `[agent-trace] session=${sessionId} WARN post-turn checkpoint failed:`,
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 }
 
 export async function markSessionRunFailedStep(sessionId: string) {
