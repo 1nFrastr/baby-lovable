@@ -37,6 +37,21 @@ interface PreviewPanelProps {
 
 /** Keep PiP visible briefly after the run ends so the final frame is usable. */
 const PIP_HOLD_AFTER_DONE_MS = 10_000;
+/** Retry once after ready so an early failed stylesheet request can recover. */
+const READY_EMBED_RELOAD_DELAY_MS = 1_000;
+/** Let the final HMR update settle before refreshing after an agent turn. */
+const TURN_EMBED_RELOAD_DELAY_MS = 300;
+
+function withEmbedCacheBust(url: string, nonce: number): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("__baby_lovable_refresh", String(nonce));
+    return parsed.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}__baby_lovable_refresh=${nonce}`;
+  }
+}
 
 function mergeChatAndPolledAppTest(
   polled: AppTestLatestStatus,
@@ -132,17 +147,14 @@ export function PreviewPanel({
     ? appTestFromProjection(projection.appTest)
     : { status: "idle" as const };
   const previewGeneration = projection?.preview.generation ?? 0;
+  const runStatus = projection?.run.status ?? "idle";
+  const readyPreviewUrl =
+    preview.status === "ready" ? preview.url : undefined;
 
-  /**
-   * Remount only on meaningful embed-state changes (not every checkPreview):
-   * warm/error → ready (clear early 502), or error fingerprint changes.
-   * URL + restart generation are already in the iframe key.
-   */
   const [embedRemountNonce, setEmbedRemountNonce] = useState(0);
-  const prevEmbedStateRef = useRef<{
-    status: AppServerStatus["status"] | null;
-    error: string | null;
-  }>({ status: null, error: null });
+  const prevAgentRunStatusRef = useRef<
+    SessionRuntimeProjection["run"]["status"] | null
+  >(null);
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -158,28 +170,42 @@ export function PreviewPanel({
 
   const appTest = mergeChatAndPolledAppTest(runtimeAppTest, chatAppTest);
 
+  // The root document can become reachable just before its CSS chunks do.
+  // Retry one full navigation after ready; unlike HMR, this reloads failed
+  // stylesheet links. Generation changes schedule the same safeguard on restart.
   useEffect(() => {
-    const prev = prevEmbedStateRef.current;
-    const error =
-      preview.status === "error" ? (preview.error ?? "error") : null;
-    prevEmbedStateRef.current = { status: preview.status, error };
-
-    if (prev.status == null) {
+    if (!readyPreviewUrl) {
       return;
     }
 
-    const becameReadyFromWarmOrError =
-      preview.status === "ready" &&
-      (prev.status === "installing" ||
-        prev.status === "starting" ||
-        prev.status === "error");
-    const errorChanged =
-      error !== prev.error && (error != null || prev.error != null);
+    const timer = window.setTimeout(() => {
+      setEmbedRemountNonce((nonce) => nonce + 1);
+    }, READY_EMBED_RELOAD_DELAY_MS);
 
-    if (becameReadyFromWarmOrError || errorChanged) {
-      setEmbedRemountNonce((n) => n + 1);
+    return () => window.clearTimeout(timer);
+  }, [readyPreviewUrl, previewGeneration]);
+
+  // HMR may rerender React while leaving a failed or stale stylesheet link in
+  // place. Refresh once when each live agent turn leaves the running state.
+  useEffect(() => {
+    const previous = prevAgentRunStatusRef.current;
+    prevAgentRunStatusRef.current = runStatus;
+
+    const turnFinished =
+      previous === "running" &&
+      (runStatus === "done" ||
+        runStatus === "error" ||
+        runStatus === "idle");
+    if (!turnFinished || !readyPreviewUrl) {
+      return;
     }
-  }, [preview.status, preview.status === "error" ? preview.error : null]);
+
+    const timer = window.setTimeout(() => {
+      setEmbedRemountNonce((nonce) => nonce + 1);
+    }, TURN_EMBED_RELOAD_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [runStatus, readyPreviewUrl]);
 
   // Open Live View only when the chat stream transitions into a running
   // testPreview after Chat has hydrated history. Refresh / session switch
@@ -346,15 +372,12 @@ export function PreviewPanel({
     pipOpen &&
     (appTest.status === "running" || pipHoldActive) &&
     !pipDismissed;
-  // Mount iframe as soon as the public proxy URL exists (installing/starting may
-  // still 502 while Next boots). Keep mounted across restart — URL is stable.
-  const previewEmbedUrl =
-    preview.status === "ready" ||
-    preview.status === "starting" ||
-    preview.status === "installing"
-      ? preview.url
-      : undefined;
-  // Remount only when URL, restart generation, or embed-state nonce changes.
+  // Do not navigate while the proxy or Next is still warming. An early iframe
+  // can retain failed CSS requests even after the document and HMR become ready.
+  const previewEmbedUrl = readyPreviewUrl;
+  const previewIframeSrc = previewEmbedUrl
+    ? withEmbedCacheBust(previewEmbedUrl, embedRemountNonce)
+    : undefined;
   const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
 
   // Unified warm copy for now (installing/starting/stopped) — easier to verify;
@@ -436,7 +459,7 @@ export function PreviewPanel({
         {previewEmbedUrl ? (
           <iframe
             key={previewIframeKey}
-            src={previewEmbedUrl}
+            src={previewIframeSrc}
             title="App preview"
             className="h-full w-full border-0 bg-white"
             allow="accelerometer; camera; microphone; clipboard-write"
