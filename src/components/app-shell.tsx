@@ -20,6 +20,36 @@ import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
 import { AuthUserBar } from "./auth-user-bar";
 
+function SessionWorkspaceLoading() {
+  return (
+    <div
+      className="flex h-full min-h-0"
+      role="status"
+      aria-label="正在载入会话"
+    >
+      <div className="flex min-w-0 flex-1 items-center justify-center">
+        <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+          <span>正在载入会话…</span>
+        </div>
+      </div>
+      <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
+        <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            Preview
+          </p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            正在连接预览环境
+          </p>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-zinc-100 dark:bg-zinc-950">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function AppShell() {
   const router = useRouter();
   const params = useParams();
@@ -214,9 +244,7 @@ export function AppShell() {
               </button>
             </div>
           ) : !isSessionReady ? (
-            <div className="flex h-full items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
-              Loading session…
-            </div>
+            <SessionWorkspaceLoading />
           ) : (
             <div className="flex h-full min-h-0">
               <div className="min-w-0 flex-1">
@@ -238,6 +266,17 @@ export function AppShell() {
                 sessionId={activeSessionId}
                 sandboxMode={activeSession.sandboxMode}
                 runtimeProjection={runtimeQuery.data?.projection ?? null}
+                runtimeLoading={
+                  runtimeQuery.isPending ||
+                  (runtimeQuery.isFetching && !runtimeQuery.data)
+                }
+                runtimeError={
+                  runtimeQuery.isError && !runtimeQuery.data
+                    ? runtimeQuery.error instanceof Error
+                      ? runtimeQuery.error.message
+                      : "Failed to load session runtime"
+                    : null
+                }
                 chatAppTest={chatAppTest}
                 chatAppTestReady={chatAppTestReady}
               />

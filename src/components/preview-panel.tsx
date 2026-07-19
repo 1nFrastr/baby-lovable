@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import type { SandboxMode } from "@/lib/sandbox/types";
@@ -29,6 +29,8 @@ interface PreviewPanelProps {
   sandboxMode?: SandboxMode;
   /** From AppShell useSessionRuntime — sole page-level runtime subscription. */
   runtimeProjection?: SessionRuntimeProjection | null;
+  runtimeLoading?: boolean;
+  runtimeError?: string | null;
   /** Live View from streamed testPreview tool output (agent path). */
   chatAppTest?: AppTestLatestStatus | null;
   /** True after Chat has reported an extract for this session (including none). */
@@ -134,6 +136,8 @@ export function PreviewPanel({
   sessionId,
   sandboxMode = "local",
   runtimeProjection = null,
+  runtimeLoading = false,
+  runtimeError = null,
   chatAppTest = null,
   chatAppTestReady = false,
 }: PreviewPanelProps) {
@@ -152,6 +156,13 @@ export function PreviewPanel({
     preview.status === "ready" ? preview.url : undefined;
 
   const [embedRemountNonce, setEmbedRemountNonce] = useState(0);
+  const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null);
+  const [previewAction, setPreviewAction] = useState<
+    "warm" | "restart" | null
+  >(null);
+  const [previewActionError, setPreviewActionError] = useState<string | null>(
+    null,
+  );
   const prevAgentRunStatusRef = useRef<
     SessionRuntimeProjection["run"]["status"] | null
   >(null);
@@ -287,48 +298,72 @@ export function PreviewPanel({
     };
   }, []);
 
+  const requestPreviewAction = useCallback(
+    async (action: "warm" | "restart") => {
+      setPreviewAction(action);
+      setPreviewActionError(null);
+
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(
+            data?.error ??
+              `Preview ${action === "warm" ? "startup" : "restart"} failed`,
+          );
+        }
+        invalidateRuntime(sessionId);
+      } catch (error) {
+        if (action === "warm") {
+          previewWarmRequested.delete(sessionId);
+        }
+        setPreviewActionError(
+          error instanceof Error ? error.message : "Preview request failed",
+        );
+      } finally {
+        setPreviewAction(null);
+      }
+    },
+    [
+      invalidateRuntime,
+      sessionId,
+      setPreviewAction,
+      setPreviewActionError,
+    ],
+  );
+
   // Enter / re-enter session once: kick startPreview.
   // Module Set survives React Strict Mode remount double-effects.
   useEffect(() => {
-    let cancelled = false;
     const key = sessionId;
     if (previewWarmRequested.has(key)) {
       return;
     }
     previewWarmRequested.add(key);
-
-    void (async () => {
-      try {
-        await fetch(`/api/sessions/${sessionId}/preview`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "warm" }),
-        });
-        if (!cancelled) {
-          invalidateRuntime(sessionId);
-        }
-      } catch {
-        // Allow retry on hard failure (network) for this session.
-        previewWarmRequested.delete(key);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, invalidateRuntime]);
+    queueMicrotask(() => {
+      void requestPreviewAction("warm");
+    });
+  }, [requestPreviewAction, sessionId]);
 
   const handleRestart = async () => {
-    try {
-      await fetch(`/api/sessions/${sessionId}/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "restart" }),
-      });
+    await requestPreviewAction("restart");
+  };
+
+  const handleRetry = () => {
+    if (runtimeError && preview.status !== "error" && !previewActionError) {
       invalidateRuntime(sessionId);
-    } catch {
-      // runtime subscription will pick up status
+      return;
     }
+
+    void requestPreviewAction(
+      preview.status === "error" ? "restart" : "warm",
+    );
   };
 
   const handleExport = async () => {
@@ -379,11 +414,50 @@ export function PreviewPanel({
     ? withEmbedCacheBust(previewEmbedUrl, embedRemountNonce)
     : undefined;
   const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
-
-  // Unified warm copy for now (installing/starting/stopped) — easier to verify;
-  // phase-specific strings can return later.
-  const previewWarmLabel =
-    sandboxMode === "daytona" ? "正在启动远程预览…" : "正在启动预览…";
+  const iframeLoaded = loadedIframeKey === previewIframeKey;
+  const displayError =
+    previewActionError ??
+    runtimeError ??
+    (preview.status === "error" ? preview.error : null);
+  const previewStatus =
+    runtimeLoading && !projection
+      ? {
+          title: "正在连接预览环境",
+          detail: "同步当前会话的运行状态…",
+        }
+      : preview.status === "installing"
+        ? {
+            title: "正在安装项目依赖",
+            detail: "首次启动可能需要一点时间，完成后会自动打开。",
+          }
+        : preview.status === "starting"
+          ? {
+              title: "正在启动开发服务器",
+              detail:
+                sandboxMode === "daytona"
+                  ? "远程环境已准备好，正在等待应用响应。"
+                  : "项目已准备好，正在等待应用响应。",
+            }
+          : preview.status === "ready" && !iframeLoaded
+            ? {
+                title: "正在载入应用",
+                detail: "预览服务已就绪，正在渲染页面…",
+              }
+            : {
+                title: "正在准备预览环境",
+                detail:
+                  sandboxMode === "daytona"
+                    ? "正在唤醒远程工作区…"
+                    : "正在初始化项目工作区…",
+              };
+  const toolbarStatus =
+    preview.status === "ready" && iframeLoaded
+      ? preview.url
+      : displayError
+        ? displayError
+        : preview.status === "needs_install"
+          ? "Project not ready"
+          : previewStatus.title;
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
@@ -410,20 +484,17 @@ export function PreviewPanel({
           </div>
           <p
             className={`text-xs dark:text-zinc-400 ${
-              preview.status === "error" || exportError
+              displayError || exportError
                 ? "whitespace-normal text-red-600 dark:text-red-400"
                 : "truncate text-zinc-500"
             }`}
+            title={
+              preview.status === "ready" && iframeLoaded
+                ? preview.url
+                : undefined
+            }
           >
-            {preview.status === "ready"
-              ? preview.url
-              : exportError
-                ? exportError
-                : preview.status === "needs_install"
-                  ? "Project not ready"
-                  : preview.status === "error"
-                    ? preview.error
-                    : previewWarmLabel}
+            {exportError ?? toolbarStatus}
           </p>
         </div>
 
@@ -448,24 +519,54 @@ export function PreviewPanel({
             onClick={() => {
               void handleRestart();
             }}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            disabled={previewAction !== null}
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
-            Restart
+            {previewAction === "restart" ? "Restarting…" : "Restart"}
           </button>
         </div>
       </div>
 
       <div className="relative min-h-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
         {previewEmbedUrl ? (
-          <iframe
-            key={previewIframeKey}
-            src={previewIframeSrc}
-            title="App preview"
-            className="h-full w-full border-0 bg-white"
-            allow="accelerometer; camera; microphone; clipboard-write"
-          />
+          <>
+            <div
+              className={`absolute inset-0 z-[1] flex flex-col items-center justify-center gap-3 px-6 text-center transition-opacity duration-300 ${
+                iframeLoaded
+                  ? "pointer-events-none opacity-0"
+                  : "opacity-100"
+              }`}
+              role="status"
+              aria-live="polite"
+              aria-hidden={iframeLoaded}
+            >
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                  {previewStatus.title}
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {previewStatus.detail}
+                </p>
+              </div>
+            </div>
+            <iframe
+              key={previewIframeKey}
+              src={previewIframeSrc}
+              title="App preview"
+              onLoad={() => setLoadedIframeKey(previewIframeKey)}
+              className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${
+                iframeLoaded ? "opacity-100" : "opacity-0"
+              }`}
+              allow="accelerometer; camera; microphone; clipboard-write"
+            />
+          </>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          <div
+            className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400"
+            role={displayError ? "alert" : "status"}
+            aria-live="polite"
+          >
             {preview.status === "needs_install" ? (
               <>
                 <p className="font-medium text-zinc-700 dark:text-zinc-200">
@@ -473,29 +574,38 @@ export function PreviewPanel({
                 </p>
                 <p>缺少 package.json，无法启动预览。</p>
               </>
-            ) : preview.status === "error" ? (
+            ) : displayError ? (
               <>
                 <p className="font-medium text-red-600 dark:text-red-400">
-                  预览启动失败
+                  暂时无法打开预览
                 </p>
                 <p className="max-w-md whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
-                  {preview.error}
+                  {displayError}
                 </p>
-                {preview.error?.includes("联系作者") ? (
+                {displayError.includes("联系作者") ? (
                   <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
                     这是平台侧 Daytona 资源限制，需要作者在控制台清理闲置
                     Sandbox 或升级配额后，再点 Restart 重试。
                   </p>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  disabled={previewAction !== null || runtimeLoading}
+                  className="mt-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  {previewAction ? "正在重试…" : "重试"}
+                </button>
               </>
             ) : (
               <>
-                <span className="inline-flex gap-1">
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" />
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.1s]" />
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.2s]" />
-                </span>
-                <p>{previewWarmLabel}</p>
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+                <div className="space-y-1">
+                  <p className="font-medium text-zinc-700 dark:text-zinc-200">
+                    {previewStatus.title}
+                  </p>
+                  <p className="text-xs">{previewStatus.detail}</p>
+                </div>
               </>
             )}
           </div>
