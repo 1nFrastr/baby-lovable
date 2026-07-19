@@ -2,6 +2,12 @@
 import { isUnreliableCompileError } from "../preview-errors";
 import type { DaytonaProjectSandbox } from "./provider";
 
+/**
+ * Short HTTP probe while Next may still be booting.
+ * Ready responds in ms; hang/timeout ≈ not ready (expect 502 / connection fail).
+ */
+export const PREVIEW_HTTP_TIMEOUT_MS = 1_500;
+
 const COMPILE_MARKERS = [
   /Parsing CSS source code failed/i,
   /Failed to compile/i,
@@ -53,11 +59,12 @@ export function extractCompileError(content: string): string | null {
 export async function httpStatus(
   url: string,
   token?: string,
+  timeoutMs: number = PREVIEW_HTTP_TIMEOUT_MS,
 ): Promise<number> {
   try {
     const res = await fetch(url, {
       headers: token ? { "x-daytona-preview-token": token } : undefined,
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return res.status;
   } catch {

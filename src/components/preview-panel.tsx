@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { AppServerStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
+import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
+
+/** Survives React StrictMode remount — one warm POST per session per page load. */
+const previewWarmRequested = new Set<string>();
 
 /** Mirrors AppTestLatestStatus — kept local so the client bundle does not pull Node fs. */
 interface AppTestLatestStatus {
@@ -91,7 +94,7 @@ function appServerFromProjection(
         error: preview.error ?? "Dev server failed",
       };
     case "installing":
-      return { status: "installing" };
+      return { status: "installing", url: preview.url };
     case "needs_install":
       return { status: "needs_install" };
     case "stopped":
@@ -125,12 +128,21 @@ export function PreviewPanel({
   const preview: AppServerStatus = projection
     ? appServerFromProjection(projection.preview)
     : { status: "stopped" };
-  const sandboxStatus: SandboxStatus =
-    projection?.preview.sandbox ?? "missing";
   const runtimeAppTest = projection
     ? appTestFromProjection(projection.appTest)
     : { status: "idle" as const };
   const previewGeneration = projection?.preview.generation ?? 0;
+
+  /**
+   * Remount only on meaningful embed-state changes (not every checkPreview):
+   * warm/error → ready (clear early 502), or error fingerprint changes.
+   * URL + restart generation are already in the iframe key.
+   */
+  const [embedRemountNonce, setEmbedRemountNonce] = useState(0);
+  const prevEmbedStateRef = useRef<{
+    status: AppServerStatus["status"] | null;
+    error: string | null;
+  }>({ status: null, error: null });
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -145,6 +157,29 @@ export function PreviewPanel({
   const pipHoldTimerRef = useRef(0);
 
   const appTest = mergeChatAndPolledAppTest(runtimeAppTest, chatAppTest);
+
+  useEffect(() => {
+    const prev = prevEmbedStateRef.current;
+    const error =
+      preview.status === "error" ? (preview.error ?? "error") : null;
+    prevEmbedStateRef.current = { status: preview.status, error };
+
+    if (prev.status == null) {
+      return;
+    }
+
+    const becameReadyFromWarmOrError =
+      preview.status === "ready" &&
+      (prev.status === "installing" ||
+        prev.status === "starting" ||
+        prev.status === "error");
+    const errorChanged =
+      error !== prev.error && (error != null || prev.error != null);
+
+    if (becameReadyFromWarmOrError || errorChanged) {
+      setEmbedRemountNonce((n) => n + 1);
+    }
+  }, [preview.status, preview.status === "error" ? preview.error : null]);
 
   // Open Live View only when the chat stream transitions into a running
   // testPreview after Chat has hydrated history. Refresh / session switch
@@ -226,10 +261,15 @@ export function PreviewPanel({
     };
   }, []);
 
-  // Enter / re-enter session once: kick startPreview. invalidateRuntime must stay
-  // referentially stable (useCallback) or this effect loops with POST /preview.
+  // Enter / re-enter session once: kick startPreview.
+  // Module Set survives React Strict Mode remount double-effects.
   useEffect(() => {
     let cancelled = false;
+    const key = sessionId;
+    if (previewWarmRequested.has(key)) {
+      return;
+    }
+    previewWarmRequested.add(key);
 
     void (async () => {
       try {
@@ -242,7 +282,8 @@ export function PreviewPanel({
           invalidateRuntime(sessionId);
         }
       } catch {
-        // runtime subscription / invalidate will reflect stopped / error
+        // Allow retry on hard failure (network) for this session.
+        previewWarmRequested.delete(key);
       }
     })();
 
@@ -305,15 +346,21 @@ export function PreviewPanel({
     pipOpen &&
     (appTest.status === "running" || pipHoldActive) &&
     !pipDismissed;
-  // Keep iframe mounted across restart — public preview URL is stable; Next down is 502.
+  // Mount iframe as soon as the public proxy URL exists (installing/starting may
+  // still 502 while Next boots). Keep mounted across restart — URL is stable.
   const previewEmbedUrl =
-    preview.status === "ready"
+    preview.status === "ready" ||
+    preview.status === "starting" ||
+    preview.status === "installing"
       ? preview.url
-      : preview.status === "starting"
-        ? preview.url
-        : undefined;
-  // Remount only when URL or restart generation changes — not on checkPreview.
-  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}`;
+      : undefined;
+  // Remount only when URL, restart generation, or embed-state nonce changes.
+  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
+
+  // Unified warm copy for now (installing/starting/stopped) — easier to verify;
+  // phase-specific strings can return later.
+  const previewWarmLabel =
+    sandboxMode === "daytona" ? "正在启动远程预览…" : "正在启动预览…";
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
@@ -349,19 +396,11 @@ export function PreviewPanel({
               ? preview.url
               : exportError
                 ? exportError
-                : preview.status === "starting"
-                  ? sandboxMode === "daytona"
-                    ? "Starting Daytona preview…"
-                    : "Starting dev server…"
-                  : preview.status === "installing"
-                    ? "Installing dependencies…"
-                    : preview.status === "needs_install"
-                      ? "Project not ready"
-                      : preview.status === "error"
-                        ? preview.error
-                        : sandboxStatus === "stopped"
-                          ? "Sandbox stopped — waiting for agent to warm preview…"
-                          : "Waiting for agent to start preview…"}
+                : preview.status === "needs_install"
+                  ? "Project not ready"
+                  : preview.status === "error"
+                    ? preview.error
+                    : previewWarmLabel}
           </p>
         </div>
 
@@ -404,20 +443,7 @@ export function PreviewPanel({
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            {preview.status === "installing" ? (
-              <>
-                <span className="inline-flex gap-1">
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" />
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.1s]" />
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.2s]" />
-                </span>
-                <p>
-                  {sandboxMode === "daytona"
-                    ? "正在远程沙箱安装依赖（pnpm）…"
-                    : "正在安装依赖（pnpm）…"}
-                </p>
-              </>
-            ) : preview.status === "needs_install" ? (
+            {preview.status === "needs_install" ? (
               <>
                 <p className="font-medium text-zinc-700 dark:text-zinc-200">
                   项目尚未就绪
@@ -446,11 +472,7 @@ export function PreviewPanel({
                   <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.1s]" />
                   <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:0.2s]" />
                 </span>
-                <p>
-                  {sandboxMode === "daytona"
-                    ? "正在启动 Daytona 远程预览…"
-                    : "正在启动 dev server…"}
-                </p>
+                <p>{previewWarmLabel}</p>
               </>
             )}
           </div>

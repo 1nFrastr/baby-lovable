@@ -51,7 +51,7 @@ describe("canFastAttachSandbox", () => {
     ).toBe(false);
   });
 
-  it("rejects still-creating phases", () => {
+  it("rejects create before sandboxId is written", () => {
     expect(
       canFastAttachSandbox(
         snap({
@@ -61,14 +61,26 @@ describe("canFastAttachSandbox", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("allows attach once sandboxId exists during warm bootstrap/install", () => {
     expect(
       canFastAttachSandbox(
         snap({
           sandboxId: "sb_1",
           observed: "bootstrapping-workspace",
-          desired: "sandbox-ready",
+          desired: "preview-ready",
         }),
       ),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      canFastAttachSandbox(
+        snap({
+          sandboxId: "sb_1",
+          observed: "installing-deps",
+          desired: "preview-ready",
+        }),
+      ),
+    ).toBe(true);
   });
 });

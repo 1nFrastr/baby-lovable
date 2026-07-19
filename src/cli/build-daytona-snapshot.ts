@@ -40,9 +40,9 @@ function parseArgs(argv: string[]): BuildArgs {
   const args: BuildArgs = {
     force: false,
     name: getDaytonaSnapshotName() ?? DAYTONA_DEFAULT_SNAPSHOT,
-    // Lean defaults — Tier 1 org disk is only 30GiB total.
+    // Defaults match DAYTONA_DEFAULT_SNAPSHOT *-2g naming.
     cpu: 1,
-    memory: 1,
+    memory: 2,
     disk: 3,
   };
 
@@ -122,6 +122,9 @@ async function main(): Promise<void> {
     `Building snapshot "${name}" from ${DAYTONA_STARTER_BASE_IMAGE} (cpu=${cpu} memory=${memory}GiB disk=${disk}GiB)…`,
   );
   const image = buildStarterSnapshotImage();
+  console.log("\n--- Dockerfile (pnpm + node_modules baked at build time) ---");
+  console.log(image.dockerfile.trimEnd());
+  console.log("--- end Dockerfile ---\n");
 
   const snapshot = await daytona.snapshot.create(
     {
@@ -139,7 +142,13 @@ async function main(): Promise<void> {
     `\nSnapshot ready: ${snapshot.name} (state=${snapshot.state}, id=${snapshot.id})`,
   );
   console.log(`Resources: ${cpu} vCPU / ${memory} GiB / ${disk} GiB`);
+  console.log(
+    "Image includes: Node, git, pnpm (system PATH), starter sources, node_modules.",
+  );
   console.log(`Set DAYTONA_SNAPSHOT=${snapshot.name} (or rely on default).`);
+  console.log(
+    "Cold start should skip runtime `pnpm install` when this snapshot is used.",
+  );
 }
 
 main().catch((error) => {

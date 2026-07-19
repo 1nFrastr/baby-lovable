@@ -71,10 +71,16 @@ export async function writeFileStep(
   const sandbox = await getSandboxFromContext(context);
   await sandbox.fs.writeTextFile(input.path, input.content);
 
+  const { peekCompileErrorIfPreviewReady } = await import(
+    "@/lib/sandbox/preview"
+  );
+  const compileError = await peekCompileErrorIfPreviewReady(context.sessionId);
+
   return {
     ok: true,
     path: input.path,
     bytesWritten: new TextEncoder().encode(input.content).length,
+    ...(compileError ? { compileError } : {}),
   };
 }
 
@@ -162,11 +168,17 @@ export async function editFileStep(
 
   await sandbox.fs.writeTextFile(input.path, output);
 
+  const { peekCompileErrorIfPreviewReady } = await import(
+    "@/lib/sandbox/preview"
+  );
+  const compileError = await peekCompileErrorIfPreviewReady(context.sessionId);
+
   return {
     ok: true,
     path: input.path,
     replacements: input.replaceAll ? matches : 1,
     bytesWritten: new TextEncoder().encode(output).length,
+    ...(compileError ? { compileError } : {}),
   };
 }
 
@@ -357,52 +369,8 @@ export async function checkPreviewStep(
 ) {
   "use step";
 
-  const {
-    checkAppServer,
-    isTempFailure,
-    restartAppServer,
-  } = await import("@/lib/sandbox/preview");
-
-  if (input.restart) {
-    await restartAppServer(context.sessionId);
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
-  } else {
-    // Brief HMR settle after the agent's last edit.
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-  }
-
-  let report = await checkAppServer(context.sessionId);
-  let retried = false;
-
-  for (
-    let attempt = 0;
-    attempt < 4 &&
-    (report.status === "starting" || report.status === "installing");
-    attempt++
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-    report = await checkAppServer(context.sessionId);
-    retried = true;
-  }
-
-  if (!input.restart && isTempFailure(report)) {
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    report = await checkAppServer(context.sessionId);
-    retried = true;
-  }
-
-  return {
-    status: report.status,
-    url: report.url,
-    httpStatus: report.httpStatus,
-    buildError: report.buildError,
-    retried,
-    restarted: input.restart ?? false,
-    ok:
-      report.buildError === null &&
-      report.status === "ready" &&
-      (report.httpStatus === undefined || report.httpStatus < 500),
-  };
+  const { runCheckPreviewProbe } = await import("@/lib/sandbox/preview");
+  return runCheckPreviewProbe(context.sessionId, { restart: input.restart });
 }
 
 export async function testPreviewStep(

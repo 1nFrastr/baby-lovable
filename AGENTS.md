@@ -114,13 +114,13 @@ Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 | `listFiles` / `searchFiles` | Discover project structure |
 | `installPackage` / `installDependencies` | Add/remove packages or run `pnpm install` (whitelisted; no arbitrary shell) |
 | `runCommand` | **Deprecated** — only `pnpm install/add/remove` allowed; rejects curl/ls/find/etc. |
-| `checkPreview` | **Compile gate** — returns `{ ok, status, url, httpStatus, buildError }`; optional `restart: true` restarts the managed dev server (never delete `.next` manually) |
+| `checkPreview` | **Readiness gate** — HTTP probe only (`{ ok, status, url, httpStatus }`); does not read compile logs. Optional `restart: true` restarts the managed dev server (never delete `.next` manually). Not required after every small HMR edit once preview is ready. |
 
 **Verification loop the agent (and you) should follow:**
 
-1. Edit files with tools.
-2. After large edits, let HMR settle briefly, then call `checkPreview` — wait through `installing` / `starting` until `status: "ready"`.
-3. If `buildError` is non-null, fix source code and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
+1. Edit files with tools. After preview is ready, small edits rely on HMR; `writeFile` / `editFile` may return `compileError` when the log already shows a failure.
+2. Before finishing any turn that edited files, call `checkPreview` until `ok: true` at least once (required on first turn). After preview is already ready, small HMR edits may skip end-of-turn check — still check after deps/config/large rewrites or when `compileError` appears.
+3. If `compileError` is non-null, or `checkPreview` reports `httpStatus` >= 500, fix source code and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
 4. Optionally `curl` the preview URL or read workspace source files to assert behavior.
 
 Preview lifecycle is owned by `src/lib/sandbox/local/app-server.ts` / `daytona/app-server.ts` — agents must **not** run `pnpm dev` themselves.
@@ -150,7 +150,7 @@ When implementing or validating changes to the builder itself:
    - `.baby-lovable/sessions/<id>/agent.log` — CLI step/tool trace (or grep `[agent-trace]` from Web dev stdout)
    - `.baby-lovable/sessions/<id>/workspace/src/**` — generated source
    - `.baby-lovable/sessions/<id>/workspace/.next/dev/logs/next-development.log` — compile details
-3. **Assert preview health** — last `checkPreview` tool output in `session.json` should have `ok: true` and `buildError: null`; or call `GET /api/sessions/<id>/preview` while the host app is running.
+3. **Assert preview health** — last `checkPreview` tool output in `session.json` should have `ok: true` (and preferably `httpStatus` < 500); or call `GET /api/sessions/<id>/preview` while the host app is running.
 4. **Re-run on same session** (`-s <id> -p "…"`) to test iterative edits and regression fixes.
 5. **List sessions** (`npm run agent -- -l`) to correlate IDs with titles and timestamps.
 

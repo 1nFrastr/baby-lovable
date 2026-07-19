@@ -44,11 +44,9 @@ export async function runAgentTurn({
 }: RunAgentOptions): Promise<RunAgentResult> {
   const modelMessages = await convertToModelMessages(messages);
 
-  // Warm up the preview (install deps + boot dev server) in the background so
-  // it is ready by the time the agent calls checkPreview — the agent should
-  // never have to run `pnpm install` / `pnpm dev` itself.
-  const { startPreview } = await import("@/lib/sandbox/preview");
-  startPreview(sessionId);
+  // Non-blocking prelude: preview-ready via reconciler (same as web chat).
+  const { kickRuntimeDesired } = await import("@/lib/sandbox/preview");
+  await kickRuntimeDesired(sessionId, "preview-ready");
 
   const previousModelCount = modelMessages.length;
 

@@ -94,7 +94,7 @@ export const builderTools = {
   }),
   writeFile: tool({
     description:
-      "Create or overwrite a text file in the project workspace. Only src/**, public/**, and root config files are writable.",
+      "Create or overwrite a text file in the project workspace. Only src/**, public/**, and root config files are writable. When preview is already ready, may include compileError from the live next log — fix and checkPreview if present.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
       content: z.string().describe("Full file contents to write"),
@@ -104,7 +104,7 @@ export const builderTools = {
   }),
   editFile: tool({
     description:
-      "Edit a text file by replacing an exact string. Prefer this for small changes to existing files instead of rewriting the whole file. Only src/**, public/**, and root config files are editable.",
+      "Edit a text file by replacing an exact string. Prefer this for small changes to existing files instead of rewriting the whole file. Only src/**, public/**, and root config files are editable. When preview is already ready, may include compileError from the live next log — fix and checkPreview if present.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
       oldString: z
@@ -194,7 +194,7 @@ export const builderTools = {
   }),
   checkPreview: tool({
     description:
-      "Probe the live app-server preview for compile/runtime errors (does not start preview). Call after editing files. Preview is warmed at turn start — if status is installing/starting, wait and call again. Set restart=true to restart the managed app server when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
+      "Probe preview readiness via HTTP (does not start preview; does not read compile logs). Compile errors come from writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/user asks. If status is installing/starting, wait and call again — do not finish while still warming. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
     inputSchema: z.object({
       restart: z
         .boolean()

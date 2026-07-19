@@ -56,7 +56,7 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 ### 1.3 核心产品闭环
 
 ```
-编辑源码 → checkPreview（编译门控，默认）
+编辑源码 → 小改靠 HMR；首轮/大改/compileError 时 checkPreview
         → testPreview（UI 冒烟，显式 / Auto Test，仅 Daytona）
         → 会话落库（或 session.json）+ workspace git checkpoint
 ```
@@ -74,7 +74,7 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 | UI 测试 | **Cloudflare Browser Run** + Playwright | 本地 Playwright / 仅靠编译 | localhost 对云端浏览器不可达；远程 Preview + Live View 才构成「可见」的自动测 |
 | 会话存储 | Local 文件 **或** Supabase | 一开始就绑定 DB | 开发零摩擦；生产用同一门面切换 |
 | 代码版本 | Workspace + **每 turn git commit**（+ Daytona Volume） | 把源码塞进 DB | 对话与代码分真相源；便于 diff / 导出 / 恢复 |
-| 验证策略 | `checkPreview` 默认；`testPreview` opt-in | Agent 每步都跑浏览器 | 控制成本与延迟；编译错误覆盖大多数失败 |
+| 验证策略 | `checkPreview` 按需（首轮/大改/compileError）；`testPreview` opt-in | Agent 每步都跑浏览器 | 控制成本与延迟；编译错误覆盖大多数失败 |
 
 ---
 

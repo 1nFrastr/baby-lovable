@@ -20,8 +20,10 @@ export type DaytonaDesiredState =
 export type DaytonaObservedPhase =
   | "missing"
   | "creating-sandbox"
+  /** @deprecated Legacy — snapshot path never seeds; treated as workspace-ready. */
   | "bootstrapping-workspace"
   | "workspace-ready"
+  /** @deprecated Legacy — never written; treated as starting. */
   | "installing-deps"
   | "starting-devserver"
   | "preview-ready"
@@ -115,7 +117,8 @@ export function deriveAppServerStatus(
 
   switch (snapshot.observed) {
     case "installing-deps":
-      return { status: "installing" };
+      // Legacy — snapshot path no longer installs at runtime.
+      return starting();
     case "starting-devserver":
       return starting();
     case "preview-ready":

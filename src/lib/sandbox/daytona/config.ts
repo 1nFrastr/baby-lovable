@@ -16,9 +16,9 @@ export function getDaytonaIdleMinutes(): number {
 
 /**
  * Prebuilt snapshot with starter + pnpm + node_modules.
- * Empty string disables snapshot (falls back to runtime seed).
- * Build with: `npm run build:daytona-snapshot`
- * Default resources: 1 vCPU / 2 GiB / 3 GiB (enough for next-server + pnpm add).
+ * Empty string disables snapshot (seed sources only — no runtime dep install).
+ * Build with: `npm run build:daytona-snapshot -- --force`
+ * Default resources at build time: 1 vCPU / 2 GiB / 3 GiB.
  */
 export const DAYTONA_DEFAULT_SNAPSHOT = "baby-lovable-nextjs-starter-2g";
 
@@ -28,6 +28,16 @@ export function getDaytonaSnapshotName(): string | null {
   }
   const name = process.env.DAYTONA_SNAPSHOT?.trim() || DAYTONA_DEFAULT_SNAPSHOT;
   return name || null;
+}
+
+/**
+ * When a snapshot name is configured but `daytona.create({ snapshot })` fails,
+ * default is fail-hard (empty image has no baked deps; runtime no longer installs).
+ * Set `DAYTONA_SNAPSHOT_FALLBACK=1` to boot a default image anyway.
+ */
+export function allowDaytonaSnapshotFallback(): boolean {
+  const raw = process.env.DAYTONA_SNAPSHOT_FALLBACK?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
 }
 
 export function isDaytonaConfigured(): boolean {

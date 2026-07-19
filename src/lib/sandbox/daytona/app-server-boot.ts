@@ -1,4 +1,4 @@
-/** App-server boot: atomic install / start / stop (no orchestration loops). */
+/** App-server boot: start / stop (no runtime pnpm / node_modules install). */
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { DAYTONA_WORKSPACE_ROOT, getDaytonaDevPort } from "./config";
 import { resolvePackageManager } from "../package-manager";
@@ -17,23 +17,9 @@ export function formatStartError(error: unknown): string {
     : "Daytona 预览启动失败，请稍后重试或联系作者。";
 }
 
-export async function installDeps(
-  sandbox: DaytonaProjectSandbox,
-  sessionId: string,
-): Promise<void> {
-  const pm = resolvePackageManager("daytona");
-  logDaytonaBootstrap(sessionId, "preview", pm.install);
-  const result = await sandbox.process.executeCommand(pm.install, ".", undefined, 600);
-  if (result.exitCode !== 0) {
-    const detail =
-      (result.stdout || result.stderr || "").trim() || "unknown install failure";
-    throw new Error(`pnpm install failed: ${detail.slice(-2000)}`);
-  }
-}
-
 /**
  * Create remote dev session and start `pnpm dev`.
- * Does not wait for preview readiness — reconciler + observer handle that.
+ * Snapshot must already include pnpm + node_modules — no runtime install.
  */
 export async function startDevSession(
   sandbox: DaytonaProjectSandbox,

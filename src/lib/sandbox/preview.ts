@@ -5,11 +5,18 @@
  *
  * Read:  getSandboxStatus / getAppServerStatus / getPreviewUrlStatus / getAllStatus
  *        peekAllStatus (durable snapshot, no remote probe) / checkAppServer / getBuildError
- * Write: startPreview / warmPreview / startAppServer / restartAppServer / stopAppServer / deleteSandbox
+ * Write: kickRuntimeDesired (non-blocking prelude) / startPreview / startAppServer /
+ *        restartAppServer / stopAppServer / deleteSandbox
  *
  * Mode (local | daytona) is chosen once via createPreviewBackend / getPreviewBackend.
+ *
+ * Warm model (Daytona):
+ *   session create / first connect → sandbox-ready, wait:false
+ *   first turn / preview open     → preview-ready, wait:false
+ *   AI loop never awaits warm; after() only keeps the isolate alive for reconcile.
  */
 
+import type { DaytonaDesiredState } from "./daytona/runtime-state";
 import { getSession } from "@/lib/session/store";
 import { createPreviewBackend, getPreviewBackend } from "./preview-backend";
 import { isTempFailure as isLocalTempFailure } from "./preview-errors";
@@ -90,17 +97,59 @@ export async function peekAllStatus(sessionId: string): Promise<AllStatus> {
   return all;
 }
 
+export type RuntimeWarmDesired = Extract<
+  DaytonaDesiredState,
+  "sandbox-ready" | "preview-ready"
+>;
+
 /**
- * Enter/re-enter session: startPreview if needed, return status immediately.
- * Does not await Daytona observe — uses peekAllStatus.
+ * Non-blocking prelude: submit desired via reconciler and return immediately.
+ * Does not await VM create / install / next — AI loop must not wait on this.
  */
-export async function warmPreview(sessionId: string): Promise<AllStatus> {
-  startPreview(sessionId);
+export async function kickRuntimeDesired(
+  sessionId: string,
+  desired: RuntimeWarmDesired,
+): Promise<AllStatus> {
+  const session = await getSession(sessionId);
+  if ((session?.sandboxMode ?? "local") === "daytona") {
+    const { ensureDesiredState } = await import("./daytona/runtime-reconciler");
+    await ensureDesiredState(sessionId, desired, { wait: false });
+  } else if (desired === "preview-ready") {
+    startPreview(sessionId);
+  }
   return peekAllStatus(sessionId);
 }
 
 /**
- * Check app server health (HTTP + buildError).
+ * Await reconciler convergence. Call from Next.js `after()` only — keeps the
+ * serverless isolate alive so wait:false background work is not frozen mid-create.
+ */
+export async function awaitRuntimeDesired(
+  sessionId: string,
+  desired: RuntimeWarmDesired,
+): Promise<void> {
+  const session = await getSession(sessionId);
+  if (!session || session.sandboxMode !== "daytona") {
+    if (desired === "preview-ready") {
+      startPreview(sessionId);
+    }
+    return;
+  }
+  const { ensureDesiredState } = await import("./daytona/runtime-reconciler");
+  await ensureDesiredState(sessionId, desired, { wait: true });
+}
+
+/**
+ * @deprecated Prefer {@link kickRuntimeDesired}("preview-ready").
+ * Enter/re-enter session: non-blocking preview-ready prelude.
+ */
+export async function warmPreview(sessionId: string): Promise<AllStatus> {
+  return kickRuntimeDesired(sessionId, "preview-ready");
+}
+
+/**
+ * Check app server health (HTTP readiness).
+ * Daytona: does not read compile logs (those are on write/edit peek).
  * Does not start sandbox or app server.
  */
 export async function checkAppServer(
@@ -113,6 +162,133 @@ export async function getBuildError(
   sessionId: string,
 ): Promise<string | null> {
   return (await getPreviewBackend(sessionId)).getBuildError(sessionId);
+}
+
+/**
+ * Cheap post-edit hint: only when app server is already ready, read compile
+ * error from logs (no HTTP probe, settle, or retries). Returns null when
+ * preview is still warming so bootstrap I/O is not slowed.
+ */
+export async function peekCompileErrorIfPreviewReady(
+  sessionId: string,
+): Promise<string | null> {
+  const backend = await getPreviewBackend(sessionId);
+  const status = await backend.getAppServerStatus(sessionId);
+  if (status.status !== "ready") {
+    return null;
+  }
+  return backend.getBuildError(sessionId);
+}
+
+export type CheckPreviewProbeResult = {
+  status: AppServerCheck["status"];
+  url?: string;
+  httpStatus?: number;
+  buildError: string | null;
+  retried: boolean;
+  restarted: boolean;
+  ok: boolean;
+};
+
+function toCheckPreviewResult(
+  report: AppServerCheck,
+  retried: boolean,
+  restarted: boolean,
+): CheckPreviewProbeResult {
+  return {
+    status: report.status,
+    url: report.url,
+    httpStatus: report.httpStatus,
+    buildError: report.buildError,
+    retried,
+    restarted,
+    ok:
+      report.buildError === null &&
+      report.status === "ready" &&
+      (report.httpStatus === undefined || report.httpStatus < 500),
+  };
+}
+
+const defaultSleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Orchestrate checkPreview probe: skip settle/warm retries when already ready.
+ */
+export async function runCheckPreviewProbe(
+  sessionId: string,
+  options: {
+    restart?: boolean;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<CheckPreviewProbeResult> {
+  const restart = options.restart ?? false;
+  const sleep = options.sleep ?? defaultSleep;
+  const t0 = Date.now();
+  let checkCalls = 0;
+
+  const timedCheck = async (label: string) => {
+    const t = Date.now();
+    checkCalls += 1;
+    const report = await checkAppServer(sessionId);
+    console.warn(
+      `[checkPreview] session=${sessionId} ${label} #${checkCalls} ms=${Date.now() - t} status=${report.status} http=${report.httpStatus ?? "n/a"}`,
+    );
+    return report;
+  };
+
+  if (restart) {
+    await restartAppServer(sessionId);
+    await sleep(3_000);
+  }
+
+  let report = await timedCheck("first");
+  let retried = false;
+
+  // Fast path: already ready — no HMR settle, no installing/starting loop.
+  // Do not bump iframe generation here: same URL + healthy ready is not a new
+  // embed state (avoids checkPreview-driven refresh loops).
+  if (!restart && report.status === "ready") {
+    if (isTempFailure(report)) {
+      await sleep(1_500);
+      report = await timedCheck("temp-retry");
+      retried = true;
+    }
+    console.warn(
+      `[checkPreview] session=${sessionId} done ms=${Date.now() - t0} path=ready-fast checks=${checkCalls}`,
+    );
+    return toCheckPreviewResult(report, retried, restart);
+  }
+
+  // Warm path: brief settle, then poll until ready / attempts exhausted.
+  if (!restart) {
+    await sleep(1_000);
+    report = await timedCheck("after-settle");
+  }
+
+  for (
+    let attempt = 0;
+    attempt < 4 &&
+    (report.status === "starting" || report.status === "installing");
+    attempt++
+  ) {
+    await sleep(2_000);
+    report = await timedCheck(`warm-poll-${attempt}`);
+    retried = true;
+  }
+
+  if (!restart && isTempFailure(report)) {
+    await sleep(1_500);
+    report = await timedCheck("temp-retry");
+    retried = true;
+  }
+
+  console.warn(
+    `[checkPreview] session=${sessionId} done ms=${Date.now() - t0} path=warm status=${report.status} checks=${checkCalls}`,
+  );
+  // Iframe remount is driven by URL / restart generation / PreviewPanel
+  // warm|error→ready detection — not by every successful checkPreview.
+  return toCheckPreviewResult(report, retried, restart);
 }
 
 /** Background: sandbox → app server → preview URL. Call at agent turn start. */
