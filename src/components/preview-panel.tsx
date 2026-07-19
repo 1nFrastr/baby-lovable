@@ -7,6 +7,8 @@ import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
+import { WorkspaceFileExplorer } from "./workspace-file-explorer";
+
 /** Survives React StrictMode remount — one warm POST per session per page load. */
 const previewWarmRequested = new Set<string>();
 
@@ -43,6 +45,8 @@ const PIP_HOLD_AFTER_DONE_MS = 10_000;
 const READY_EMBED_RELOAD_DELAY_MS = 1_000;
 /** Let the final HMR update settle before refreshing after an agent turn. */
 const TURN_EMBED_RELOAD_DELAY_MS = 300;
+
+type PreviewPanelTab = "preview" | "files";
 
 function withEmbedCacheBust(url: string, nonce: number): string {
   try {
@@ -163,6 +167,14 @@ export function PreviewPanel({
   const [previewActionError, setPreviewActionError] = useState<string | null>(
     null,
   );
+  const [panelTab, setPanelTab] = useState<PreviewPanelTab>("preview");
+  /** Session id for which Files explorer stays mounted (avoids refetch on tab switch). */
+  const [filesMountSessionId, setFilesMountSessionId] = useState<string | null>(
+    null,
+  );
+  /** Bumped when an agent turn finishes — explorer re-lists from sandbox. */
+  const [filesRefreshKey, setFilesRefreshKey] = useState(0);
+  const filesMounted = filesMountSessionId === sessionId;
   const prevAgentRunStatusRef = useRef<
     SessionRuntimeProjection["run"]["status"] | null
   >(null);
@@ -198,6 +210,7 @@ export function PreviewPanel({
 
   // HMR may rerender React while leaving a failed or stale stylesheet link in
   // place. Refresh once when each live agent turn leaves the running state.
+  // Also re-sync the read-only file explorer from sandbox after the turn.
   useEffect(() => {
     const previous = prevAgentRunStatusRef.current;
     prevAgentRunStatusRef.current = runStatus;
@@ -207,7 +220,15 @@ export function PreviewPanel({
       (runStatus === "done" ||
         runStatus === "error" ||
         runStatus === "idle");
-    if (!turnFinished || !readyPreviewUrl) {
+    if (!turnFinished) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      setFilesRefreshKey((key) => key + 1);
+    });
+
+    if (!readyPreviewUrl) {
       return;
     }
 
@@ -464,9 +485,41 @@ export function PreviewPanel({
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-              Preview
-            </p>
+            <div
+              className="flex items-center rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
+              role="tablist"
+              aria-label="Preview panel"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={panelTab === "preview"}
+                onClick={() => setPanelTab("preview")}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  panelTab === "preview"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }`}
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={panelTab === "files"}
+                onClick={() => {
+                  setFilesMountSessionId(sessionId);
+                  setPanelTab("files");
+                }}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  panelTab === "files"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }`}
+              >
+                Files
+              </button>
+            </div>
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
                 sandboxMode === "daytona"
@@ -489,182 +542,220 @@ export function PreviewPanel({
                 : "truncate text-zinc-500"
             }`}
             title={
-              preview.status === "ready" && iframeLoaded
+              panelTab === "preview" &&
+              preview.status === "ready" &&
+              iframeLoaded
                 ? preview.url
                 : undefined
             }
           >
-            {exportError ?? toolbarStatus}
+            {panelTab === "files"
+              ? "只读文件树 · 一次拉取全量 meta，对话结束后自动同步"
+              : (exportError ?? toolbarStatus)}
           </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              void handleExport();
-            }}
-            disabled={exporting || sandboxMode === "local"}
-            title={
-              sandboxMode === "local"
-                ? "Local export is not implemented yet"
-                : "Download workspace as git archive zip"
-            }
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-          >
-            {exporting ? "Exporting…" : "Export"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void handleRestart();
-            }}
-            disabled={previewAction !== null}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-          >
-            {previewAction === "restart" ? "Restarting…" : "Restart"}
-          </button>
+          {panelTab === "files" ? (
+            <button
+              type="button"
+              onClick={() => setFilesRefreshKey((key) => key + 1)}
+              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Sync
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleExport();
+                }}
+                disabled={exporting || sandboxMode === "local"}
+                title={
+                  sandboxMode === "local"
+                    ? "Local export is not implemented yet"
+                    : "Download workspace as git archive zip"
+                }
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                {exporting ? "Exporting…" : "Export"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleRestart();
+                }}
+                disabled={previewAction !== null}
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                {previewAction === "restart" ? "Restarting…" : "Restart"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
-        {previewEmbedUrl ? (
-          <>
-            <div
-              className={`absolute inset-0 z-[1] flex flex-col items-center justify-center gap-3 px-6 text-center transition-opacity duration-300 ${
-                iframeLoaded
-                  ? "pointer-events-none opacity-0"
-                  : "opacity-100"
-              }`}
-              role="status"
-              aria-live="polite"
-              aria-hidden={iframeLoaded}
-            >
-              <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                  {previewStatus.title}
-                </p>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {previewStatus.detail}
-                </p>
-              </div>
-            </div>
-            <iframe
-              key={previewIframeKey}
-              src={previewIframeSrc}
-              title="App preview"
-              onLoad={() => setLoadedIframeKey(previewIframeKey)}
-              className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${
-                iframeLoaded ? "opacity-100" : "opacity-0"
-              }`}
-              allow="accelerometer; camera; microphone; clipboard-write"
+      <div className="relative min-h-0 flex-1">
+        <div
+          className={`absolute inset-0 bg-white dark:bg-zinc-950 ${
+            panelTab === "files" ? "" : "hidden"
+          }`}
+          aria-hidden={panelTab !== "files"}
+        >
+          {filesMounted ? (
+            <WorkspaceFileExplorer
+              key={sessionId}
+              sessionId={sessionId}
+              refreshKey={filesRefreshKey}
             />
-          </>
-        ) : (
-          <div
-            className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400"
-            role={displayError ? "alert" : "status"}
-            aria-live="polite"
-          >
-            {preview.status === "needs_install" ? (
-              <>
-                <p className="font-medium text-zinc-700 dark:text-zinc-200">
-                  项目尚未就绪
-                </p>
-                <p>缺少 package.json，无法启动预览。</p>
-              </>
-            ) : displayError ? (
-              <>
-                <p className="font-medium text-red-600 dark:text-red-400">
-                  暂时无法打开预览
-                </p>
-                <p className="max-w-md whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
-                  {displayError}
-                </p>
-                {displayError.includes("联系作者") ? (
-                  <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
-                    这是平台侧 Daytona 资源限制，需要作者在控制台清理闲置
-                    Sandbox 或升级配额后，再点 Restart 重试。
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  disabled={previewAction !== null || runtimeLoading}
-                  className="mt-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  {previewAction ? "正在重试…" : "重试"}
-                </button>
-              </>
-            ) : (
-              <>
+          ) : null}
+        </div>
+
+        <div
+          className={`absolute inset-0 bg-zinc-100 dark:bg-zinc-950 ${
+            panelTab === "preview" ? "" : "hidden"
+          }`}
+          aria-hidden={panelTab !== "preview"}
+        >
+          {previewEmbedUrl ? (
+            <>
+              <div
+                className={`absolute inset-0 z-[1] flex flex-col items-center justify-center gap-3 px-6 text-center transition-opacity duration-300 ${
+                  iframeLoaded
+                    ? "pointer-events-none opacity-0"
+                    : "opacity-100"
+                }`}
+                role="status"
+                aria-live="polite"
+                aria-hidden={iframeLoaded}
+              >
                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
                 <div className="space-y-1">
-                  <p className="font-medium text-zinc-700 dark:text-zinc-200">
+                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
                     {previewStatus.title}
                   </p>
-                  <p className="text-xs">{previewStatus.detail}</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {previewStatus.detail}
+                  </p>
                 </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {showPip && appTest.liveViewUrl ? (
-          <div className="absolute bottom-3 right-3 z-10 flex w-[320px] flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-2 py-1.5 dark:border-zinc-700">
-              <p className="truncate text-[11px] font-medium text-zinc-700 dark:text-zinc-200">
-                App Test Live View
-              </p>
-              <div className="flex shrink-0 items-center gap-1">
-                <a
-                  href={appTest.liveViewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-zinc-100 dark:text-blue-400 dark:hover:bg-zinc-800"
-                >
-                  Open
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPipDismissed(true);
-                    setPipOpen(false);
-                    window.clearTimeout(pipHoldTimerRef.current);
-                    setPipHoldActive(false);
-                    pendingPipOpenRef.current = false;
-                  }}
-                  className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  aria-label="Close Live View"
-                >
-                  ✕
-                </button>
               </div>
+              <iframe
+                key={previewIframeKey}
+                src={previewIframeSrc}
+                title="App preview"
+                onLoad={() => setLoadedIframeKey(previewIframeKey)}
+                className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${
+                  iframeLoaded ? "opacity-100" : "opacity-0"
+                }`}
+                allow="accelerometer; camera; microphone; clipboard-write"
+              />
+            </>
+          ) : (
+            <div
+              className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400"
+              role={displayError ? "alert" : "status"}
+              aria-live="polite"
+            >
+              {preview.status === "needs_install" ? (
+                <>
+                  <p className="font-medium text-zinc-700 dark:text-zinc-200">
+                    项目尚未就绪
+                  </p>
+                  <p>缺少 package.json，无法启动预览。</p>
+                </>
+              ) : displayError ? (
+                <>
+                  <p className="font-medium text-red-600 dark:text-red-400">
+                    暂时无法打开预览
+                  </p>
+                  <p className="max-w-md whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
+                    {displayError}
+                  </p>
+                  {displayError.includes("联系作者") ? (
+                    <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
+                      这是平台侧 Daytona 资源限制，需要作者在控制台清理闲置
+                      Sandbox 或升级配额后，再点 Restart 重试。
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    disabled={previewAction !== null || runtimeLoading}
+                    className="mt-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    {previewAction ? "正在重试…" : "重试"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+                  <div className="space-y-1">
+                    <p className="font-medium text-zinc-700 dark:text-zinc-200">
+                      {previewStatus.title}
+                    </p>
+                    <p className="text-xs">{previewStatus.detail}</p>
+                  </div>
+                </>
+              )}
             </div>
-            <iframe
-              key={appTest.liveViewUrl}
-              src={appTest.liveViewUrl}
-              title="App test Live View"
-              className="h-[200px] w-full border-0 bg-zinc-950"
-              allow="clipboard-read; clipboard-write"
-            />
-          </div>
-        ) : null}
+          )}
 
-        {sandboxMode === "daytona" &&
-        appTest.status === "running" &&
-        appTest.liveViewUrl &&
-        pipDismissed ? (
-          <a
-            href={appTest.liveViewUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="absolute bottom-3 right-3 z-10 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-          >
-            Open Live View
-          </a>
-        ) : null}
+          {showPip && appTest.liveViewUrl ? (
+            <div className="absolute bottom-3 right-3 z-10 flex w-[320px] flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+              <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-2 py-1.5 dark:border-zinc-700">
+                <p className="truncate text-[11px] font-medium text-zinc-700 dark:text-zinc-200">
+                  App Test Live View
+                </p>
+                <div className="flex shrink-0 items-center gap-1">
+                  <a
+                    href={appTest.liveViewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-zinc-100 dark:text-blue-400 dark:hover:bg-zinc-800"
+                  >
+                    Open
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPipDismissed(true);
+                      setPipOpen(false);
+                      window.clearTimeout(pipHoldTimerRef.current);
+                      setPipHoldActive(false);
+                      pendingPipOpenRef.current = false;
+                    }}
+                    className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    aria-label="Close Live View"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+              <iframe
+                key={appTest.liveViewUrl}
+                src={appTest.liveViewUrl}
+                title="App test Live View"
+                className="h-[200px] w-full border-0 bg-zinc-950"
+                allow="clipboard-read; clipboard-write"
+              />
+            </div>
+          ) : null}
+
+          {sandboxMode === "daytona" &&
+          appTest.status === "running" &&
+          appTest.liveViewUrl &&
+          pipDismissed ? (
+            <a
+              href={appTest.liveViewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="absolute bottom-3 right-3 z-10 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+            >
+              Open Live View
+            </a>
+          ) : null}
+        </div>
       </div>
     </section>
   );
