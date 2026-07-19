@@ -39,9 +39,6 @@ export interface Session {
   /** Whether a workflow turn is in-flight; drives client resume behaviour. */
   runStatus: SessionRunStatus;
   sandboxMode: SandboxMode;
-  gitRemote?: string;
-  /** Last successful git commit in the workspace. */
-  lastCommitSha?: string;
   /** Soft-delete timestamp — reserved for Supabase row lifecycle. */
   deletedAt?: string | null;
 }
@@ -71,8 +68,6 @@ export interface UpdateSessionInput {
   lastRunId?: string | null;
   runStatus?: SessionRunStatus;
   sandboxMode?: SandboxMode;
-  gitRemote?: string;
-  lastCommitSha?: string;
   deletedAt?: string | null;
 }
 

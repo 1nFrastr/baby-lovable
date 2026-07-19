@@ -13,7 +13,6 @@
     "cleanup-previews": "tsx scripts/cleanup-preview-servers.ts",
     "build:daytona-snapshot": "tsx src/cli/build-daytona-snapshot.ts",
     "test:daytona-fs": "tsx src/cli/test-daytona-fs.ts",
-    "test:daytona-git": "tsx src/cli/test-daytona-git.ts",
     "test:daytona-export": "tsx src/cli/test-daytona-export.ts",
     "test:app-preview": "tsx src/cli/test-app-preview.ts",
     "workflow:web": "workflow web"

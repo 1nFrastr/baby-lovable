@@ -49,7 +49,7 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 
 ### 1.2 三条工程原则（贯穿始终）
 
-1. **接口先行**：`ProjectSandbox`（fs / process / git）让 local 与 Daytona 共用工具面。
+1. **接口先行**：`ProjectSandbox`（fs / process）让 local 与 Daytona 共用工具面。
 2. **文件优先**：开发默认无登录、无数据库；`.baby-lovable/` 即真相源。
 3. **CLI 先行**：`npm run agent -- -p "…"` 与 Web 共用 Agent，方便 Cursor 编码 Agent 做端到端自回归。
 
@@ -58,7 +58,7 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 ```
 编辑源码 → 小改靠 HMR；首轮/大改/compileError 时 checkPreview
         → testPreview（UI 冒烟，显式 / Auto Test，仅 Daytona）
-        → 会话落库（或 session.json）+ workspace git checkpoint
+        → 会话落库（或 session.json）
 ```
 
 ---
@@ -70,10 +70,10 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 | 决策 | 选择 | 不选 / 推迟 | 一句话理由 |
 | --- | --- | --- | --- |
 | Agent 运行时 | Vercel AI SDK v7 **WorkflowAgent** + Workflow DevKit | 自建 Redis/Bull 队列 + 手写状态机 | 流式续传、step 重试、与 Vercel 一体；长 turn 天然 durable |
-| 远程沙盒 | **Daytona** | E2B 等 | 一套 SDK 覆盖 fs/process/git/preview/volume/snapshot；公开 Preview URL 可被 Browser Run 访问 |
+| 远程沙盒 | **Daytona** | E2B 等 | 一套 SDK 覆盖 fs/process/preview/volume/snapshot；公开 Preview URL 可被 Browser Run 访问 |
 | UI 测试 | **Cloudflare Browser Run** + Playwright | 本地 Playwright / 仅靠编译 | localhost 对云端浏览器不可达；远程 Preview + Live View 才构成「可见」的自动测 |
 | 会话存储 | Local 文件 **或** Supabase | 一开始就绑定 DB | 开发零摩擦；生产用同一门面切换 |
-| 代码版本 | Workspace + **每 turn git commit**（+ Daytona Volume） | 把源码塞进 DB | 对话与代码分真相源；便于 diff / 导出 / 恢复 |
+| 代码版本 | Workspace 工作树（+ Daytona Volume） | 把源码塞进 DB | 对话与代码分真相源；便于导出 / 恢复 |
 | 验证策略 | `checkPreview` 按需（首轮/大改/compileError）；`testPreview` opt-in | Agent 每步都跑浏览器 | 控制成本与延迟；编译错误覆盖大多数失败 |
 
 ---

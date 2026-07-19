@@ -5,10 +5,8 @@ import {
   type FileInfo,
   type ProjectSandbox,
   type SandboxFileSystem,
-  type SandboxGitRunner,
   type SandboxProcessRunner,
 } from "../types";
-import { createGitRunner } from "../git-runner";
 import { DAYTONA_WORKSPACE_ROOT } from "./config";
 
 function normalizeRelativePath(targetPath: string): string {
@@ -158,7 +156,6 @@ export class DaytonaProjectSandbox implements ProjectSandbox {
   readonly description: string;
   readonly fs: SandboxFileSystem;
   readonly process: SandboxProcessRunner;
-  readonly git: SandboxGitRunner;
   readonly sdkSandbox: Sandbox;
 
   constructor(sessionId: string, sdkSandbox: Sandbox) {
@@ -168,6 +165,5 @@ export class DaytonaProjectSandbox implements ProjectSandbox {
     this.description = `Daytona sandbox ${sdkSandbox.id} for session ${sessionId}`;
     this.fs = new DaytonaSandboxFileSystem(sdkSandbox);
     this.process = new DaytonaSandboxProcessRunner(sdkSandbox);
-    this.git = createGitRunner(this);
   }
 }

@@ -59,12 +59,6 @@ function rowToSession(row: SessionRow): Session {
   if (row.last_run_id) {
     session.lastRunId = row.last_run_id;
   }
-  if (row.git_remote) {
-    session.gitRemote = row.git_remote;
-  }
-  if (row.last_commit_sha) {
-    session.lastCommitSha = row.last_commit_sha;
-  }
 
   return session;
 }
@@ -96,9 +90,9 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     last_run_id: session.lastRunId ?? null,
     run_status: session.runStatus,
     sandbox_mode: session.sandboxMode,
-    git_remote: session.gitRemote ?? null,
+    git_remote: null,
     daytona_sandbox_id: null,
-    last_commit_sha: session.lastCommitSha ?? null,
+    last_commit_sha: null,
     deleted_at: session.deletedAt ?? null,
   };
 }
@@ -238,12 +232,6 @@ export async function updateSessionSupabase(
   }
   if (input.sandboxMode !== undefined) {
     patch.sandbox_mode = updated.sandboxMode;
-  }
-  if (input.gitRemote !== undefined) {
-    patch.git_remote = updated.gitRemote ?? null;
-  }
-  if (input.lastCommitSha !== undefined) {
-    patch.last_commit_sha = updated.lastCommitSha ?? null;
   }
   if (input.deletedAt !== undefined) {
     patch.deleted_at = updated.deletedAt ?? null;

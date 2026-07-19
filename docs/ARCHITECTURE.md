@@ -163,12 +163,11 @@ Daytona signed Preview URL
 ProjectSandbox {
   fs: SandboxFileSystem
   process: SandboxProcessRunner
-  git: SandboxGitRunner
 }
 ```
 
-- Local：Node `fs` + `spawn` + shell git
-- Daytona：SDK fs / process / git
+- Local：Node `fs` + `spawn`
+- Daytona：SDK fs / process
 
 上层 tools **只依赖接口**。这是渐进加 Daytona 时没有重写 Agent 的前提。
 
