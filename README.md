@@ -24,7 +24,7 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 ### 亮点技术栈
 
 - **Agent**：Vercel AI SDK v7 `WorkflowAgent` + Workflow DevKit（durable 多步、流式续传）
-- **沙盒**：Daytona 远程 workspace（Volume 持久化 / Snapshot 冷启动 / signed Preview）
+- **沙盒**：Daytona 远程 workspace（Snapshot 冷启动 / Preview URL）
 - **自动测**：Cloudflare Browser Run + Playwright Live View（对云端 Preview 可见地点测）
 - **宿主**：Next.js 16 · Supabase Auth/Postgres（多用户）· 本地文件模式可零后端开发 · 同款 CLI 自回归
 
@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 | P1 | 可自验证 | CLI one-shot + 托管 `pnpm dev` + `checkPreview` |
 | P2 | 可续聊 / 可恢复 | Session resume、draft、runStatus |
 | P3 | 可多人 / 可部署 | Supabase Auth + Postgres（本地模式仍可关掉） |
-| P4 | 可隔离执行 | Daytona sandbox + Volume + signed Preview |
+| P4 | 可隔离执行 | Daytona sandbox + Snapshot + Preview |
 | P5 | 可测 UI | Cloudflare Browser Run + `testPreview` / Auto Test |
 
 每一阶段都保持：**同一套 Agent / tools / prompt**，只替换存储与执行后端。
@@ -70,10 +70,10 @@ https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9
 | 决策 | 选择 | 不选 / 推迟 | 一句话理由 |
 | --- | --- | --- | --- |
 | Agent 运行时 | Vercel AI SDK v7 **WorkflowAgent** + Workflow DevKit | 自建 Redis/Bull 队列 + 手写状态机 | 流式续传、step 重试、与 Vercel 一体；长 turn 天然 durable |
-| 远程沙盒 | **Daytona** | E2B 等 | 一套 SDK 覆盖 fs/process/preview/volume/snapshot；公开 Preview URL 可被 Browser Run 访问 |
+| 远程沙盒 | **Daytona** | E2B 等 | 一套 SDK 覆盖 fs/process/preview/snapshot；公开 Preview URL 可被 Browser Run 访问 |
 | UI 测试 | **Cloudflare Browser Run** + Playwright | 本地 Playwright / 仅靠编译 | localhost 对云端浏览器不可达；远程 Preview + Live View 才构成「可见」的自动测 |
 | 会话存储 | Local 文件 **或** Supabase | 一开始就绑定 DB | 开发零摩擦；生产用同一门面切换 |
-| 代码版本 | Workspace 工作树（+ Daytona Volume） | 把源码塞进 DB | 对话与代码分真相源；便于导出 / 恢复 |
+| 代码版本 | Workspace 工作树（sandbox 盘 / 本地磁盘） | 把源码塞进 DB | 对话与代码分真相源；需要副本时 zip 导出 |
 | 验证策略 | `checkPreview` 按需（首轮/大改/compileError）；`testPreview` opt-in | Agent 每步都跑浏览器 | 控制成本与延迟；编译错误覆盖大多数失败 |
 
 ---

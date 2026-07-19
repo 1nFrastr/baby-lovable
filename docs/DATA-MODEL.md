@@ -8,18 +8,16 @@
 
 | 层 | 真相源 | 存什么 | 不存什么 |
 | --- | --- | --- | --- |
-| **对话与会话元数据** | Local：`session.json` / Prod：Supabase `sessions` | UIMessage 历史、标题、runStatus、sandboxMode、daytonaSandboxId… | 源码正文 |
+| **对话与会话元数据** | Local：`session.json` / Prod：Supabase `sessions` | UIMessage 历史、标题、runStatus、sandboxMode… | 源码正文 |
 | **流式中间态** | `draft.json` / `session_drafts` | 进行中的 assistant 草稿（可恢复） | 最终历史（完成后合并再删） |
-| **代码** | `workspace/` 工作树 | 生成的 Next 应用源码 | 聊天文本 |
-| **远程代码副本** | Daytona Volume（per-session subpath） | workspace 快照（排除 node_modules/.next/.git） | 运行态 |
-| **预览运行态** | 进程内 Map +（Daytona）可 adopt 的 sandbox id | port、preview URL、installing/ready | 长期归档 |
+| **代码** | `workspace/` 工作树（local 磁盘或 Daytona sandbox 盘） | 生成的 Next 应用源码 | 聊天文本 |
+| **预览运行态** | 进程内 Map +（Daytona）`session_daytona_runtime` | port、preview URL、sandboxId、installing/ready | 长期归档 |
 | **App Test 运行态** | `app-test-status.json` / `session_app_test_status` | Live View、进度、结果摘要 | 与 messages 同行更新（避免互相覆盖） |
 
 一句话：
 
 - **DB / session 文件** = 对话与编排状态的真相源  
-- **Workspace 工作树** = 代码的真相源  
-- **Volume** = 远程场景下代码的持久化后端
+- **Workspace 工作树** = 代码的真相源（sandbox 生命周期内有效；导出靠 zip）
 
 ---
 
@@ -32,8 +30,6 @@ Session
   runStatus: idle | pending | running | completed | failed | cancelled
   lastRunId?
   messages: UIMessage[]          # 含 tool-call / tool-result parts
-  daytonaSandboxId?
-  volumeSubpath?
   createdAt, updatedAt
 ```
 
@@ -48,25 +44,21 @@ sequenceDiagram
   participant U as User / CLI
   participant A as Builder Agent
   participant W as workspace/
-  participant V as Daytona Volume
   participant S as Session store
 
   U->>A: prompt
   A->>W: writeFile / editFile / …
   A->>A: checkPreview / testPreview
   A->>S: 最终 messages
-  opt daytona
-    W->>V: persist (exclude node_modules/.next/.git)
-  end
 ```
 
 要点：
 
-1. **工作树即真相源**：Agent 直接改 `workspace/`，不再做 turn 边界 git commit。
-2. **Bootstrap**：Daytona 新沙盒若 workspace 空，可从 Volume restore。
+1. **工作树即真相源**：Agent 直接改 `workspace/`。
+2. **Bootstrap**：Daytona 从 Snapshot 起沙盒（starter + `node_modules` 预装）。
 3. **导出**：sandbox 打包为 zip（local zip 尚未实现）。
 
-这样评审可以问：「代码从哪来？丢了怎么找？」——答案是 workspace（+ Volume），而不是「在某个 JSON 字段里」。
+这样评审可以问：「代码从哪来？」——答案是当前 sandbox/local 的 `workspace/`，而不是「在某个 JSON 字段里」。
 
 ---
 
@@ -100,7 +92,7 @@ CLI 更简单：同步跑完 → `replaceMessages` →（one-shot）停 local pr
 ### Preview
 
 - Local：本机端口（如 3200+）上的 `pnpm dev`，状态主要在 host 内存；进程可成为 orphan → `npm run cleanup-previews`
-- Daytona：preview URL 与 sandbox 绑定；Vercel **冷 isolate** 内存空时，靠 `session.daytonaSandboxId` **adopt** 已有 sandbox，避免「URL 分裂」
+- Daytona：preview URL 与 sandbox 绑定；Vercel **冷 isolate** 内存空时，靠 `session_daytona_runtime.sandbox_id` **adopt** 已有 sandbox，避免「URL 分裂」
 
 ### App Test
 
@@ -131,7 +123,7 @@ CLI 更简单：同步跑完 → `replaceMessages` →（one-shot）停 local pr
 | 用户昨天说了什么？ | Session messages |
 | 应用现在长什么样？ | `workspace/` 工作树 |
 | 上一轮 Agent 改了啥？ | 该 turn 的 tool parts |
-| 远程机器重启后代码还在吗？ | Daytona Volume restore + 再起 sandbox |
+| 远程机器重启后代码还在吗？ | 依赖 sandbox / Snapshot 生命周期；需要副本时用 zip 导出 |
 | 流式说到一半刷新？ | draft + lastRunId 续流 |
 | 源码要不要进 Postgres？ | **不要**（体积、工具链都不合适） |
 | 聊天要不要只放在 workspace？ | **不要**（查询、RLS、草稿、run 状态不适合） |

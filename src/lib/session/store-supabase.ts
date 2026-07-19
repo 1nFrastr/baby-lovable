@@ -36,9 +36,6 @@ interface SessionRow {
   last_run_id: string | null;
   run_status: SessionRunStatus;
   sandbox_mode: SandboxMode;
-  git_remote: string | null;
-  daytona_sandbox_id: string | null;
-  last_commit_sha: string | null;
   deleted_at: string | null;
 }
 
@@ -90,9 +87,6 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     last_run_id: session.lastRunId ?? null,
     run_status: session.runStatus,
     sandbox_mode: session.sandboxMode,
-    git_remote: null,
-    daytona_sandbox_id: null,
-    last_commit_sha: null,
     deleted_at: session.deletedAt ?? null,
   };
 }
