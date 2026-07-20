@@ -1,13 +1,14 @@
 <div align="center">
 <img src="public/brand/icon.png" alt="BabyLovable" width="64" height="64" />
-<h1 style="margin: 6px 0 4px; font-weight: bold;">BabyLovable</h1>
-<h3 style="margin: 0 0 8px;">基于 Serverless 云端多用户 Coding Agent · <a href="https://baby-lovable.vercel.app/">演示地址</a></h3>
-<a href="https://ai-sdk.dev/docs/agents/workflow-agent#workflowagent"><img src="https://img.shields.io/badge/Vercel_AI_SDK-WorkflowAgent-000000"></a>
-<a href="https://supabase.com/docs/guides/auth"><img src="https://img.shields.io/badge/Supabase-Auth-3FCF8E"></a>
-<a href="https://supabase.com/docs/guides/realtime"><img src="https://img.shields.io/badge/Supabase-Realtime-3FCF8E"></a>
-<a href="https://www.daytona.io/"><img src="https://img.shields.io/badge/Daytona-Sandbox-0A0A0A"></a>
-<a href="https://developers.cloudflare.com/browser-rendering/"><img src="https://img.shields.io/badge/Cloudflare-Browser_Run-F38020"></a>
-<a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-black"></a>
+<h2 style="margin: 6px 0 4px; font-weight: bold;">BabyLovable</h2>
+<h3 style="margin: 0 0 8px;">基于 Serverless 云端多用户 Coding Agent · <a href="https://baby-lovable.vercel.app/">Demo ↗</a></h3>
+<a href="https://ai-sdk.dev/docs/agents/workflow-agent#workflowagent"><img src="https://img.shields.io/badge/Vercel_AI_SDK-v7-000000?logo=vercel&logoColor=white"></a>
+<a href="https://ai-sdk.dev/docs/agents/workflow-agent#workflowagent"><img src="https://img.shields.io/badge/Vercel-WorkflowAgent-000000?logo=vercel&logoColor=white"></a>
+<a href="https://www.daytona.io/"><img src="https://img.shields.io/badge/Daytona-Sandbox-000000"></a>
+<a href="https://supabase.com/docs/guides/auth"><img src="https://img.shields.io/badge/Supabase-Auth-3ECF8E?logo=supabase&logoColor=white"></a>
+<a href="https://supabase.com/docs/guides/realtime"><img src="https://img.shields.io/badge/Supabase-Realtime-3ECF8E?logo=supabase&logoColor=white"></a>
+<a href="https://developers.cloudflare.com/browser-rendering/"><img src="https://img.shields.io/badge/Cloudflare-Browser_Run-F38020?logo=cloudflare&logoColor=white"></a>
+<a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white"></a>
 </div>
 
 ## 核心能力
