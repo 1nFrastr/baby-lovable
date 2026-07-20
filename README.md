@@ -183,11 +183,11 @@ Agent / Preview API
 
 ## 工程落地方法
 
-开发体验优先：vercel cli , supabase cli 
-
 可观测性驱动开发：CLI Agent 模式不依赖 WebUI 调试、本地沙盒兼容层不依赖远程沙盒服务、纯文件持久化系统不依赖 DB、不依赖 Docker、完整系统可以在工程项目内 All-in-one 启动运行和调试Debug。方便 Cursor 编码 Agent 做端到端自回归。
 
-AI Coding 方法： 编码工作由 Cursor 完成；90% 工作使用普通模型完成，如 Composer2.5、Grok 4.5；复杂任务使用高级模型 GPT 5.6-Sol、Claude Sonnet 5（复杂任务是指：架构设计Plan、  复杂模块的 Review 和 Debug 工作）；方案调研工作如架构选型等是和 Genspark Agent一起完成；
+开发体验优先：Vercel CLI + Supabase CLI；沙盒可选 本地模拟 或 Daytona；存储与鉴权可选本地文件模式免登录，或接 Supabase（匿名登录 / OAuth）
+
+AI Coding 方法： 编码工作由 Cursor 完成；90% 工作使用普通模型完成，如 Composer2.5、Grok 4.5；复杂任务使用高级模型 GPT 5.6-Sol、Claude Sonnet 5（复杂任务是指：架构设计Plan、复杂模块的 Review 和 Debug 工作）；方案调研工作如架构选型等是和 Genspark Agent一起完成；
 
 ## 更多功能规划
 
