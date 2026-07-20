@@ -1,7 +1,13 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 
 import {
   useCreateSessionMutation,
@@ -36,17 +42,21 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-function SessionWorkspaceLoading() {
+function SessionWorkspaceLoading({
+  label = "正在载入会话…",
+}: {
+  label?: string;
+}) {
   return (
     <div
       className="flex h-full min-h-0"
       role="status"
-      aria-label="正在载入会话"
+      aria-label={label}
     >
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
-          <span>正在载入会话…</span>
+          <span>{label}</span>
         </div>
       </div>
       <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
@@ -71,6 +81,7 @@ export function AppShell() {
   const params = useParams();
   const activeSessionId =
     typeof params.sessionId === "string" ? params.sessionId : null;
+  const [isNavPending, startTransition] = useTransition();
 
   const sessionsQuery = useSessionsQuery();
   const sessionQuery = useSessionQuery(activeSessionId);
@@ -79,6 +90,10 @@ export function AppShell() {
   const invalidateSessionDetail = useInvalidateSessionDetail();
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActivatingSession, setIsActivatingSession] = useState(false);
+  /** Optimistic target while router/API lag (weak network). */
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  /** Covers create API + post-success navigation gap (mutation isPending ends first). */
+  const [isCreateInFlight, setIsCreateInFlight] = useState(false);
   const [chatAppTest, setChatAppTest] = useState<AppTestLatestStatus | null>(
     null,
   );
@@ -149,6 +164,17 @@ export function AppShell() {
     }
   }, [sessionQuery.isFetching]);
 
+  // Clear optimistic navigation once the URL matches the intended session.
+  useEffect(() => {
+    if (pendingSessionId != null && pendingSessionId === activeSessionId) {
+      setPendingSessionId(null);
+      setIsCreateInFlight(false);
+    }
+  }, [activeSessionId, pendingSessionId]);
+
+  const isCreating = isCreateInFlight || createSessionMutation.isPending;
+  const isSwitchingSession =
+    pendingSessionId != null && pendingSessionId !== activeSessionId;
   const isBootstrapping = sessionsQuery.isPending && sessions.length === 0;
   const cacheMissingMessages =
     activeSummary != null &&
@@ -159,6 +185,16 @@ export function AppShell() {
     activeSession?.id === activeSessionId &&
     !cacheMissingMessages &&
     !(isActivatingSession && sessionQuery.isFetching);
+  const showWorkspaceLoading =
+    isCreating ||
+    isSwitchingSession ||
+    isNavPending ||
+    (activeSessionId != null && !isSessionReady);
+  const workspaceLoadingLabel = isCreating
+    ? "正在创建会话…"
+    : isSwitchingSession || isNavPending
+      ? "正在切换会话…"
+      : "正在载入会话…";
 
   const loadError =
     actionError ??
@@ -174,21 +210,39 @@ export function AppShell() {
       : null);
 
   const handleSelectSession = (sessionId: string) => {
-    if (sessionId === activeSessionId) {
+    if (
+      sessionId === activeSessionId ||
+      sessionId === pendingSessionId ||
+      isCreating
+    ) {
       return;
     }
 
     setActionError(null);
-    router.push(`/sessions/${sessionId}`);
+    setPendingSessionId(sessionId);
+    startTransition(() => {
+      router.push(`/sessions/${sessionId}`);
+    });
   };
 
   const handleCreateSession = async () => {
+    if (isCreating || isSwitchingSession) {
+      return;
+    }
+
     setActionError(null);
+    setPendingSessionId(null);
+    setIsCreateInFlight(true);
 
     try {
       const { session } = await createSessionMutation.mutateAsync();
-      router.push(`/sessions/${session.id}`);
+      setPendingSessionId(session.id);
+      startTransition(() => {
+        router.push(`/sessions/${session.id}`);
+      });
     } catch (error) {
+      setPendingSessionId(null);
+      setIsCreateInFlight(false);
       setActionError(
         error instanceof Error ? error.message : "Failed to create session",
       );
@@ -237,11 +291,13 @@ export function AppShell() {
         <SessionSidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
+          pendingSessionId={pendingSessionId}
           onSelect={handleSelectSession}
           onCreate={() => {
             void handleCreateSession();
           }}
-          isCreating={createSessionMutation.isPending}
+          isCreating={isCreating}
+          isSwitching={isSwitchingSession || isNavPending}
         />
 
         <main className="min-w-0 flex-1">
@@ -249,7 +305,7 @@ export function AppShell() {
             <div className="flex h-full items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
               Loading sessions…
             </div>
-          ) : loadError ? (
+          ) : loadError && !isCreating && !isSwitchingSession ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-sm text-red-600 dark:text-red-400">
                 {loadError}
@@ -262,7 +318,9 @@ export function AppShell() {
                 返回会话列表
               </button>
             </div>
-          ) : !activeSessionId ? (
+          ) : showWorkspaceLoading || (activeSessionId != null && !activeSession) ? (
+            <SessionWorkspaceLoading label={workspaceLoadingLabel} />
+          ) : !activeSessionId || !activeSession ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-lg text-zinc-700 dark:text-zinc-200">
                 创建第一个项目会话
@@ -277,14 +335,19 @@ export function AppShell() {
                 onClick={() => {
                   void handleCreateSession();
                 }}
-                disabled={createSessionMutation.isPending}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                disabled={isCreating}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {createSessionMutation.isPending ? "Creating…" : "New Project"}
+                {isCreating ? (
+                  <>
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    Creating…
+                  </>
+                ) : (
+                  "New Project"
+                )}
               </button>
             </div>
-          ) : !isSessionReady ? (
-            <SessionWorkspaceLoading />
           ) : (
             <div className="flex h-full min-h-0">
               <div className="min-w-0 flex-1">
