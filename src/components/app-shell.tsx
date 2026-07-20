@@ -182,13 +182,22 @@ export function AppShell() {
   return (
     <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <div>
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            baby-lovable
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            WorkflowAgent runtime for Next.js app generation
-          </p>
+        <div className="flex items-center gap-3">
+          <img
+            src="/brand/icon.png"
+            alt=""
+            width={36}
+            height={36}
+            className="rounded-lg"
+          />
+          <div>
+            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              baby-lovable
+            </h1>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              WorkflowAgent runtime for Next.js app generation
+            </p>
+          </div>
         </div>
         <AuthUserBar />
       </header>

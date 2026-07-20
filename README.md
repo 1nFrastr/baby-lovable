@@ -1,8 +1,37 @@
-# baby-lovable
+<p align="center">
+  <img src="public/brand/icon.png" alt="BabyLovable" width="96" height="96" />
+</p>
+<h1 align="center" style="margin: 10px 0 10px; font-weight: bold;">BabyLovable</h1>
+<h3 align="center" style="margin-bottom: 10px;">基于 Serverless 云端多用户 Coding Agent</h3>
+<p align="center">
+  <a href="https://baby-lovable.vercel.app/">演示地址</a>
+</p>
+<p align="center">
+  <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-Serverless-000000"></a>
+  <a href="https://ai-sdk.dev/"><img src="https://img.shields.io/badge/AI_SDK-v7-000000"></a>
+  <a href="https://supabase.com/"><img src="https://img.shields.io/badge/Supabase-Auth_+_Realtime-3FCF8E"></a>
+  <a href="https://www.daytona.io/"><img src="https://img.shields.io/badge/Daytona-Sandbox-0A0A0A"></a>
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-black"></a>
+  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19-61DAFB"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6"></a>
+</p>
 
-**baby-lovable** 是一款基于 Serverless 架构的多用户云端 Coding Agent
+## 核心能力
 
-演示地址：[https://baby-lovable.vercel.app/](https://baby-lovable.vercel.app/)
+|              |                                                            |
+| ------------ | ---------------------------------------------------------- |
+| **Agent 编排** | Vercel AI SDK v7 `WorkflowAgent`                           |
+| **持久执行**     | Workflow Serverless：挂了能续、失败重试、可观测性                         |
+| **可恢复流**     | 刷新不断流，会话历史落库可回看                                            |
+| **隔离沙盒**     | Daytona Sandbox + 自建镜像                                     |
+| **资源调和**     | Lease + CAS，像 K8s 一样 observe → act，把 Serverless 下的沙盒并发串行管住 |
+| **实时同步**     | Supabase Realtime 推送会话与 Preview 状态，前端不用轮询                  |
+| **多用户隔离**    | Supabase Auth + RLS，认证授权和数据权限隔离                            |
+| **自动 E2E**   | Cloudflare BrowserRun，Agent 自己开浏览器验结果                      |
+
+
+其中「资源调和」与「实时同步」对应两套刻意拆开的控制面：**沙盒怎么在 Serverless 下安全收敛**，以及 **UI 怎么拿到会话/Preview 状态**。
+
 
 <table>
   <tr>
@@ -26,25 +55,6 @@
     </td>
   </tr>
 </table>
-
-## 核心能力
-
-
-|              |                                                            |
-| ------------ | ---------------------------------------------------------- |
-| **Agent 编排** | Vercel AI SDK v7 `WorkflowAgent`                           |
-| **持久执行**     | Workflow Serverless：挂了能续、失败重试、可观测性                         |
-| **可恢复流**     | 刷新不断流，会话历史落库可回看                                            |
-| **隔离沙盒**     | Daytona Sandbox + 自建镜像                                     |
-| **资源调和**     | Lease + CAS，像 K8s 一样 observe → act，把 Serverless 下的沙盒并发串行管住 |
-| **实时同步**     | Supabase Realtime 推送会话与 Preview 状态，前端不用轮询                  |
-| **多用户隔离**    | Supabase Auth + RLS，认证授权和数据权限隔离                            |
-| **自动 E2E**   | Cloudflare BrowserRun，Agent 自己开浏览器验结果                      |
-
-
-其中「资源调和」与「实时同步」对应两套刻意拆开的控制面：**沙盒怎么在 Serverless 下安全收敛**，以及 **UI 怎么拿到会话/Preview 状态**。
-
----
 
 ## 技术设计细节
 
@@ -122,8 +132,6 @@ async function reconcileLoop(...) {
 
 **一句话**：Serverless 下把「多请求并发」收成「一个租约持有者按 desired 调和」；CAS 保证跨 isolate 的状态写不错乱——所以 README 说「像 K8s 一样 observe → act，把沙盒并发串行管住」。
 
----
-
 ### 实时同步：Supabase Realtime，前端不轮询
 
 #### 要解决的问题
@@ -171,8 +179,6 @@ Daytona 侧 CAS 成功后，会从 snapshot **投影**出 preview 再 publish—
 刻意不做的：客户端自己 merge `preview.updated`、再加一层 Ably/Redis、把 chat token 塞进这条通道（chat 仍走 Workflow SSE）。
 
 **一句话**：沙盒真相在 Daytona runtime snapshot；UI 只订一份投影。云端用 Postgres Realtime 推整行，本地用 SSE 等价——所以「前端不用轮询」。
-
----
 
 ### 两者怎么串起来
 
