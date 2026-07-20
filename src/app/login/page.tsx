@@ -71,8 +71,15 @@ function LoginForm() {
   return (
     <div className="mx-auto w-full max-w-sm space-y-6">
       <div className="text-center">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          登录 baby-lovable
+        <img
+          src="/brand/icon.png"
+          alt="BabyLovable"
+          width={64}
+          height={64}
+          className="mx-auto rounded-2xl"
+        />
+        <h1 className="mt-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+          登录 BabyLovable
         </h1>
         <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
           使用第三方账号登录以管理你的项目会话

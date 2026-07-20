@@ -262,17 +262,12 @@ export function AppShell() {
           />
           <div>
             <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              baby-lovable
+              BabyLovable
             </h1>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
               WorkflowAgent runtime for Next.js app generation
             </p>
           </div>
-        </div>
-
-        <MvpNoticeCarousel className="hidden sm:block" />
-
-        <div className="flex shrink-0 items-center gap-3">
           <a
             href={GITHUB_REPO_URL}
             target="_blank"
@@ -283,6 +278,11 @@ export function AppShell() {
           >
             <GitHubIcon className="h-5 w-5" />
           </a>
+        </div>
+
+        <MvpNoticeCarousel className="hidden sm:block" />
+
+        <div className="ml-auto flex shrink-0 items-center gap-3 sm:ml-0">
           <AuthUserBar />
         </div>
       </header>
@@ -328,7 +328,7 @@ export function AppShell() {
               <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
                 {sandboxMode === "daytona"
                   ? "Daytona 模式会在远程沙箱内部文件系统中从 Next.js starter 模板初始化项目。"
-                  : "baby-lovable 会在本地 `.baby-lovable/sessions/` 目录中从 Next.js starter 模板初始化项目，并持久化你的修改。"}
+                  : "BabyLovable 会在本地 `.baby-lovable/sessions/` 目录中从 Next.js starter 模板初始化项目，并持久化你的修改。"}
               </p>
               <button
                 type="button"

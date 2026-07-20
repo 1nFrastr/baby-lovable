@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "baby-lovable",
+  title: "BabyLovable",
   description:
     "WorkflowAgent runtime for generating Next.js apps with durable sessions",
 };
