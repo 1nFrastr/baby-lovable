@@ -49,7 +49,7 @@
 
 ## 技术设计细节
 
-### 1. 资源调和：Lease + CAS，observe → act
+### 1. 沙盒生命周期：像 K8s 一样 observe → act（Lease + CAS）
 
 #### 要解决的问题
 
@@ -63,7 +63,7 @@
 
 #### 设计：像 K8s 一样声明 desired，再收敛
 
-核心在 `DaytonaRuntimeSnapshot`：只存 **intent（desired）** 和 **现状（observed）**，不让每个 API 直接「命令式地」起停沙盒。
+核心在 `DaytonaRuntimeSnapshot`：只存 **意图（desired）** 和 **现状（observed）**，不让每个 API 直接「命令式地」起停沙盒。
 
 ```typescript
 export interface DaytonaRuntimeSnapshot {
@@ -100,8 +100,6 @@ async function reconcileLoop(...) {
 }
 ```
 
-调用方也可以 `wait: false` 只提交 intent，由 `after()` 把 isolate 撑住做后台 reconcile（见 `preview.ts` 注释），这样 **Agent 主循环不用干等冷启动**。
-
 #### 为什么是 Lease + CAS，而不是别的
 
 | 机制                          | 作用                                |
@@ -120,9 +118,9 @@ async function reconcileLoop(...) {
 
 竞态测试也是按这个假设写的：模拟「WebUI + Agent 两个 isolate 同时 `ensure(preview-ready)` → 只有 lease holder 真正 `createSandbox`」。
 
-**一句话**：Serverless 下把「多请求并发」收成「一个租约持有者按 desired 调和」；CAS 保证跨 isolate 的状态写不错乱——所以 README 说「像 K8s 一样 observe → act，把沙盒并发串行管住」。
+**一句话**：Serverless 下把「多请求并发」收成「一个租约持有者按 desired 调和」；CAS 保证跨 isolate 的状态写不错乱。
 
-### 2. 实时同步：Supabase Realtime，前端不轮询
+### 2. 服务端状态同步：Supabase Realtime，前端不轮询
 
 #### 要解决的问题
 
@@ -166,7 +164,7 @@ Daytona 侧 CAS 成功后，会从 snapshot **投影**出 preview 再 publish—
 
 刻意不做的：客户端自己 merge `preview.updated`、再加一层 Ably/Redis、把 chat token 塞进这条通道（chat 仍走 Workflow SSE）。
 
-**一句话**：沙盒真相在 Daytona runtime snapshot；UI 只订一份投影。云端用 Postgres Realtime 推整行，本地用 SSE 等价——所以「前端不用轮询」。
+**一句话**：沙盒真相在 Daytona runtime snapshot；UI 只订一份投影。云端用 Postgres Realtime 推整行更新，前端不用轮询。
 
 ### 3. 两者怎么串起来
 
