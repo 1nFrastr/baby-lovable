@@ -2,29 +2,65 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { LanguageModelUsage, ModelMessage } from "ai";
 
 import type { AgentStreamResult } from "./agent-trace";
+import { compactModelMessages } from "./context-compact";
 
-/** Max invisible auto-continue rounds after finishReason=length (0 = disabled). */
+/** Max invisible auto-continue rounds after finishReason=length / step budget (0 = disabled). */
 export const AUTO_CONTINUE_MAX = Math.max(
   0,
-  Number(process.env.AI_AUTO_CONTINUE_MAX ?? 2),
+  Number(process.env.AI_AUTO_CONTINUE_MAX ?? 3),
 );
 
 /** Transient model message — never persisted to session UI history. */
-export const AUTO_CONTINUE_HINT =
+export const AUTO_CONTINUE_HINT_LENGTH =
   "[Auto-continue] Your previous model output was cut off because the per-step output token limit was reached. Continue the same task from where you left off. Do not repeat tool calls that already succeeded. If a file write was interrupted, readFile first, then editFile or writeFile. Prefer splitting very large files into smaller components under src/components/.";
+
+export const AUTO_CONTINUE_HINT_STEPS =
+  "[Auto-continue] You hit the per-pass step budget before finishing. Continue the same task from where you left off. Do not repeat tool calls that already succeeded. Prefer small focused files; call checkPreview before finishing if you edited files.";
+
+/** @deprecated use AUTO_CONTINUE_HINT_LENGTH */
+export const AUTO_CONTINUE_HINT = AUTO_CONTINUE_HINT_LENGTH;
 
 export function shouldAutoContinue(
   finishReason: string,
   continuationCount: number,
+  options?: { stepCount?: number; maxSteps?: number },
 ): boolean {
-  return finishReason === "length" && continuationCount < AUTO_CONTINUE_MAX;
+  if (continuationCount >= AUTO_CONTINUE_MAX) {
+    return false;
+  }
+  if (finishReason === "length") {
+    return true;
+  }
+  // Step budget exhausted while the model still wanted tools — start a fresh pass.
+  if (
+    finishReason === "tool-calls" &&
+    options?.maxSteps != null &&
+    options.stepCount != null &&
+    options.stepCount >= options.maxSteps
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function continueHintFor(finishReason: string): string {
+  return finishReason === "tool-calls"
+    ? AUTO_CONTINUE_HINT_STEPS
+    : AUTO_CONTINUE_HINT_LENGTH;
 }
 
 /** Strip system messages before a continue pass (instructions are on the agent). */
-function messagesForContinuation(passMessages: ModelMessage[]): ModelMessage[] {
+function messagesForContinuation(
+  passMessages: ModelMessage[],
+  finishReason: string,
+): ModelMessage[] {
+  const compacted = compactModelMessages(
+    passMessages.filter((message) => message.role !== "system"),
+  ).messages;
+
   return [
-    ...passMessages.filter((message) => message.role !== "system"),
-    { role: "user", content: AUTO_CONTINUE_HINT },
+    ...compacted,
+    { role: "user", content: continueHintFor(finishReason) },
   ];
 }
 
@@ -112,12 +148,17 @@ export interface AgentStreamPassResult {
 export interface RunAgentStreamWithAutoContinueOptions {
   initialMessages: ModelMessage[];
   writable?: WritableStream<ModelCallStreamPart>;
+  /** Per-pass step budget (used to detect incomplete tool-calls finishes). */
+  maxSteps?: number;
   streamOnce: (options: {
     messages: ModelMessage[];
     preventClose: boolean;
     sendFinish: boolean;
   }) => Promise<AgentStreamPassResult>;
-  onAutoContinue?: (continuationNumber: number) => void;
+  onAutoContinue?: (
+    continuationNumber: number,
+    reason: "length" | "tool-calls",
+  ) => void;
   /**
    * Close the workflow writable after the final pass. Required in `'use workflow'`
    * context — plain `getWriter()` throws outside a step.
@@ -129,16 +170,19 @@ export interface RunAgentStreamWithAutoContinueOptions {
 
 /**
  * Run the agent stream, silently continuing when a pass ends with
- * finishReason=length. Transient continue hints are model-only (not UI).
+ * finishReason=length (output token cap) or tool-calls at the step budget.
+ * Compacts oversized file/tool history before each pass. Transient continue
+ * hints are model-only (not UI).
  */
 export async function runAgentStreamWithAutoContinue({
   initialMessages,
   writable,
+  maxSteps,
   streamOnce,
   onAutoContinue,
   finalizeWritable,
 }: RunAgentStreamWithAutoContinueOptions): Promise<AgentStreamResult> {
-  let messages = initialMessages;
+  let messages = compactModelMessages(initialMessages).messages;
   let continuationCount = 0;
   let accumulated: AgentStreamResult | null = null;
 
@@ -158,7 +202,13 @@ export async function runAgentStreamWithAutoContinue({
 
     accumulated = mergeStreamResults(accumulated, passResult);
 
-    if (!shouldAutoContinue(pass.finishReason, continuationCount)) {
+    const reason = pass.finishReason === "tool-calls" ? "tool-calls" : "length";
+    if (
+      !shouldAutoContinue(pass.finishReason, continuationCount, {
+        stepCount: pass.steps.length,
+        maxSteps,
+      })
+    ) {
       if (writable) {
         const close = finalizeWritable ?? finalizeWritableDefault;
         await close(writable);
@@ -170,8 +220,8 @@ export async function runAgentStreamWithAutoContinue({
     }
 
     continuationCount += 1;
-    onAutoContinue?.(continuationCount);
+    onAutoContinue?.(continuationCount, reason);
 
-    messages = messagesForContinuation(pass.messages);
+    messages = messagesForContinuation(pass.messages, pass.finishReason);
   }
 }

@@ -41,13 +41,14 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
     result = await runAgentStreamWithAutoContinue({
       initialMessages: modelMessages,
       writable,
+      maxSteps,
       finalizeWritable: closeAgentWritableStep,
-      onAutoContinue: (n) => {
+      onAutoContinue: (n, reason) => {
         console.log(
           formatTraceStdout(
             sessionId,
             "INFO",
-            `auto-continue #${n} after finish=length (invisible to user)`,
+            `auto-continue #${n} after finish=${reason} (invisible to user)`,
           ),
         );
       },

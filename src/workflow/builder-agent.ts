@@ -1,5 +1,11 @@
 import { WorkflowAgent } from "@ai-sdk/workflow";
+import type { ModelMessage } from "ai";
 
+import {
+  compactModelMessages,
+  CONTEXT_COMPACT_TOKENS,
+  estimateTokens,
+} from "@/lib/agent/context-compact";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { packageManagerPromptLines } from "@/lib/sandbox/package-manager";
 import { builderTools, createToolsContext } from "@/tools/builder-tools";
@@ -70,6 +76,21 @@ export function createBuilderAgent(
     tools: builderTools,
     toolsContext,
     runtimeContext,
+    prepareStep: ({ messages }) => {
+      // In-turn compaction: large writeFile/readFile payloads blow the context
+      // window when many files are edited in one conversation.
+      // WorkflowAgent types this as LanguageModelV4Prompt; runtime prompt parts
+      // match ModelMessage tool-call/result shapes (input/output).
+      const modelMessages = messages as unknown as ModelMessage[];
+      if (estimateTokens(modelMessages) <= CONTEXT_COMPACT_TOKENS) {
+        return undefined;
+      }
+      const compacted = compactModelMessages(modelMessages);
+      if (!compacted.compacted) {
+        return undefined;
+      }
+      return { messages: compacted.messages as typeof messages };
+    },
   });
 
   return { agent, toolsContext, runtimeContext };

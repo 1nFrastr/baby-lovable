@@ -221,6 +221,14 @@ export function collectIncompleteWarnings(
     );
   }
 
+  if (result.finishReason === "tool-calls" && result.steps.length >= maxSteps) {
+    warnings.push(
+      (result.autoContinueCount ?? 0) > 0
+        ? `agent still unfinished after ${result.autoContinueCount} auto-continue(s) at step budget — turn may be incomplete`
+        : `agent hit step budget (${maxSteps}) with finishReason=tool-calls — turn may be incomplete`,
+    );
+  }
+
   if (result.finishReason === "length") {
     if ((result.autoContinueCount ?? 0) > 0) {
       warnings.push(

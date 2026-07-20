@@ -66,9 +66,10 @@ export async function runAgentTurn({
   const result = await runAgentStreamWithAutoContinue({
     initialMessages: modelMessages,
     writable,
-    onAutoContinue: (n) => {
+    maxSteps,
+    onAutoContinue: (n, reason) => {
       trace.logInfo(
-        `auto-continue #${n} after finish=length (invisible to user)`,
+        `auto-continue #${n} after finish=${reason} (invisible to user)`,
       );
     },
     streamOnce: async ({ messages, preventClose, sendFinish }) => {
