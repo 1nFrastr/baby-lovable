@@ -15,10 +15,26 @@ import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 import { toSessionRunStatus } from "@/lib/session/runtime-projection";
 import { useSessionRuntime } from "@/lib/session/runtime-query";
 
+import { AuthUserBar } from "./auth-user-bar";
 import { Chat } from "./chat";
+import { MvpNoticeCarousel } from "./mvp-notice-carousel";
 import { PreviewPanel } from "./preview-panel";
 import { SessionSidebar } from "./session-sidebar";
-import { AuthUserBar } from "./auth-user-bar";
+
+const GITHUB_REPO_URL = "https://github.com/1nFrastr/baby-lovable";
+
+function GitHubIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23.96-.27 1.98-.4 3-.4s2.04.13 3 .4c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.61-.01 2.91-.01 3.3 0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12 24 5.37 18.63 0 12 0z" />
+    </svg>
+  );
+}
 
 function SessionWorkspaceLoading() {
   return (
@@ -181,8 +197,8 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+        <div className="flex shrink-0 items-center gap-3">
           <img
             src="/brand/icon.png"
             alt=""
@@ -199,7 +215,22 @@ export function AppShell() {
             </p>
           </div>
         </div>
-        <AuthUserBar />
+
+        <MvpNoticeCarousel className="hidden sm:block" />
+
+        <div className="flex shrink-0 items-center gap-3">
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="在 GitHub 打开仓库"
+            title="GitHub"
+            className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+          >
+            <GitHubIcon className="h-5 w-5" />
+          </a>
+          <AuthUserBar />
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
