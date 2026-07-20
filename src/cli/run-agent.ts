@@ -8,6 +8,7 @@ import {
 
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
+import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
 import type { SandboxMode } from "@/lib/sandbox/types";
@@ -64,11 +65,14 @@ export async function runAgentTurn({
   });
   const startedAt = Date.now();
   const writable = trace.createWritable();
+  const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
+  const maxOutputTokens = resolveMaxOutputTokens(modelId);
 
   const result = await runAgentStreamWithAutoContinue({
     initialMessages: modelMessages,
     writable,
     maxSteps,
+    maxOutputTokens,
     onAutoContinue: (n, reason) => {
       trace.logInfo(
         `auto-continue #${n} after finish=${reason} (invisible to user)`,

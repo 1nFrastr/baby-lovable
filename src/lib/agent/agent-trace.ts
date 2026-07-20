@@ -13,7 +13,19 @@ export interface AgentStreamResult {
     stepNumber: number;
     finishReason: string;
     usage?: LanguageModelUsage;
-    toolCalls?: Array<{ toolName: string }>;
+    text?: string;
+    content?: Array<{
+      type: string;
+      text?: string;
+      toolCallId?: string;
+      toolName?: string;
+      input?: unknown;
+    }>;
+    toolCalls?: Array<{
+      toolName: string;
+      toolCallId?: string;
+      input?: unknown;
+    }>;
   }>;
   finishReason: string;
   totalUsage: LanguageModelUsage;

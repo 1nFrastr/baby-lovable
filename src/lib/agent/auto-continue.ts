@@ -3,6 +3,11 @@ import type { LanguageModelUsage, ModelMessage } from "ai";
 
 import type { AgentStreamResult } from "./agent-trace";
 import { compactModelMessages } from "./context-compact";
+import {
+  isOutputLengthFinish,
+  reconcileMessagesWithLastStep,
+  type StepWithContent,
+} from "./reconcile-truncated";
 
 /** Max invisible auto-continue rounds after finishReason=length / step budget (0 = disabled). */
 export const AUTO_CONTINUE_MAX = Math.max(
@@ -12,10 +17,10 @@ export const AUTO_CONTINUE_MAX = Math.max(
 
 /** Transient model message — never persisted to session UI history. */
 export const AUTO_CONTINUE_HINT_LENGTH =
-  "[Auto-continue] Your previous model output was cut off because the per-step output token limit was reached. Continue the same task from where you left off. Do not repeat tool calls that already succeeded. If a file write was interrupted, readFile first, then editFile or writeFile. Prefer splitting very large files into smaller components under src/components/.";
+  "[Auto-continue] Your previous reply was cut off by the per-step output token limit (finishReason=length). Continue the SAME task. Do NOT resume or repeat a long analysis / coordinate dump / step-by-step narration — that burns the limit again. Prefer tools (readFile/editFile/writeFile/checkPreview). Keep chat text to 1–3 short sentences. Do not repeat tool calls that already succeeded. If a file write was interrupted, readFile first, then editFile or writeFile.";
 
 export const AUTO_CONTINUE_HINT_STEPS =
-  "[Auto-continue] You hit the per-pass step budget before finishing. Continue the same task from where you left off. Do not repeat tool calls that already succeeded. Prefer small focused files; call checkPreview before finishing if you edited files.";
+  "[Auto-continue] You hit the per-pass step budget before finishing. Continue the same task from where you left off. Do not repeat tool calls that already succeeded. Prefer small focused files and short chat replies; call checkPreview before finishing if you edited files.";
 
 /** @deprecated use AUTO_CONTINUE_HINT_LENGTH */
 export const AUTO_CONTINUE_HINT = AUTO_CONTINUE_HINT_LENGTH;
@@ -23,12 +28,22 @@ export const AUTO_CONTINUE_HINT = AUTO_CONTINUE_HINT_LENGTH;
 export function shouldAutoContinue(
   finishReason: string,
   continuationCount: number,
-  options?: { stepCount?: number; maxSteps?: number },
+  options?: {
+    stepCount?: number;
+    maxSteps?: number;
+    lastStep?: StepWithContent;
+    maxOutputTokens?: number;
+  },
 ): boolean {
   if (continuationCount >= AUTO_CONTINUE_MAX) {
     return false;
   }
-  if (finishReason === "length") {
+  if (
+    isOutputLengthFinish(finishReason, {
+      lastStep: options?.lastStep,
+      maxOutputTokens: options?.maxOutputTokens,
+    })
+  ) {
     return true;
   }
   // Step budget exhausted while the model still wanted tools — start a fresh pass.
@@ -43,16 +58,24 @@ export function shouldAutoContinue(
   return false;
 }
 
-function continueHintFor(finishReason: string): string {
-  return finishReason === "tool-calls"
-    ? AUTO_CONTINUE_HINT_STEPS
-    : AUTO_CONTINUE_HINT_LENGTH;
+function continueHintFor(
+  finishReason: string,
+  options?: { lastStep?: StepWithContent; maxOutputTokens?: number },
+): string {
+  if (
+    finishReason === "tool-calls" &&
+    !isOutputLengthFinish(finishReason, options)
+  ) {
+    return AUTO_CONTINUE_HINT_STEPS;
+  }
+  return AUTO_CONTINUE_HINT_LENGTH;
 }
 
 /** Strip system messages before a continue pass (instructions are on the agent). */
 function messagesForContinuation(
   passMessages: ModelMessage[],
   finishReason: string,
+  options?: { lastStep?: StepWithContent; maxOutputTokens?: number },
 ): ModelMessage[] {
   const compacted = compactModelMessages(
     passMessages.filter((message) => message.role !== "system"),
@@ -60,7 +83,7 @@ function messagesForContinuation(
 
   return [
     ...compacted,
-    { role: "user", content: continueHintFor(finishReason) },
+    { role: "user", content: continueHintFor(finishReason, options) },
   ];
 }
 
@@ -150,6 +173,8 @@ export interface RunAgentStreamWithAutoContinueOptions {
   writable?: WritableStream<ModelCallStreamPart>;
   /** Per-pass step budget (used to detect incomplete tool-calls finishes). */
   maxSteps?: number;
+  /** Per-step output token ceiling — used to detect near-limit truncations. */
+  maxOutputTokens?: number;
   streamOnce: (options: {
     messages: ModelMessage[];
     preventClose: boolean;
@@ -180,6 +205,7 @@ export async function runAgentStreamWithAutoContinue({
   initialMessages,
   writable,
   maxSteps,
+  maxOutputTokens,
   streamOnce,
   onAutoContinue,
   onSanitized,
@@ -201,8 +227,15 @@ export async function runAgentStreamWithAutoContinue({
       sendFinish: false,
     });
 
+    // WorkflowAgent omits truncated assistant text from messages on length —
+    // reattach from the last step so continue + persistence stay coherent.
+    const reconciledMessages = reconcileMessagesWithLastStep(
+      pass.messages,
+      pass.steps as StepWithContent[],
+    );
+
     const passResult: AgentStreamResult = {
-      messages: pass.messages,
+      messages: reconciledMessages,
       steps: pass.steps,
       finishReason: pass.finishReason,
       totalUsage: pass.totalUsage,
@@ -210,11 +243,20 @@ export async function runAgentStreamWithAutoContinue({
 
     accumulated = mergeStreamResults(accumulated, passResult);
 
-    const reason = pass.finishReason === "tool-calls" ? "tool-calls" : "length";
+    const lastStep = pass.steps.at(-1) as StepWithContent | undefined;
+    const lengthHit = isOutputLengthFinish(pass.finishReason, {
+      lastStep,
+      maxOutputTokens,
+    });
+    const reason: "length" | "tool-calls" =
+      pass.finishReason === "tool-calls" && !lengthHit ? "tool-calls" : "length";
+
     if (
       !shouldAutoContinue(pass.finishReason, continuationCount, {
         stepCount: pass.steps.length,
         maxSteps,
+        lastStep,
+        maxOutputTokens,
       })
     ) {
       if (writable) {
@@ -230,6 +272,9 @@ export async function runAgentStreamWithAutoContinue({
     continuationCount += 1;
     onAutoContinue?.(continuationCount, reason);
 
-    messages = messagesForContinuation(pass.messages, pass.finishReason);
+    messages = messagesForContinuation(reconciledMessages, pass.finishReason, {
+      lastStep,
+      maxOutputTokens,
+    });
   }
 }

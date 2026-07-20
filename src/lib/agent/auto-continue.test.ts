@@ -9,6 +9,10 @@ import {
   compactModelMessages,
   estimateTokens,
 } from "./context-compact";
+import {
+  isOutputLengthFinish,
+  reconcileMessagesWithLastStep,
+} from "./reconcile-truncated";
 import { sanitizeModelMessages } from "./sanitize-messages";
 
 describe("shouldAutoContinue", () => {
@@ -35,6 +39,68 @@ describe("shouldAutoContinue", () => {
 
   it("does not continue on stop", () => {
     expect(shouldAutoContinue("stop", 0)).toBe(false);
+  });
+
+  it("continues when usage sits at the output ceiling even if finishReason is other", () => {
+    expect(
+      shouldAutoContinue("other", 0, {
+        lastStep: { usage: { outputTokens: 31_500 } },
+        maxOutputTokens: 32_000,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("reconcileMessagesWithLastStep", () => {
+  it("reattaches truncated assistant text omitted from messages", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "fix ghosts" },
+    ];
+    const steps = [
+      {
+        finishReason: "length",
+        text: "globalTimerRef = 0 >=",
+      },
+    ];
+
+    const result = reconcileMessagesWithLastStep(messages, steps);
+    expect(result).toHaveLength(2);
+    expect(result[1]?.role).toBe("assistant");
+    if (result[1]?.role === "assistant" && Array.isArray(result[1].content)) {
+      expect(result[1].content[0]).toMatchObject({
+        type: "text",
+        text: "globalTimerRef = 0 >=",
+      });
+    }
+  });
+
+  it("does not duplicate when text is already present", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "already here full text" }],
+      },
+    ];
+    const result = reconcileMessagesWithLastStep(messages, [
+      { text: "already here full text" },
+    ]);
+    expect(result).toHaveLength(2);
+  });
+});
+
+describe("isOutputLengthFinish", () => {
+  it("detects explicit length", () => {
+    expect(isOutputLengthFinish("length")).toBe(true);
+  });
+
+  it("detects near-ceiling usage", () => {
+    expect(
+      isOutputLengthFinish("other", {
+        lastStep: { usage: { outputTokens: 8000 } },
+        maxOutputTokens: 8000,
+      }),
+    ).toBe(true);
   });
 });
 

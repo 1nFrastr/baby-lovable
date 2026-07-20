@@ -4,6 +4,7 @@ import { getWritable } from "workflow";
 
 import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
+import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { createBuilderAgent } from "./builder-agent";
 
 import {
@@ -32,6 +33,8 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   );
 
   const maxSteps = 30;
+  const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
+  const maxOutputTokens = resolveMaxOutputTokens(modelId);
   const trace = createAgentTrace({
     sessionId,
     maxSteps,
@@ -46,6 +49,7 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
       initialMessages: modelMessages,
       writable,
       maxSteps,
+      maxOutputTokens,
       finalizeWritable: closeAgentWritableStep,
       onAutoContinue: (n, reason) => {
         console.log(
