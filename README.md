@@ -192,5 +192,9 @@ AI Coding 方法： 编码工作由 Cursor 完成；90% 工作使用普通模型
 ## 更多功能规划
 
 Agent Runtime 治理：长上下文治理、工具结果压缩等
+
 代码产物持久化：云端版本控制，接入 Freestyle Git和 Github 双向同步
+
 产品体验优化：UI/UX等优化
+
+第三方连接器：如 Supabase Baas、Vercel Deploy、图片素材生成 MCP 工具等
