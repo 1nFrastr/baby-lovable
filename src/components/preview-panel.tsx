@@ -193,6 +193,13 @@ export function PreviewPanel({
 
   const appTest = mergeChatAndPolledAppTest(runtimeAppTest, chatAppTest);
 
+  // Do not navigate while the proxy or Next is still warming. An early iframe
+  // can retain failed CSS requests even after the document and HMR become ready.
+  const previewEmbedUrl = readyPreviewUrl;
+  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
+  const iframeLoaded =
+    Boolean(previewEmbedUrl) && loadedIframeKey === previewIframeKey;
+
   // The root document can become reachable just before its CSS chunks do.
   // Retry one full navigation after ready; unlike HMR, this reloads failed
   // stylesheet links. Generation changes schedule the same safeguard on restart.
@@ -207,6 +214,15 @@ export function PreviewPanel({
 
     return () => window.clearTimeout(timer);
   }, [readyPreviewUrl, previewGeneration]);
+
+  // Prefetch the file tree as soon as the preview iframe is ready so the Files
+  // tab opens without a first-click wait.
+  useEffect(() => {
+    if (!iframeLoaded) {
+      return;
+    }
+    setFilesMountSessionId(sessionId);
+  }, [iframeLoaded, sessionId]);
 
   // HMR may rerender React while leaving a failed or stale stylesheet link in
   // place. Refresh once when each live agent turn leaves the running state.
@@ -430,12 +446,9 @@ export function PreviewPanel({
     !pipDismissed;
   // Do not navigate while the proxy or Next is still warming. An early iframe
   // can retain failed CSS requests even after the document and HMR become ready.
-  const previewEmbedUrl = readyPreviewUrl;
   const previewIframeSrc = previewEmbedUrl
     ? withEmbedCacheBust(previewEmbedUrl, embedRemountNonce)
     : undefined;
-  const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
-  const iframeLoaded = loadedIframeKey === previewIframeKey;
   const displayError =
     previewActionError ??
     runtimeError ??
@@ -549,9 +562,7 @@ export function PreviewPanel({
                 : undefined
             }
           >
-            {panelTab === "files"
-              ? "只读文件树 · 一次拉取全量 meta，对话结束后自动同步"
-              : (exportError ?? toolbarStatus)}
+            {panelTab === "files" ? "\u00a0" : (exportError ?? toolbarStatus)}
           </p>
         </div>
 

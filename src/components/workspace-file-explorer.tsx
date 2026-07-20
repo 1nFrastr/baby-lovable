@@ -304,8 +304,7 @@ export function WorkspaceFileExplorer({
         <div className="min-h-0 flex-1 overflow-auto">
           {!selectedPath ? (
             <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-400">
-              从左侧打开源码文件。内容只读；文件树 meta
-              一次拉取，对话结束后自动同步。
+              从左侧打开源码文件
             </div>
           ) : contentLoading ? (
             <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-400">
