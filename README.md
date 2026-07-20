@@ -1,20 +1,15 @@
-<p align="center">
-  <img src="public/brand/icon.png" alt="BabyLovable" width="96" height="96" />
-</p>
-<h1 align="center" style="margin: 10px 0 10px; font-weight: bold;">BabyLovable</h1>
-<h3 align="center" style="margin-bottom: 10px;">基于 Serverless 云端多用户 Coding Agent</h3>
-<p align="center">
-  <a href="https://baby-lovable.vercel.app/">演示地址</a>
-</p>
-<p align="center">
-  <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-Serverless-000000"></a>
-  <a href="https://ai-sdk.dev/"><img src="https://img.shields.io/badge/AI_SDK-v7-000000"></a>
-  <a href="https://supabase.com/"><img src="https://img.shields.io/badge/Supabase-Auth_+_Realtime-3FCF8E"></a>
-  <a href="https://www.daytona.io/"><img src="https://img.shields.io/badge/Daytona-Sandbox-0A0A0A"></a>
-  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-black"></a>
-  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19-61DAFB"></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6"></a>
-</p>
+<div align="center">
+<img src="public/brand/icon.png" alt="BabyLovable" width="96" height="96" />
+<h1 style="margin: 8px 0 4px; font-weight: bold;">BabyLovable</h1>
+<h3 style="margin: 0 0 8px;">基于 Serverless 云端多用户 Coding Agent · <a href="https://baby-lovable.vercel.app/">演示地址</a></h3>
+<a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-Serverless-000000"></a>
+<a href="https://workflow-sdk.dev/"><img src="https://img.shields.io/badge/Workflow-SDK-000000"></a>
+<a href="https://supabase.com/docs/guides/auth"><img src="https://img.shields.io/badge/Supabase-Auth-3FCF8E"></a>
+<a href="https://supabase.com/docs/guides/realtime"><img src="https://img.shields.io/badge/Supabase-Realtime-3FCF8E"></a>
+<a href="https://www.daytona.io/"><img src="https://img.shields.io/badge/Daytona-Sandbox-0A0A0A"></a>
+<a href="https://developers.cloudflare.com/browser-rendering/"><img src="https://img.shields.io/badge/Cloudflare-Browser_Run-F38020"></a>
+<a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-black"></a>
+</div>
 
 ## 核心能力
 
