@@ -2,13 +2,13 @@
 <img src="public/brand/icon.png" alt="BabyLovable" width="80" height="80" />
 <h2>BabyLovable</h2>
 <h3>基于 Serverless 架构的云端多用户 Coding Agent - <a href="https://baby-lovable.vercel.app/">Demo ↗</a></h3>
-<a href="https://ai-sdk.dev/docs/agents/workflow-agent#workflowagent"><img src="https://img.shields.io/badge/Vercel_AI-SDK_v7-000000?logo=vercel&logoColor=white"></a>
+<a href="https://vercel.com/blog/ai-sdk-7"><img src="https://img.shields.io/badge/Vercel_AI-SDK_v7-000000?logo=vercel&logoColor=white"></a>
+<a href="https://ai-sdk.dev/docs/agents/workflow-agent#workflowagent"><img src="https://img.shields.io/badge/Vercel_Workflow-Agent-000000?logo=vercel&logoColor=white"></a>
 <a href="https://www.daytona.io/"><img src="https://img.shields.io/badge/Daytona-Sandbox-000000"></a>
+<a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white"></a>
 <a href="https://supabase.com/docs/guides/auth"><img src="https://img.shields.io/badge/Supabase-Auth-3ECF8E?logo=supabase&logoColor=white"></a>
 <a href="https://supabase.com/docs/guides/realtime"><img src="https://img.shields.io/badge/Supabase-Realtime-3ECF8E?logo=supabase&logoColor=white"></a>
 <a href="https://developers.cloudflare.com/browser-rendering/"><img src="https://img.shields.io/badge/Cloudflare-Browser_Run-F38020?logo=cloudflare&logoColor=white"></a>
-<a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white"></a>
-<a href="https://ai-sdk.dev/docs/agents/workflow-agent#workflowagent"><img src="https://img.shields.io/badge/Vercel_Workflow-Agent-000000?logo=vercel&logoColor=white"></a>
 </div>
 
 ## 核心能力
