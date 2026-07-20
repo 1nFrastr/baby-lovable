@@ -159,6 +159,8 @@ export interface RunAgentStreamWithAutoContinueOptions {
     continuationNumber: number,
     reason: "length" | "tool-calls",
   ) => void;
+  /** Fired when incomplete tool call/result pairs are stripped from history. */
+  onSanitized?: (removedToolCallIds: string[]) => void;
   /**
    * Close the workflow writable after the final pass. Required in `'use workflow'`
    * context — plain `getWriter()` throws outside a step.
@@ -180,9 +182,15 @@ export async function runAgentStreamWithAutoContinue({
   maxSteps,
   streamOnce,
   onAutoContinue,
+  onSanitized,
   finalizeWritable,
 }: RunAgentStreamWithAutoContinueOptions): Promise<AgentStreamResult> {
-  let messages = compactModelMessages(initialMessages).messages;
+  // Sanitize incomplete tool pairs + stub old tool payloads before every pass.
+  const prepared = compactModelMessages(initialMessages);
+  if (prepared.sanitizedToolCallIds.length > 0) {
+    onSanitized?.(prepared.sanitizedToolCallIds);
+  }
+  let messages = prepared.messages;
   let continuationCount = 0;
   let accumulated: AgentStreamResult | null = null;
 

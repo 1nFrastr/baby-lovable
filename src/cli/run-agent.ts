@@ -42,7 +42,9 @@ export async function runAgentTurn({
   messages,
   maxSteps = 30,
 }: RunAgentOptions): Promise<RunAgentResult> {
-  const modelMessages = await convertToModelMessages(messages);
+  const modelMessages = await convertToModelMessages(messages, {
+    ignoreIncompleteToolCalls: true,
+  });
 
   // Non-blocking prelude: preview-ready via reconciler (same as web chat).
   const { kickRuntimeDesired } = await import("@/lib/sandbox/preview");
@@ -70,6 +72,11 @@ export async function runAgentTurn({
     onAutoContinue: (n, reason) => {
       trace.logInfo(
         `auto-continue #${n} after finish=${reason} (invisible to user)`,
+      );
+    },
+    onSanitized: (ids) => {
+      trace.logWarn(
+        `removed ${ids.length} incomplete tool call(s) from history: ${ids.slice(0, 5).join(", ")}${ids.length > 5 ? "…" : ""}`,
       );
     },
     streamOnce: async ({ messages, preventClose, sendFinish }) => {

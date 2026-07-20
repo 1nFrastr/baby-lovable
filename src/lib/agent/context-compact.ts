@@ -1,12 +1,14 @@
 import { pruneMessages, type ModelMessage } from "ai";
 
-/** Soft budget before we start truncating old tool payloads (chars/4 ≈ tokens). */
+import { sanitizeModelMessages } from "./sanitize-messages";
+
+/** Soft budget before we drop older tool rounds entirely (chars/4 ≈ tokens). */
 export const CONTEXT_COMPACT_TOKENS = Math.max(
   8_000,
   Number(process.env.AI_CONTEXT_COMPACT_TOKENS ?? 100_000),
 );
 
-/** Keep the newest N messages fully intact while compacting older ones. */
+/** Keep the newest N messages fully intact; older tool payloads are stubbed. */
 export const CONTEXT_KEEP_RECENT_MESSAGES = Math.max(
   2,
   Number(process.env.AI_CONTEXT_KEEP_RECENT ?? 8),
@@ -55,6 +57,23 @@ function compactToolInput(toolName: string, input: unknown): unknown {
   }
 
   return record;
+}
+
+/** Tiny stub for old tool results — keeps call/result pairing, drops payload. */
+function stubToolOutput(toolName: string, output: unknown): unknown {
+  if (output != null && typeof output === "object" && !Array.isArray(output)) {
+    const rec = output as Record<string, unknown>;
+    if (rec.type === "json" || rec.type === "text") {
+      return {
+        type: "text",
+        value: `[dropped ${toolName} output — re-read workspace if needed]`,
+      };
+    }
+    if (typeof rec.ok === "boolean") {
+      return { ok: rec.ok, compacted: true, tool: toolName };
+    }
+  }
+  return { compacted: true, tool: toolName };
 }
 
 function compactToolOutput(toolName: string, output: unknown): unknown {
@@ -136,9 +155,14 @@ function compactToolOutput(toolName: string, output: unknown): unknown {
   return output;
 }
 
+/**
+ * @param mode
+ * - `truncate` — shrink large payloads (soft compact)
+ * - `drop` — replace tool results with a one-line stub (older history)
+ */
 function compactMessageParts(
   message: ModelMessage,
-  aggressive: boolean,
+  mode: "truncate" | "drop",
 ): ModelMessage {
   if (message.role !== "assistant" && message.role !== "tool") {
     return message;
@@ -149,18 +173,19 @@ function compactMessageParts(
 
   const content = message.content.map((part) => {
     if (part.type === "tool-call") {
-      if (!aggressive && !FILE_MUTATION_TOOLS.has(part.toolName)) {
-        return part;
-      }
       return {
         ...part,
         input: compactToolInput(part.toolName, part.input),
       };
     }
     if (part.type === "tool-result") {
+      const output =
+        mode === "drop"
+          ? stubToolOutput(part.toolName, part.output)
+          : compactToolOutput(part.toolName, part.output);
       return {
         ...part,
-        output: compactToolOutput(part.toolName, part.output) as typeof part.output,
+        output: output as typeof part.output,
       };
     }
     return part;
@@ -170,9 +195,13 @@ function compactMessageParts(
 }
 
 /**
- * Shrink model-bound history when estimated tokens exceed the soft budget.
- * Prefer in-place truncation of old writeFile/readFile payloads so message
- * indices stay stable for UI stitching; fall back to pruneMessages if still over.
+ * Shrink model-bound history:
+ * 1. Sanitize incomplete tool call/result pairs (interrupted turns).
+ * 2. Always stub/truncate tool payloads older than `keepRecent`.
+ * 3. If still over budget, drop older tool rounds via pruneMessages.
+ *
+ * Yes — every tool output normally sits in context until compacted. This is
+ * the simple discard path: keep recent full, stub older payloads, prune if needed.
  */
 export function compactModelMessages(
   messages: ModelMessage[],
@@ -180,19 +209,31 @@ export function compactModelMessages(
     tokenBudget?: number;
     keepRecent?: number;
   },
-): { messages: ModelMessage[]; estimatedTokens: number; compacted: boolean } {
+): {
+  messages: ModelMessage[];
+  estimatedTokens: number;
+  compacted: boolean;
+  sanitizedToolCallIds: string[];
+} {
   const tokenBudget = options?.tokenBudget ?? CONTEXT_COMPACT_TOKENS;
   const keepRecent = options?.keepRecent ?? CONTEXT_KEEP_RECENT_MESSAGES;
   const before = estimateTokens(messages);
 
-  if (before <= tokenBudget) {
-    return { messages, estimatedTokens: before, compacted: false };
-  }
+  const sanitized = sanitizeModelMessages(messages);
+  let next = sanitized.messages;
+  const keepFrom = Math.max(0, next.length - keepRecent);
 
-  const keepFrom = Math.max(0, messages.length - keepRecent);
-  let next = messages.map((message, index) =>
-    index < keepFrom ? compactMessageParts(message, true) : message,
-  );
+  // Always stub older tool outputs (not only when over budget).
+  let changed = sanitized.removedToolCallIds.length > 0;
+  if (keepFrom > 0) {
+    const beforeStub = estimateTokens(next);
+    next = next.map((message, index) =>
+      index < keepFrom ? compactMessageParts(message, "drop") : message,
+    );
+    if (estimateTokens(next) < beforeStub) {
+      changed = true;
+    }
+  }
 
   let after = estimateTokens(next);
   if (after > tokenBudget) {
@@ -203,12 +244,16 @@ export function compactModelMessages(
       toolCalls: `before-last-${Math.max(keepRecent, 3)}-messages`,
       emptyMessages: "remove",
     });
+    const again = sanitizeModelMessages(next);
+    next = again.messages;
     after = estimateTokens(next);
+    changed = true;
   }
 
   return {
     messages: next,
     estimatedTokens: after,
-    compacted: after < before || next.length !== messages.length,
+    compacted: changed || after < before || next.length !== messages.length,
+    sanitizedToolCallIds: sanitized.removedToolCallIds,
   };
 }

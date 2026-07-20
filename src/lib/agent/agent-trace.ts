@@ -415,6 +415,7 @@ export function createAgentTraceCore({
     createWritable,
     finalizeTurn,
     logInfo: (message: string) => sink.info(message),
+    logWarn: (message: string) => sink.warn(message),
   };
 }
 

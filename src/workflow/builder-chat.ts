@@ -19,7 +19,11 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
 
   const session = await getSessionStep(sessionId);
   const sandboxMode = session.sandboxMode;
-  const modelMessages = await convertToModelMessages(messages);
+  // Interrupted turns leave tool parts without results — drop them so the
+  // model prompt does not throw AI_MissingToolResultsError.
+  const modelMessages = await convertToModelMessages(messages, {
+    ignoreIncompleteToolCalls: true,
+  });
 
   const previousModelCount = modelMessages.length;
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(
@@ -49,6 +53,15 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
             sessionId,
             "INFO",
             `auto-continue #${n} after finish=${reason} (invisible to user)`,
+          ),
+        );
+      },
+      onSanitized: (ids) => {
+        console.log(
+          formatTraceStdout(
+            sessionId,
+            "WARN",
+            `removed ${ids.length} incomplete tool call(s) from history: ${ids.slice(0, 5).join(", ")}${ids.length > 5 ? "…" : ""}`,
           ),
         );
       },

@@ -9,6 +9,7 @@ import {
   compactModelMessages,
   estimateTokens,
 } from "./context-compact";
+import { sanitizeModelMessages } from "./sanitize-messages";
 
 describe("shouldAutoContinue", () => {
   it("continues on finishReason=length within budget", () => {
@@ -34,6 +35,88 @@ describe("shouldAutoContinue", () => {
 
   it("does not continue on stop", () => {
     expect(shouldAutoContinue("stop", 0)).toBe(false);
+  });
+});
+
+describe("sanitizeModelMessages", () => {
+  it("removes tool-calls that have no matching result", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "build" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "writing…" },
+          {
+            type: "tool-call",
+            toolCallId: "call_orphan",
+            toolName: "writeFile",
+            input: { path: "a.ts", content: "x" },
+          },
+        ],
+      },
+      { role: "user", content: "continue" },
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    expect(result.removedToolCallIds).toEqual(["call_orphan"]);
+    const assistant = result.messages[1];
+    expect(assistant?.role).toBe("assistant");
+    if (assistant?.role === "assistant" && Array.isArray(assistant.content)) {
+      expect(assistant.content).toHaveLength(1);
+      expect(assistant.content[0]).toMatchObject({ type: "text" });
+    }
+  });
+
+  it("keeps paired tool-call + tool-result", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_ok",
+            toolName: "checkPreview",
+            input: {},
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_ok",
+            toolName: "checkPreview",
+            output: { type: "json", value: { ok: true } },
+          },
+        ],
+      } as ModelMessage,
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    expect(result.removedToolCallIds).toEqual([]);
+    expect(result.messages).toHaveLength(2);
+  });
+
+  it("drops empty assistant messages that only had orphan tool-calls", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_only",
+            toolName: "readFile",
+            input: { path: "x" },
+          },
+        ],
+      },
+      { role: "user", content: "hi" },
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.role).toBe("user");
   });
 });
 
@@ -70,13 +153,17 @@ describe("compactModelMessages", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "hello" },
       writeFileCall("src/a.ts", " console.log(1)"),
+      writeFileResult("src/a.ts"),
     ];
-    const result = compactModelMessages(messages, { tokenBudget: 100_000 });
+    const result = compactModelMessages(messages, {
+      tokenBudget: 100_000,
+      keepRecent: 8,
+    });
     expect(result.compacted).toBe(false);
-    expect(result.messages).toEqual(messages);
+    expect(result.messages).toHaveLength(3);
   });
 
-  it("truncates old writeFile payloads when over budget", () => {
+  it("stubs old writeFile payloads even under soft budget", () => {
     const big = "x".repeat(8_000);
     const messages: ModelMessage[] = [
       { role: "user", content: "build many files" },
@@ -89,7 +176,7 @@ describe("compactModelMessages", () => {
 
     const before = estimateTokens(messages);
     const result = compactModelMessages(messages, {
-      tokenBudget: Math.floor(before / 3),
+      tokenBudget: 1_000_000,
       keepRecent: 4,
     });
 
@@ -107,5 +194,35 @@ describe("compactModelMessages", () => {
         expect(input.content?.length ?? 0).toBeLessThan(big.length);
       }
     }
+  });
+
+  it("sanitizes orphan tool-calls during compact", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_broken",
+            toolName: "writeFile",
+            input: { path: "a.ts", content: "x".repeat(500) },
+          },
+        ],
+      },
+      { role: "user", content: "retry" },
+    ];
+
+    const result = compactModelMessages(messages, { keepRecent: 2 });
+    expect(result.sanitizedToolCallIds).toContain("call_broken");
+    expect(
+      result.messages.some(
+        (m) =>
+          Array.isArray(m.content) &&
+          m.content.some(
+            (p) => p.type === "tool-call" && p.toolCallId === "call_broken",
+          ),
+      ),
+    ).toBe(false);
   });
 });
