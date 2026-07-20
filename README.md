@@ -13,16 +13,14 @@
 
 ## 核心能力
 
-|              |                                                            |
-| ------------ | ---------------------------------------------------------- |
-| **Agent 编排** | Vercel AI SDK v7 `WorkflowAgent`                           |
-| **持久执行**     | Serverless Workflow：中断可续跑，失败可重试，步骤可观测                        |
-| **可恢复流**     | 刷新不断流，会话历史落库可回看                                            |
-| **远程沙盒**     | Daytona Sandbox + 自建镜像                                     |
-| **沙盒生命周期**     | 类似 K8s 的声明式调度机制：observe → act（Lease + CAS）|
-| **状态同步**     | Supabase Realtime 推送会话与 Preview 状态，前端不用轮询                  |
-| **多用户隔离**    | Supabase Auth + RLS，认证授权和数据权限隔离                            |
-| **自动 E2E**   | Cloudflare BrowserRun，Agent 自己开浏览器验结果                      |
+- **Agent 编排** — Vercel AI SDK v7 `WorkflowAgent`
+- **持久执行** — Serverless Workflow：中断可续跑，失败可重试，步骤可观测
+- **可恢复流** — 刷新不断流，会话历史落库可回看
+- **远程沙盒** — Daytona Sandbox + 自建镜像
+- **沙盒生命周期** — 类似 K8s 的声明式调度：observe → act（Lease + CAS）
+- **状态同步** — Supabase Realtime 推送会话与 Preview 状态，前端不用轮询
+- **多用户隔离** — Supabase Auth + RLS，认证授权和数据权限隔离
+- **自动 E2E** — Cloudflare BrowserRun，Agent 自己开浏览器验结果
 
 <table>
   <tr>
@@ -181,18 +179,15 @@ Agent / Preview API
 
 ## 工程落地方法
 
-可观测性驱动开发：CLI Agent 模式不依赖 WebUI 调试、本地沙盒兼容层不依赖远程沙盒服务、纯文件持久化系统不依赖 DB、不依赖 Docker、完整系统可以在工程项目内 All-in-one 启动运行和调试Debug。方便 Cursor 编码 Agent 做端到端自回归。
-
-开发体验优先：Vercel CLI + Supabase CLI；沙盒可选 本地模拟 或 Daytona；存储与鉴权可选本地文件模式免登录，或接 Supabase（匿名登录 / OAuth）
-
-AI Coding 方法： 编码工作由 Cursor 完成；90% 工作使用普通模型完成，如 Composer2.5、Grok 4.5；复杂任务使用高级模型 GPT 5.6-Sol、Claude Sonnet 5（复杂任务是指：架构设计Plan、复杂模块的 Review 和 Debug 工作）；方案调研工作如架构选型等是和 Genspark Agent一起完成；
+| 原则 | 要点 |
+| --- | --- |
+| **可观测性驱动** | CLI Agent 不依赖 WebUI 调试<br>本地沙盒兼容层不依赖远程沙盒<br>文件持久化，不依赖 DB / Docker<br>All-in-one 可在仓库内启动与 Debug，方便 Cursor Agent 端到端自回归 |
+| **开发体验优先** | 工具链：Vercel CLI + Supabase CLI<br>沙盒：本地模拟 或 Daytona<br>存储与鉴权：本地文件免登录，或接 Supabase（匿名登录 / OAuth） |
+| **AI Coding** | 编码由 Cursor 完成<br>日常（约 90%）：Composer 2.5、Grok 4.5<br>复杂任务（架构 Plan、复杂模块 Review / Debug）：GPT 5.6-Sol、Claude Sonnet 5<br>方案调研 / 架构选型：与 Genspark Agent 协作 |
 
 ## 更多功能规划
 
-Agent Runtime 治理：长上下文治理、工具结果压缩等
-
-代码产物持久化：云端版本控制，接入 Freestyle Git和 Github 双向同步
-
-产品体验优化：UI/UX等优化
-
-第三方连接器：如 Supabase Baas、Vercel Deploy、图片素材生成 MCP 工具等
+- [ ] Agent Runtime 治理：长上下文治理、工具结果压缩等
+- [ ] 代码产物持久化：云端版本控制，接入 Freestyle Git 和 Github 双向同步
+- [ ] 产品体验优化：UI/UX 等优化
+- [ ] 第三方连接器：如 Supabase BaaS、Vercel Deploy、图片素材生成 MCP 工具等
