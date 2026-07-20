@@ -13,14 +13,16 @@
 
 ## 核心能力
 
-- **Agent 编排** — Vercel AI SDK v7 `WorkflowAgent`
-- **持久执行** — Serverless Workflow：中断可续跑，失败可重试，步骤可观测
-- **可恢复流** — 刷新不断流，会话历史落库可回看
-- **远程沙盒** — Daytona Sandbox + 自建镜像
-- **沙盒生命周期** — 类似 K8s 的声明式调度：observe → act（Lease + CAS）
-- **状态同步** — Supabase Realtime 推送会话与 Preview 状态，前端不用轮询
-- **多用户隔离** — Supabase Auth + RLS，认证授权和数据权限隔离
-- **自动 E2E** — Cloudflare BrowserRun，Agent 自己开浏览器验结果
+| 能力 | 说明 |
+| --- | --- |
+| **Agent 编排** | Vercel AI SDK v7 `WorkflowAgent` |
+| **持久执行** | Serverless Workflow：中断可续跑，失败可重试，步骤可观测 |
+| **可恢复流** | 刷新不断流，会话历史落库可回看 |
+| **远程沙盒** | Daytona Sandbox + 自建镜像 |
+| **沙盒生命周期** | 类似 K8s 的声明式调度：observe → act（Lease + CAS） |
+| **状态同步** | Supabase Realtime 推送会话与 Preview 状态，前端不用轮询 |
+| **多用户隔离** | Supabase Auth + RLS，认证授权和数据权限隔离 |
+| **自动 E2E** | Cloudflare BrowserRun，Agent 自己开浏览器验结果 |
 
 <table>
   <tr>
