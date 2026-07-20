@@ -260,24 +260,22 @@ export function AppShell() {
             height={36}
             className="rounded-lg"
           />
-          <div>
+          <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
               BabyLovable
             </h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              WorkflowAgent runtime for Next.js app generation
-            </p>
+            <a
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="在 GitHub 打开仓库"
+              title="GitHub"
+              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-[10px] font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            >
+              <GitHubIcon className="h-3.5 w-3.5" />
+              Repo
+            </a>
           </div>
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="在 GitHub 打开仓库"
-            title="GitHub"
-            className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-          >
-            <GitHubIcon className="h-5 w-5" />
-          </a>
         </div>
 
         <MvpNoticeCarousel className="hidden sm:block" />
