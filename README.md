@@ -4,7 +4,7 @@
 <h2>BabyLovable</h2>
 
 <h3>
-  Serverless 架构下的云端多用户 Coding Agent
+  Serverless 架构上的云端多用户 Coding Agent
   ·
   <a href="https://baby-lovable.vercel.app/">Demo ↗</a>
 </h3>
