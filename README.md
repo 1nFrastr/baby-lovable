@@ -4,7 +4,7 @@
 <h2>BabyLovable</h2>
 
 <h3>
-  Serverless 架构上的云端多用户 Coding Agent
+  Serverless 架构上的多用户 Coding Agent
   ·
   <a href="https://baby-lovable.vercel.app/">Demo ↗</a>
 </h3>
@@ -20,7 +20,7 @@
 
 ## BabyLovable 是什么
 
-BabyLovable 是一个运行在 Serverless 架构上的云端多用户 Coding Agent。
+BabyLovable 是一个运行在 Serverless 架构上的多用户 Coding Agent。
 
 用户可以在浏览器里发起需求，Agent 会在远程沙盒中生成和修改项目，启动开发服务，提供实时 Preview，并可以自动打开浏览器验证结果。
 
