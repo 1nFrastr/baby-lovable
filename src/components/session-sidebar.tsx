@@ -1,5 +1,7 @@
 "use client";
 
+import { Loader2, Plus } from "lucide-react";
+
 import type { SessionSummary } from "@/lib/session/types";
 import { isActiveRunStatus } from "@/lib/session/types";
 
@@ -12,15 +14,6 @@ interface SessionSidebarProps {
   onCreate: () => void;
   isCreating?: boolean;
   isSwitching?: boolean;
-}
-
-function Spinner({ className }: { className?: string }) {
-  return (
-    <span
-      className={`inline-block animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-200 ${className ?? "h-3.5 w-3.5"}`}
-      aria-hidden="true"
-    />
-  );
 }
 
 function formatRelativeTime(value: string): string {
@@ -66,11 +59,14 @@ export function SessionSidebar({
           >
             {isCreating ? (
               <>
-                <Spinner className="h-3 w-3 border-white/40 border-t-white" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
                 Creating…
               </>
             ) : (
-              "+ New"
+              <>
+                <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                New
+              </>
             )}
           </button>
         </div>
@@ -129,7 +125,10 @@ export function SessionSidebar({
                       {formatRelativeTime(session.updatedAt)}
                     </p>
                     {isPendingTarget ? (
-                      <Spinner className="h-3 w-3 shrink-0" />
+                      <Loader2
+                        className="h-3 w-3 shrink-0 animate-spin text-zinc-400"
+                        strokeWidth={2}
+                      />
                     ) : null}
                   </div>
                 </button>

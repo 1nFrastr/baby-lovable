@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -81,8 +82,17 @@ function FileTreeNode({
         style={{ paddingLeft: 6 + depth * 12 }}
         title={node.path}
       >
-        <span className="w-3 shrink-0 text-[10px] text-zinc-400" aria-hidden>
-          {node.isDir ? (isOpen ? "▾" : "▸") : " "}
+        <span
+          className="flex h-3 w-3 shrink-0 items-center justify-center text-zinc-400"
+          aria-hidden
+        >
+          {node.isDir ? (
+            isOpen ? (
+              <ChevronDown className="h-3 w-3" strokeWidth={2} />
+            ) : (
+              <ChevronRight className="h-3 w-3" strokeWidth={2} />
+            )
+          ) : null}
         </span>
         <span className="min-w-0 truncate">{node.name}</span>
       </button>
@@ -129,6 +139,12 @@ export function WorkspaceFileExplorer({
   const [rootLoading, setRootLoading] = useState(true);
   const contentRequestRef = useRef(0);
   const prevRefreshKeyRef = useRef(refreshKey);
+  /** Opened-file content cache — skip re-fetch when switching tabs unless force/refresh. */
+  const contentCacheRef = useRef(new Map<string, ExplorerContentResult>());
+
+  const clearContentCache = useCallback(() => {
+    contentCacheRef.current.clear();
+  }, []);
 
   const reloadTree = useCallback(async () => {
     setRootLoading(true);
@@ -164,6 +180,14 @@ export function WorkspaceFileExplorer({
     }
   }, [sessionId]);
 
+  // Drop cache + selection when switching sessions.
+  useEffect(() => {
+    clearContentCache();
+    setSelectedPath(null);
+    setContent(null);
+    setContentError(null);
+  }, [sessionId, clearContentCache]);
+
   // Initial load + sync after agent turn / manual refresh (one tree request).
   useEffect(() => {
     queueMicrotask(() => {
@@ -172,11 +196,21 @@ export function WorkspaceFileExplorer({
   }, [reloadTree, refreshKey]);
 
   const loadFile = useCallback(
-    async (filePath: string) => {
-      const requestId = ++contentRequestRef.current;
+    async (filePath: string, options?: { force?: boolean }) => {
       setSelectedPath(filePath);
-      setContentLoading(true);
       setContentError(null);
+
+      if (!options?.force) {
+        const cached = contentCacheRef.current.get(filePath);
+        if (cached) {
+          setContent(cached);
+          setContentLoading(false);
+          return;
+        }
+      }
+
+      const requestId = ++contentRequestRef.current;
+      setContentLoading(true);
 
       try {
         const data = await fetchJson<ExplorerContentResult>(
@@ -185,11 +219,13 @@ export function WorkspaceFileExplorer({
         if (requestId !== contentRequestRef.current) {
           return;
         }
+        contentCacheRef.current.set(filePath, data);
         setContent(data);
       } catch (error) {
         if (requestId !== contentRequestRef.current) {
           return;
         }
+        contentCacheRef.current.delete(filePath);
         setContent(null);
         setContentError(
           error instanceof Error ? error.message : "Failed to read file",
@@ -203,17 +239,21 @@ export function WorkspaceFileExplorer({
     [sessionId],
   );
 
-  // Re-fetch open file only when sandbox sync refreshKey bumps.
+  // Invalidate cache + re-fetch open file when sandbox sync refreshKey bumps.
   useEffect(() => {
     const previous = prevRefreshKeyRef.current;
     prevRefreshKeyRef.current = refreshKey;
-    if (previous === refreshKey || !selectedPath) {
+    if (previous === refreshKey) {
+      return;
+    }
+    clearContentCache();
+    if (!selectedPath) {
       return;
     }
     queueMicrotask(() => {
-      void loadFile(selectedPath);
+      void loadFile(selectedPath, { force: true });
     });
-  }, [refreshKey, selectedPath, loadFile]);
+  }, [refreshKey, selectedPath, loadFile, clearContentCache]);
 
   const handleToggleDir = useCallback((dirPath: string) => {
     setExpanded((prev) => {
@@ -237,14 +277,16 @@ export function WorkspaceFileExplorer({
           <button
             type="button"
             onClick={() => {
+              clearContentCache();
               void reloadTree();
               if (selectedPath) {
-                void loadFile(selectedPath);
+                void loadFile(selectedPath, { force: true });
               }
             }}
-            className="rounded px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800"
             title="从 sandbox 重新同步完整文件树"
           >
+            <RefreshCw className="h-3 w-3" strokeWidth={2} />
             刷新
           </button>
         </div>

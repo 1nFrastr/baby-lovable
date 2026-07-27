@@ -1,5 +1,16 @@
 "use client";
 
+import {
+  ArrowLeft,
+  ArrowRight,
+  Download,
+  ExternalLink,
+  House,
+  RefreshCw,
+  RotateCcw,
+  RotateCw,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
@@ -43,10 +54,38 @@ interface PreviewPanelProps {
 const PIP_HOLD_AFTER_DONE_MS = 10_000;
 /** Retry once after ready so an early failed stylesheet request can recover. */
 const READY_EMBED_RELOAD_DELAY_MS = 1_000;
-/** Let the final HMR update settle before refreshing after an agent turn. */
-const TURN_EMBED_RELOAD_DELAY_MS = 300;
 
 type PreviewPanelTab = "preview" | "files";
+
+/** Must match templates/nextjs-starter/src/instrumentation-client.ts */
+const PREVIEW_BRIDGE_SOURCE = "baby-lovable-preview";
+
+interface PreviewBridgeLocation {
+  href: string;
+  path: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+interface PreviewBridgeLocationMessage {
+  source: typeof PREVIEW_BRIDGE_SOURCE;
+  type: "location";
+  href: string;
+  path: string;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+}
+
+function previewOrigin(url: string | undefined): string | null {
+  if (!url) {
+    return null;
+  }
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
 
 function withEmbedCacheBust(url: string, nonce: number): string {
   try {
@@ -161,6 +200,8 @@ export function PreviewPanel({
 
   const [embedRemountNonce, setEmbedRemountNonce] = useState(0);
   const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null);
+  /** Soft prompt after an agent turn — user opts in to remount (avoids interrupting iframe interaction). */
+  const [previewRefreshPending, setPreviewRefreshPending] = useState(false);
   const [previewAction, setPreviewAction] = useState<
     "warm" | "restart" | null
   >(null);
@@ -178,6 +219,11 @@ export function PreviewPanel({
   const prevAgentRunStatusRef = useRef<
     SessionRuntimeProjection["run"]["status"] | null
   >(null);
+  const iframeLoadedRef = useRef(false);
+  const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const [iframeLocation, setIframeLocation] =
+    useState<PreviewBridgeLocation | null>(null);
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -199,6 +245,7 @@ export function PreviewPanel({
   const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
   const iframeLoaded =
     Boolean(previewEmbedUrl) && loadedIframeKey === previewIframeKey;
+  iframeLoadedRef.current = iframeLoaded;
 
   // The root document can become reachable just before its CSS chunks do.
   // Retry one full navigation after ready; unlike HMR, this reloads failed
@@ -208,6 +255,7 @@ export function PreviewPanel({
       return;
     }
 
+    setPreviewRefreshPending(false);
     const timer = window.setTimeout(() => {
       setEmbedRemountNonce((nonce) => nonce + 1);
     }, READY_EMBED_RELOAD_DELAY_MS);
@@ -224,9 +272,61 @@ export function PreviewPanel({
     setFilesMountSessionId(sessionId);
   }, [iframeLoaded, sessionId]);
 
-  // HMR may rerender React while leaving a failed or stale stylesheet link in
-  // place. Refresh once when each live agent turn leaves the running state.
-  // Also re-sync the read-only file explorer from sandbox after the turn.
+  useEffect(() => {
+    setPreviewRefreshPending(false);
+    setIframeLocation(null);
+  }, [sessionId]);
+
+  // Remount clears SPA history inside the iframe — reset chrome until bridge reports.
+  useEffect(() => {
+    setIframeLocation(null);
+  }, [previewIframeKey]);
+
+  // Cross-origin preview: location + history only via postMessage bridge.
+  useEffect(() => {
+    const expectedOrigin = previewOrigin(readyPreviewUrl);
+    if (!expectedOrigin) {
+      return;
+    }
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== expectedOrigin) {
+        return;
+      }
+      if (event.source !== previewIframeRef.current?.contentWindow) {
+        return;
+      }
+      const data = event.data as PreviewBridgeLocationMessage | null;
+      if (
+        !data ||
+        typeof data !== "object" ||
+        data.source !== PREVIEW_BRIDGE_SOURCE ||
+        data.type !== "location" ||
+        typeof data.path !== "string"
+      ) {
+        return;
+      }
+
+      setIframeLocation((prev) => ({
+        href: typeof data.href === "string" ? data.href : data.path,
+        path: data.path || "/",
+        canGoBack:
+          typeof data.canGoBack === "boolean"
+            ? data.canGoBack
+            : (prev?.canGoBack ?? false),
+        canGoForward:
+          typeof data.canGoForward === "boolean"
+            ? data.canGoForward
+            : (prev?.canGoForward ?? false),
+      }));
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [readyPreviewUrl]);
+
+  // After each agent turn: sync Files explorer, but do not remount the iframe
+  // (that interrupts in-iframe interaction). Offer a soft refresh prompt instead.
   useEffect(() => {
     const previous = prevAgentRunStatusRef.current;
     prevAgentRunStatusRef.current = runStatus;
@@ -242,19 +342,48 @@ export function PreviewPanel({
 
     queueMicrotask(() => {
       setFilesRefreshKey((key) => key + 1);
+      if (readyPreviewUrl && iframeLoadedRef.current) {
+        setPreviewRefreshPending(true);
+      }
     });
-
-    if (!readyPreviewUrl) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setEmbedRemountNonce((nonce) => nonce + 1);
-    }, TURN_EMBED_RELOAD_DELAY_MS);
-
-    return () => window.clearTimeout(timer);
   }, [runStatus, readyPreviewUrl]);
 
+  const applyPreviewRefresh = useCallback(() => {
+    setPreviewRefreshPending(false);
+    setEmbedRemountNonce((nonce) => nonce + 1);
+  }, []);
+
+  const navigatePreview = useCallback(
+    (action: "back" | "forward" | "reload" | "home") => {
+      const win = previewIframeRef.current?.contentWindow;
+      const targetOrigin = previewOrigin(readyPreviewUrl);
+      if (!win || !targetOrigin) {
+        if (action === "reload" || action === "home") {
+          applyPreviewRefresh();
+        }
+        return;
+      }
+
+      try {
+        win.postMessage(
+          {
+            source: PREVIEW_BRIDGE_SOURCE,
+            type: "navigate",
+            action,
+          },
+          targetOrigin,
+        );
+        if (action === "reload") {
+          setPreviewRefreshPending(false);
+        }
+      } catch {
+        if (action === "reload" || action === "home") {
+          applyPreviewRefresh();
+        }
+      }
+    },
+    [applyPreviewRefresh, readyPreviewUrl],
+  );
   // Open Live View only when the chat stream transitions into a running
   // testPreview after Chat has hydrated history. Refresh / session switch
   // must not pop the PiP for past or in-flight rehydrated runs.
@@ -486,12 +615,20 @@ export function PreviewPanel({
               };
   const toolbarStatus =
     preview.status === "ready" && iframeLoaded
-      ? preview.url
+      ? (iframeLocation?.href ?? readyPreviewUrl)
       : displayError
         ? displayError
         : preview.status === "needs_install"
           ? "Project not ready"
           : previewStatus.title;
+
+  const addressBarPath = iframeLocation?.path ?? "/";
+  const addressBarTitle =
+    iframeLocation?.href ?? readyPreviewUrl ?? previewEmbedUrl;
+  const canNavigateBack =
+    iframeLoaded && Boolean(iframeLocation?.canGoBack);
+  const canNavigateForward =
+    iframeLoaded && Boolean(iframeLocation?.canGoForward);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
@@ -558,7 +695,7 @@ export function PreviewPanel({
               panelTab === "preview" &&
               preview.status === "ready" &&
               iframeLoaded
-                ? preview.url
+                ? (iframeLocation?.href ?? readyPreviewUrl)
                 : undefined
             }
           >
@@ -571,8 +708,9 @@ export function PreviewPanel({
             <button
               type="button"
               onClick={() => setFilesRefreshKey((key) => key + 1)}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
+              <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
               Sync
             </button>
           ) : (
@@ -588,8 +726,16 @@ export function PreviewPanel({
                     ? "Local export is not implemented yet"
                     : "Download workspace as git archive zip"
                 }
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
+                {exporting ? (
+                  <RefreshCw
+                    className="h-3.5 w-3.5 animate-spin"
+                    strokeWidth={2}
+                  />
+                ) : (
+                  <Download className="h-3.5 w-3.5" strokeWidth={2} />
+                )}
                 {exporting ? "Exporting…" : "Export"}
               </button>
               <button
@@ -598,14 +744,73 @@ export function PreviewPanel({
                   void handleRestart();
                 }}
                 disabled={previewAction !== null}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
+                <RotateCcw
+                  className={`h-3.5 w-3.5 ${
+                    previewAction === "restart" ? "animate-spin" : ""
+                  }`}
+                  strokeWidth={2}
+                />
                 {previewAction === "restart" ? "Restarting…" : "Restart"}
               </button>
             </>
           )}
         </div>
       </div>
+
+      {panelTab === "preview" && previewEmbedUrl ? (
+        <div className="flex shrink-0 items-center gap-1 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => navigatePreview("back")}
+              disabled={!canNavigateBack}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="后退"
+              aria-label="后退"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigatePreview("forward")}
+              disabled={!canNavigateForward}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="前进"
+              aria-label="前进"
+            >
+              <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigatePreview("reload")}
+              disabled={!iframeLoaded}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="刷新"
+              aria-label="刷新"
+            >
+              <RotateCw className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigatePreview("home")}
+              disabled={!iframeLoaded}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="回到预览首页"
+              aria-label="回到预览首页"
+            >
+              <House className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          </div>
+          <p
+            className="min-w-0 flex-1 truncate rounded-md border border-zinc-200 bg-white px-2.5 py-1 font-mono text-[11px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+            title={addressBarTitle}
+          >
+            {addressBarPath}
+          </p>
+        </div>
+      ) : null}
 
       <div className="relative min-h-0 flex-1">
         <div
@@ -651,7 +856,29 @@ export function PreviewPanel({
                   </p>
                 </div>
               </div>
+              {previewRefreshPending && iframeLoaded ? (
+                <div className="absolute top-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1 rounded-full border border-zinc-200 bg-white/95 px-1.5 py-1 shadow-sm backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/95">
+                  <button
+                    type="button"
+                    onClick={applyPreviewRefresh}
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <RefreshCw className="h-3 w-3" strokeWidth={2} />
+                    预览有更新 · 刷新
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewRefreshPending(false)}
+                    className="rounded-full px-2 py-1 text-[11px] text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                    aria-label="忽略预览刷新提示"
+                    title="忽略"
+                  >
+                    <X className="h-3 w-3" strokeWidth={2} />
+                  </button>
+                </div>
+              ) : null}
               <iframe
+                ref={previewIframeRef}
                 key={previewIframeKey}
                 src={previewIframeSrc}
                 title="App preview"
@@ -693,8 +920,14 @@ export function PreviewPanel({
                     type="button"
                     onClick={handleRetry}
                     disabled={previewAction !== null || runtimeLoading}
-                    className="mt-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                   >
+                    <RotateCcw
+                      className={`h-3.5 w-3.5 ${
+                        previewAction ? "animate-spin" : ""
+                      }`}
+                      strokeWidth={2}
+                    />
                     {previewAction ? "正在重试…" : "重试"}
                   </button>
                 </>
@@ -723,8 +956,9 @@ export function PreviewPanel({
                     href={appTest.liveViewUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-zinc-100 dark:text-blue-400 dark:hover:bg-zinc-800"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-zinc-100 dark:text-blue-400 dark:hover:bg-zinc-800"
                   >
+                    <ExternalLink className="h-3 w-3" strokeWidth={2} />
                     Open
                   </a>
                   <button
@@ -736,10 +970,10 @@ export function PreviewPanel({
                       setPipHoldActive(false);
                       pendingPipOpenRef.current = false;
                     }}
-                    className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    className="inline-flex items-center rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                     aria-label="Close Live View"
                   >
-                    ✕
+                    <X className="h-3 w-3" strokeWidth={2} />
                   </button>
                 </div>
               </div>
@@ -761,8 +995,9 @@ export function PreviewPanel({
               href={appTest.liveViewUrl}
               target="_blank"
               rel="noreferrer"
-              className="absolute bottom-3 right-3 z-10 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+              className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
             >
+              <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} />
               Open Live View
             </a>
           ) : null}

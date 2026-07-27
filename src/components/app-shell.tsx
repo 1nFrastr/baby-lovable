@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2, Plus } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import {
   useCallback,
@@ -29,6 +30,7 @@ import { SessionSidebar } from "./session-sidebar";
 
 const GITHUB_REPO_URL = "https://github.com/1nFrastr/baby-lovable";
 
+/** Lucide dropped brand icons; keep a minimal GitHub mark here. */
 function GitHubIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -338,11 +340,14 @@ export function AppShell() {
               >
                 {isCreating ? (
                   <>
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
                     Creating…
                   </>
                 ) : (
-                  "New Project"
+                  <>
+                    <Plus className="h-4 w-4" strokeWidth={2} />
+                    New Project
+                  </>
                 )}
               </button>
             </div>

@@ -15,6 +15,10 @@ const NEXTJS_STARTER_TEMPLATE = path.join(
   "nextjs-starter",
 );
 
+/** Marker in templates/nextjs-starter/src/instrumentation-client.ts */
+const PREVIEW_BRIDGE_MARKER = "baby-lovable-preview-bridge";
+const PREVIEW_BRIDGE_RELATIVE = path.join("src", "instrumentation-client.ts");
+
 async function isWorkspaceEmpty(workspaceRoot: string): Promise<boolean> {
   try {
     const entries = await fs.readdir(workspaceRoot);
@@ -69,6 +73,38 @@ export async function getLocalSandboxStatus(
   }
 }
 
+/**
+ * Ensure the platform preview iframe bridge exists for older local workspaces.
+ * Writes only when missing or when the file lacks the platform marker (never
+ * overwrite a customized non-bridge instrumentation-client.ts).
+ */
+async function ensurePreviewBridge(workspaceRoot: string): Promise<void> {
+  const target = path.join(workspaceRoot, PREVIEW_BRIDGE_RELATIVE);
+  const source = path.join(NEXTJS_STARTER_TEMPLATE, PREVIEW_BRIDGE_RELATIVE);
+
+  try {
+    await fs.access(source);
+  } catch {
+    return;
+  }
+
+  try {
+    const existing = await fs.readFile(target, "utf8");
+    if (existing.includes(PREVIEW_BRIDGE_MARKER)) {
+      return;
+    }
+    // Custom instrumentation-client without our bridge — leave it alone.
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.copyFile(source, target);
+}
+
 /** Create workspace from template if missing/empty. */
 export async function ensureWorkspace(
   sessionId: string,
@@ -80,6 +116,8 @@ export async function ensureWorkspace(
     await fs.mkdir(path.dirname(workspaceRoot), { recursive: true });
     await seedWorkspaceFromTemplate(workspaceRoot);
   }
+
+  await ensurePreviewBridge(workspaceRoot);
 
   return workspaceRoot;
 }

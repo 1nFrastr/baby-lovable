@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
 import { isToolUIPart, type UIMessage } from "ai";
+import { FlaskConical, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -303,8 +304,9 @@ export function Chat({
             onClick={handleRunAppTest}
             disabled={isLiveTurn}
             title="Send a message asking the agent to run a happy-path UI test"
-            className="absolute bottom-4 right-4 z-10 rounded-full border border-zinc-200 bg-white/95 px-3.5 py-2 text-xs font-medium text-zinc-700 shadow-md backdrop-blur transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/95 px-3.5 py-2 text-xs font-medium text-zinc-700 shadow-md backdrop-blur transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
+            <FlaskConical className="h-3.5 w-3.5" strokeWidth={2} />
             Auto Test
           </button>
         ) : null}
@@ -325,8 +327,9 @@ export function Chat({
           <button
             type="submit"
             disabled={isLiveTurn}
-            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
           >
+            <Send className="h-4 w-4" strokeWidth={2} />
             发送
           </button>
         </div>
