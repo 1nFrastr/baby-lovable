@@ -38,6 +38,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 - **`session.json`** — durable chat + tool-call history. Inspect it to see exactly what the agent did (tool inputs/outputs, errors, token of conversation).
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
 - **`workspace/`** — the app under construction. Read/edit files here to verify codegen, run commands, or debug compile issues.
+- **Daytona + Freestyle** — for `sandboxMode=daytona`, Freestyle `main` is the durable source of truth; the sandbox working tree is a projection. See `docs/freestyle-git.md`. Local mode keeps on-disk workspace only.
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
 ## CLI — headless agent runner (preferred for AI verification)

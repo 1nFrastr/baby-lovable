@@ -1,4 +1,5 @@
 import type { AppTestLatestStatus, AppTestRunStatus } from "@/lib/browser-run/types";
+import type { SourceControlProjection } from "@/lib/git/types";
 import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 
 import type { SessionRunStatus } from "./types";
@@ -39,12 +40,14 @@ export interface SessionRuntimeProjection {
     ok?: boolean;
     updatedAt: string;
   };
+  sourceControl: SourceControlProjection;
 }
 
 export type RuntimeProjectionPatch = {
   run?: Partial<SessionRuntimeProjection["run"]>;
   preview?: Partial<SessionRuntimeProjection["preview"]>;
   appTest?: Partial<SessionRuntimeProjection["appTest"]>;
+  sourceControl?: Partial<SourceControlProjection>;
 };
 
 export type RuntimeTransport = "sse" | "realtime";
@@ -134,6 +137,7 @@ export function emptyRuntimeProjection(
       updatedAt,
     },
     appTest: { status: "idle", updatedAt },
+    sourceControl: { status: "idle", updatedAt },
   };
 }
 
@@ -141,6 +145,10 @@ export function mergeRuntimeProjection(
   current: SessionRuntimeProjection,
   patch: RuntimeProjectionPatch,
 ): SessionRuntimeProjection {
+  const sourceControl =
+    current.sourceControl ??
+    ({ status: "idle", updatedAt: new Date().toISOString() } as SourceControlProjection);
+
   return {
     sessionId: current.sessionId,
     version: current.version,
@@ -151,6 +159,9 @@ export function mergeRuntimeProjection(
     appTest: patch.appTest
       ? { ...current.appTest, ...patch.appTest }
       : current.appTest,
+    sourceControl: patch.sourceControl
+      ? { ...sourceControl, ...patch.sourceControl }
+      : sourceControl,
   };
 }
 
@@ -158,6 +169,7 @@ export function mergeRuntimeProjection(
 export function runtimeUiSignature(
   projection: SessionRuntimeProjection,
 ): string {
+  const sourceControl = projection.sourceControl ?? { status: "idle" };
   return JSON.stringify({
     run: {
       status: projection.run.status,
@@ -176,6 +188,11 @@ export function runtimeUiSignature(
       liveViewUrl: projection.appTest.liveViewUrl ?? null,
       summary: projection.appTest.summary ?? null,
       ok: projection.appTest.ok ?? null,
+    },
+    sourceControl: {
+      status: sourceControl.status,
+      shortSha: sourceControl.shortSha ?? null,
+      error: sourceControl.error ?? null,
     },
   });
 }

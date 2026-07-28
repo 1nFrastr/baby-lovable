@@ -106,6 +106,7 @@ export async function saveSessionMessagesStep(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
+  const runId = session.lastRunId;
   const draft = await readDraft(sessionId, session.userId);
   const assistantMessage =
     draft && draft.runId === session.lastRunId
@@ -126,11 +127,27 @@ export async function saveSessionMessagesStep(
     await updateSession(sessionId, { title });
   }
 
+  // Unlock UI first — Freestyle sync continues after terminal runStatus.
   await updateSession(sessionId, {
     runStatus: "completed",
     lastRunId: null,
   });
   await deleteDraft(sessionId, session.userId);
+
+  if (session.sandboxMode === "daytona") {
+    const { checkpointSessionTurn } = await import(
+      "@/lib/git/checkpoint-session-turn"
+    );
+    await checkpointSessionTurn({
+      sessionId,
+      sandboxMode: session.sandboxMode,
+      messages: mergedMessages,
+      outcome: "completed",
+      runId,
+      userId: session.userId,
+      sessionTitle: title,
+    });
+  }
 
   return { messageCount: mergedMessages.length };
 }
@@ -142,12 +159,29 @@ export async function markSessionRunFailedStep(sessionId: string) {
   const { getSession, updateSession } = await import("@/lib/session/store");
 
   const session = await getSession(sessionId);
+  const runId = session?.lastRunId ?? null;
+
   await updateSession(sessionId, {
     runStatus: "failed",
     lastRunId: null,
   });
   if (session) {
     await deleteDraft(sessionId, session.userId);
+
+    if (session.sandboxMode === "daytona") {
+      const { checkpointSessionTurn } = await import(
+        "@/lib/git/checkpoint-session-turn"
+      );
+      await checkpointSessionTurn({
+        sessionId,
+        sandboxMode: session.sandboxMode,
+        messages: session.messages,
+        outcome: "failed",
+        runId,
+        userId: session.userId,
+        sessionTitle: session.title,
+      });
+    }
   }
 }
 

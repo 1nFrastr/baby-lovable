@@ -51,6 +51,16 @@ export async function ensureSandboxPublic(sandbox: Sandbox): Promise<void> {
   }
 }
 
+/** True when Daytona still has a record for this id (asleep counts as present). */
+export async function sandboxRecordExists(sandboxId: string): Promise<boolean> {
+  try {
+    await getDaytonaClient().get(sandboxId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Get sandbox by id. wake=false never starts stopped/archived VMs. */
 export async function fetchSandbox(
   sessionId: string,
@@ -124,12 +134,30 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
   const idleMinutes = Number(process.env.DAYTONA_SANDBOX_IDLE_MINUTES ?? 30);
   const snapshot = getDaytonaSnapshotName();
 
+  // Freestyle Git is not in Daytona Essential Services — must allow explicitly.
+  // Keep GitHub/npm so snapshot tooling and installs still work when allow-list
+  // replaces broader defaults (tier-dependent).
+  const domainAllowList =
+    process.env.DAYTONA_DOMAIN_ALLOW_LIST?.trim() ||
+    [
+      "git.freestyle.sh",
+      "api.freestyle.sh",
+      "*.freestyle.sh",
+      "github.com",
+      "*.github.com",
+      "*.githubusercontent.com",
+      "registry.npmjs.org",
+      "registry.npmjs.com",
+      "nodejs.org",
+    ].join(",");
+
   const baseParams = {
     language: "typescript" as const,
     labels: { "baby-lovable-session": session.id },
     autoStopInterval: idleMinutes > 0 ? idleMinutes : 0,
     // Public port preview — iframe uses getPreviewLink URL (no signed token).
     public: true,
+    domainAllowList,
   };
 
   logDaytonaBootstrap(

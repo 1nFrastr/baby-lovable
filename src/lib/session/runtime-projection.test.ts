@@ -64,4 +64,14 @@ describe("runtime projection merge / bump", () => {
 
     expect(shouldBumpRuntimeVersion(before, after)).toBe(true);
   });
+
+  it("bumps when sourceControl status changes", () => {
+    const before = emptyRuntimeProjection("sess_1");
+    const after = mergeRuntimeProjection(before, {
+      sourceControl: { status: "syncing", shortSha: "abc1234" },
+    });
+
+    expect(shouldBumpRuntimeVersion(before, after)).toBe(true);
+    expect(after.sourceControl.status).toBe("syncing");
+  });
 });

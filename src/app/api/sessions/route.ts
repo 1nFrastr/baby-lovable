@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 
+import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import {
   awaitRuntimeDesired,
@@ -64,6 +65,22 @@ export async function POST(request: Request) {
     );
   }
 
+  if (sandboxMode === "daytona") {
+    try {
+      assertFreestyleForDaytona();
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "FREESTYLE_API_KEY is required for Daytona sessions",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   try {
     const session = await createSession(
       {
@@ -73,8 +90,20 @@ export async function POST(request: Request) {
       auth,
     );
 
-    // Prelude: sandbox-ready only (VM + files). Preview upgrades on open / first turn.
+    // Prelude: sandbox-ready only (VM + Freestyle hydrate). Preview upgrades later.
     if (sandboxMode === "daytona") {
+      // Durable Freestyle provision (survives serverless freeze); hydrate stays on reconciler.
+      try {
+        const { kickFreestyleProvisionWorkflow } = await import(
+          "@/workflow/git-provision-kick"
+        );
+        await kickFreestyleProvisionWorkflow(session.id, session.userId);
+      } catch (error) {
+        console.warn(
+          `[sessions] freestyle provision kick failed session=${session.id}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
       await kickRuntimeDesired(session.id, "sandbox-ready");
       after(() => awaitRuntimeDesired(session.id, "sandbox-ready"));
     }

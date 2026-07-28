@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { CheckpointBarrierError } from "@/lib/git/await-checkpoint";
 import { exportWorkspaceArchive } from "@/lib/sandbox/daytona/export-archive";
 import { NotImplementedError } from "@/lib/sandbox/types";
 import {
@@ -31,7 +32,9 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const archive = await exportWorkspaceArchive(sessionId);
+    const archive = await exportWorkspaceArchive(sessionId, {
+      userId: auth.userId,
+    });
     const disposition = `attachment; filename="${archive.filename}"`;
 
     return new NextResponse(Buffer.from(archive.bytes), {
@@ -50,6 +53,9 @@ export async function GET(
     }
     if (error instanceof NotImplementedError) {
       return NextResponse.json({ error: error.message }, { status: 501 });
+    }
+    if (error instanceof CheckpointBarrierError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     const message = error instanceof Error ? error.message : "Export failed";
     console.error(`[export] session=${sessionId}`, error);

@@ -54,6 +54,11 @@ export interface ObservedRuntime {
   lastError: string | null;
   /** The failure is inconclusive and must not clobber known-good durable state. */
   transient?: boolean;
+  /**
+   * Daytona API confirmed the stored sandbox id no longer exists
+   * (e.g. deleted in Daytona console). Reconciler must clear the id and recreate.
+   */
+  confirmedAbsent?: boolean;
 }
 
 function emptyObserved(
@@ -260,8 +265,22 @@ async function runObserve(
         sandboxId: snapshot.sandboxId,
         sandboxState: peek.state ?? null,
       };
-    } catch {
-      return emptyObserved();
+    } catch (error) {
+      // get() failed after reconnect miss → sandbox truly gone (console delete,
+      // TTL GC, etc.). Distinct from soft-timeout / transient probe failures.
+      const detail = error instanceof Error ? error.message : String(error);
+      logDaytonaBootstrap(
+        sessionId,
+        "sandbox",
+        `confirmed absent ${snapshot.sandboxId}: ${detail.slice(0, 120)}`,
+      );
+      logDaytonaTiming(sessionId, "observe.total", Date.now() - t0, "confirmed-absent");
+      return {
+        ...emptyObserved(
+          `Daytona sandbox deleted externally (${detail.slice(0, 160)})`,
+        ),
+        confirmedAbsent: true,
+      };
     }
   }
 

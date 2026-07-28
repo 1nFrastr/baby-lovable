@@ -12,10 +12,12 @@ const {
   createSandbox,
   deleteSandboxById,
   reconnectSandbox,
+  sandboxRecordExists,
   wrapSandbox,
   startDevSession,
   stopDevSession,
   observeRuntime,
+  httpStatus,
 } = vi.hoisted(() => {
   const ctx = { sessionId: "" };
   return {
@@ -23,10 +25,12 @@ const {
     createSandbox: vi.fn(),
     deleteSandboxById: vi.fn(),
     reconnectSandbox: vi.fn(),
+    sandboxRecordExists: vi.fn(async () => true),
     wrapSandbox: vi.fn(),
     startDevSession: vi.fn(),
     stopDevSession: vi.fn(),
     observeRuntime: vi.fn(),
+    httpStatus: vi.fn(async () => 200),
   };
 });
 
@@ -41,6 +45,7 @@ vi.mock("./vm", () => ({
   createSandbox,
   deleteSandboxById,
   reconnectSandbox,
+  sandboxRecordExists,
   wrapSandbox,
   isAsleep: (state: string | undefined) =>
     state === "stopped" || state === "archived",
@@ -51,6 +56,11 @@ vi.mock("./app-server-boot", () => ({
     error instanceof Error ? error.message : String(error),
   startDevSession,
   stopDevSession,
+}));
+
+vi.mock("./app-server-health", () => ({
+  httpStatus,
+  PREVIEW_HTTP_TIMEOUT_MS: 1_500,
 }));
 
 vi.mock("./runtime-observer", () => ({
@@ -103,6 +113,8 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
     stopDevSession.mockResolvedValue(undefined);
     deleteSandboxById.mockResolvedValue(undefined);
+    sandboxRecordExists.mockResolvedValue(true);
+    httpStatus.mockResolvedValue(200);
   });
 
   it("readRuntime never creates a sandbox (UI poll isolate)", async () => {
@@ -781,6 +793,201 @@ describe("runtime-reconciler isolate / UI races", () => {
       expect(b.sandboxId).toBe(a.sandboxId);
       expect(a.observed).toBe("preview-ready");
       expect(deleteSandboxById).not.toHaveBeenCalled();
+    });
+  });
+
+  it("readRuntime clears stale sandboxId when console-deleted (confirmedAbsent)", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_dead",
+        previewUrl: "https://embed.example/x",
+        previewPort: 3000,
+        generation: 2,
+      });
+      observeRuntime.mockResolvedValue(
+        observed({
+          phase: "missing",
+          confirmedAbsent: true,
+          lastError: "Daytona sandbox deleted externally (not found)",
+        }),
+      );
+
+      const result = await withFreshIsolate(sessionId, () =>
+        readRuntime(sessionId),
+      );
+
+      expect(result.sandboxId).toBeNull();
+      expect(result.observed).toBe("missing");
+      expect(result.previewUrl).toBeNull();
+      expect(result.generation).toBe(3);
+      expect(createSandbox).not.toHaveBeenCalled();
+    });
+  });
+
+  it("ensureDesired recreates sandbox after confirmedAbsent (console delete)", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_dead",
+        previewUrl: "https://embed.example/old",
+        previewPort: 3000,
+        generation: 1,
+      });
+
+      sandboxRecordExists.mockImplementation(async (id: string) => id !== "sb_dead");
+
+      let liveId: string | null = null;
+      createSandbox.mockImplementation(async () => {
+        liveId = "sb_new";
+        return { id: "sb_new", state: "started" };
+      });
+      startDevSession.mockImplementation(async () => ({
+        sessionName: "preview-sess",
+        port: 3000,
+      }));
+
+      observeRuntime.mockImplementation(async (_sid, opts) => {
+        const snap = opts?.snapshot ?? (await getRuntimeSnapshot(sessionId));
+        if (snap.sandboxId === "sb_dead") {
+          return observed({
+            phase: "missing",
+            confirmedAbsent: true,
+            lastError: "Daytona sandbox deleted externally (not found)",
+          });
+        }
+        if (!snap.sandboxId) {
+          return observed({ phase: "missing" });
+        }
+        if (liveId && snap.sandboxId === liveId) {
+          return observed({
+            phase: "preview-ready",
+            sandboxId: liveId,
+            previewUrl: "https://embed.example/new",
+            previewPort: 3000,
+          });
+        }
+        return observed({
+          phase: "workspace-ready",
+          sandboxId: snap.sandboxId,
+        });
+      });
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "console-delete-recover",
+        }),
+      );
+
+      expect(createSandbox).toHaveBeenCalled();
+      expect(result.sandboxId).toBe("sb_new");
+      expect(result.observed).toBe("preview-ready");
+      expect(result.generation).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("ensureDesired restarts pnpm only when durable ready but probe is 502", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_live",
+        previewUrl: "https://embed.example/stale",
+        previewPort: 3000,
+        devSessionName: "preview-old",
+        generation: 1,
+      });
+
+      httpStatus.mockResolvedValueOnce(502);
+      reconnectSandbox.mockResolvedValue({ id: "sb_live", state: "started" });
+      wrapSandbox.mockImplementation((_sid: string, sdk: unknown) => ({
+        sdkSandbox: {
+          ...(sdk as object),
+          getPreviewLink: async () => ({
+            url: "https://embed.example/stale",
+          }),
+        },
+        process: { executeCommand: vi.fn() },
+      }));
+      startDevSession.mockResolvedValue({
+        sessionName: "preview-new",
+        port: 3000,
+      });
+
+      let started = false;
+      observeRuntime.mockImplementation(async (_sid, opts) => {
+        const snap = opts?.snapshot ?? (await getRuntimeSnapshot(sessionId));
+        if (started || snap.devSessionName === "preview-new") {
+          return observed({
+            phase: "preview-ready",
+            sandboxId: "sb_live",
+            previewUrl: "https://embed.example/stale",
+            previewPort: 3000,
+            httpStatus: 200,
+          });
+        }
+        return observed({
+          phase: "workspace-ready",
+          sandboxId: "sb_live",
+          previewUrl: "https://embed.example/stale",
+          previewPort: 3000,
+          httpStatus: 502,
+        });
+      });
+      startDevSession.mockImplementation(async () => {
+        started = true;
+        return { sessionName: "preview-new", port: 3000 };
+      });
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "stale-preview-recover",
+        }),
+      );
+
+      expect(createSandbox).not.toHaveBeenCalled();
+      expect(startDevSession).toHaveBeenCalled();
+      expect(result.sandboxId).toBe("sb_live");
+      expect(result.observed).toBe("preview-ready");
+    });
+  });
+
+  it("ensureDesired trusts durable preview-ready when probe is healthy", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_live",
+        previewUrl: "https://embed.example/ok",
+        previewPort: 3000,
+        generation: 1,
+      });
+
+      httpStatus.mockResolvedValue(200);
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "healthy-preview",
+        }),
+      );
+
+      expect(httpStatus).toHaveBeenCalled();
+      expect(createSandbox).not.toHaveBeenCalled();
+      expect(startDevSession).not.toHaveBeenCalled();
+      expect(result.observed).toBe("preview-ready");
     });
   });
 });

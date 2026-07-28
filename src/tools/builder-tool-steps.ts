@@ -37,6 +37,17 @@ async function getSandboxFromContext(context: ToolContext) {
   return getProjectSandbox(context.sessionId, context.sandboxMode);
 }
 
+/** Daytona only — wait for prior Freestyle checkpoint / provision before writes. */
+async function awaitMutationGate(context: ToolContext) {
+  if (context.sandboxMode !== "daytona") {
+    return;
+  }
+  const { awaitPreviousCheckpoint } = await import(
+    "@/lib/git/await-checkpoint"
+  );
+  await awaitPreviousCheckpoint(context.sessionId);
+}
+
 export async function readFileStep(
   input: { path: string },
   { context }: { context: ToolContext },
@@ -66,6 +77,16 @@ export async function writeFileStep(
   const blocked = pathGuard("write", input.path);
   if (blocked) {
     return { ...blocked, path: input.path };
+  }
+
+  try {
+    await awaitMutationGate(context);
+  } catch (error) {
+    return {
+      ok: false as const,
+      path: input.path,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const sandbox = await getSandboxFromContext(context);
@@ -98,6 +119,16 @@ export async function editFileStep(
   const blocked = pathGuard("edit", input.path);
   if (blocked) {
     return { ...blocked, path: input.path };
+  }
+
+  try {
+    await awaitMutationGate(context);
+  } catch (error) {
+    return {
+      ok: false as const,
+      path: input.path,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const sandbox = await getSandboxFromContext(context);
@@ -244,6 +275,7 @@ async function executeAllowedPnpmCommand(
   cwd?: string,
   timeout?: number,
 ) {
+  await awaitMutationGate(context);
   const sandbox = await getSandboxFromContext(context);
   const result = await sandbox.process.executeCommand(
     allowed.shell,
@@ -461,6 +493,16 @@ export async function deleteFileStep(
   const blocked = pathGuard("delete", input.path);
   if (blocked) {
     return { ...blocked, path: input.path };
+  }
+
+  try {
+    await awaitMutationGate(context);
+  } catch (error) {
+    return {
+      ok: false as const,
+      path: input.path,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const sandbox = await getSandboxFromContext(context);

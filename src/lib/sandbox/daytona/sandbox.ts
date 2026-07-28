@@ -6,10 +6,18 @@ import {
   isDesiredSatisfied,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
-import { ensureDesiredState } from "./runtime-reconciler";
+import { logDaytonaBootstrap } from "./bootstrap-log";
+import {
+  clearDaytonaAttachCache,
+  getFsAttach,
+  setFsAttach,
+} from "./fs-attach-cache";
+import { ensureDesiredState, markSandboxExternallyDeleted } from "./runtime-reconciler";
 import { getRuntimeSnapshot } from "./runtime-store";
 import { getSession } from "@/lib/session/store";
-import { reconnectSandbox, wrapSandbox } from "./vm";
+import { reconnectSandbox, sandboxRecordExists, wrapSandbox } from "./vm";
+
+export { clearDaytonaAttachCache } from "./fs-attach-cache";
 
 /** If durable desired is still below preview, re-kick reconciler (non-blocking). */
 function kickPreviewWarmIfNeeded(snapshot: DaytonaRuntimeSnapshot): void {
@@ -26,13 +34,6 @@ function kickPreviewWarmIfNeeded(snapshot: DaytonaRuntimeSnapshot): void {
     // best-effort
   });
 }
-
-/**
- * Process-local FS attach cache.
- * Parallel tool steps in one isolate share one reconnect; sequential tools reuse it.
- * Durable snapshot remains source of truth across isolates.
- */
-const attachBySession = new Map<string, Promise<DaytonaProjectSandbox>>();
 
 /**
  * Snapshot already has a usable workspace — skip reconcile.
@@ -74,6 +75,40 @@ async function reconnectProject(
 }
 
 /**
+ * Drop process-local attach when it no longer matches durable sandboxId
+ * (e.g. reconciler recreated after console delete, but FS cache still holds
+ * the dead SDK handle — files would 404 on the old id).
+ */
+async function refreshAttachIfStale(
+  sessionId: string,
+  project: DaytonaProjectSandbox,
+  cachedPromise: Promise<DaytonaProjectSandbox>,
+): Promise<DaytonaProjectSandbox> {
+  const snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  const liveId = project.sdkSandbox.id;
+  if (snapshot.sandboxId && liveId === snapshot.sandboxId) {
+    return project;
+  }
+  if (getFsAttach(sessionId) === cachedPromise) {
+    clearDaytonaAttachCache(sessionId);
+  }
+  logStaleAttach(sessionId, liveId, snapshot.sandboxId);
+  return attachDaytonaSandboxForFs(sessionId);
+}
+
+function logStaleAttach(
+  sessionId: string,
+  cachedId: string,
+  durableId: string | null,
+): void {
+  logDaytonaBootstrap(
+    sessionId,
+    "sandbox",
+    `stale FS attach — cached=${cachedId.slice(0, 12)} durable=${durableId?.slice(0, 12) ?? "null"}; reattach`,
+  );
+}
+
+/**
  * Attach for FS / process tools.
  * Fast path: runtime says sandbox-ready → one Daytona get (no ensureDesiredState,
  * no workspace check). Cold path: ensure once, then attach.
@@ -98,6 +133,10 @@ async function attachDaytonaSandboxForFsOnce(
       kickPreviewWarmIfNeeded(snapshot);
       return project;
     }
+    // Reconnect miss: console delete vs transient. Only clear when get() confirms gone.
+    if (!(await sandboxRecordExists(snapshot.sandboxId))) {
+      await markSandboxExternallyDeleted(sessionId);
+    }
   }
 
   snapshot = await ensureDesiredState(sessionId, "sandbox-ready", {
@@ -118,28 +157,29 @@ async function attachDaytonaSandboxForFsOnce(
 /**
  * Coalesced FS attach for the current isolate.
  * Prefer this over ensureDesiredState + getExisting for tool I/O.
+ * Invalidates when durable sandboxId diverges from the cached SDK handle.
  */
 export function attachDaytonaSandboxForFs(
   sessionId: string,
 ): Promise<DaytonaProjectSandbox> {
-  const pending = attachBySession.get(sessionId);
+  const pending = getFsAttach(sessionId);
   if (pending) {
-    return pending;
+    return pending.then((project) =>
+      refreshAttachIfStale(sessionId, project, pending),
+    );
   }
 
   const promise = attachDaytonaSandboxForFsOnce(sessionId).catch((error) => {
-    if (attachBySession.get(sessionId) === promise) {
-      attachBySession.delete(sessionId);
+    if (getFsAttach(sessionId) === promise) {
+      clearDaytonaAttachCache(sessionId);
     }
     throw error;
   });
 
-  attachBySession.set(sessionId, promise);
-  return promise;
-}
-
-export function clearDaytonaAttachCache(sessionId: string): void {
-  attachBySession.delete(sessionId);
+  setFsAttach(sessionId, promise);
+  return promise.then((project) =>
+    refreshAttachIfStale(sessionId, project, promise),
+  );
 }
 
 /** Read-only — durable snapshot only (no Daytona observe / get). */

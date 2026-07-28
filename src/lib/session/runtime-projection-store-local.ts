@@ -22,13 +22,23 @@ function isProjection(
     return false;
   }
   const obj = value as SessionRuntimeProjection;
-  return (
-    typeof obj.sessionId === "string" &&
-    typeof obj.version === "number" &&
-    obj.run != null &&
-    obj.preview != null &&
-    obj.appTest != null
-  );
+  if (
+    typeof obj.sessionId !== "string" ||
+    typeof obj.version !== "number" ||
+    obj.run == null ||
+    obj.preview == null ||
+    obj.appTest == null
+  ) {
+    return false;
+  }
+  // Backward compatible: older projection files omit sourceControl.
+  if (!obj.sourceControl) {
+    obj.sourceControl = {
+      status: "idle",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return true;
 }
 
 export async function readRuntimeProjectionLocal(
