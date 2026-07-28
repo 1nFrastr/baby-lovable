@@ -512,4 +512,25 @@ describe("observeRuntime soft deadline", () => {
       transient: true,
     });
   });
+
+  it("marks confirmedAbsent when reconnect and get both miss (console delete)", async () => {
+    reconnectSandbox.mockResolvedValue(null);
+    getDaytonaClient.mockReturnValue({
+      get: vi.fn(async () => {
+        throw new Error("Sandbox not found");
+      }),
+    });
+
+    const result = await observeRuntime("sess_obs", {
+      wake: true,
+      snapshot: snap(),
+    });
+
+    expect(result).toMatchObject({
+      phase: "missing",
+      sandboxId: null,
+      confirmedAbsent: true,
+    });
+    expect(result.lastError).toMatch(/deleted externally/i);
+  });
 });

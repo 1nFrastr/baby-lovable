@@ -39,6 +39,7 @@ import {
   deleteSandboxById,
   ensureSandboxPublic,
   reconnectSandbox,
+  sandboxRecordExists,
   wrapSandbox,
 } from "./vm";
 
@@ -62,6 +63,24 @@ function applyObservation(
   snapshot: DaytonaRuntimeSnapshot,
   observed: ObservedRuntime,
 ): Partial<DaytonaRuntimeSnapshot> {
+  // Console / external delete: clear durable id so recreate + Freestyle hydrate run.
+  if (observed.confirmedAbsent) {
+    return {
+      observed: "missing",
+      sandboxId: null,
+      devSessionName: null,
+      previewUrl: null,
+      previewPort: null,
+      lastError:
+        observed.lastError ??
+        "Daytona sandbox deleted externally — recreating from Freestyle",
+      lastObservedAt: new Date().toISOString(),
+      ...(snapshot.sandboxId
+        ? { generation: snapshot.generation + 1 }
+        : {}),
+    };
+  }
+
   const controllerPhases = new Set<string>([
     "creating-sandbox",
     "starting-devserver",
@@ -122,6 +141,9 @@ function applyObservation(
 
 /** Observe timeout / empty failure — must not clobber a known-good snapshot. */
 function isTransientObserveFailure(observed: ObservedRuntime): boolean {
+  if (observed.confirmedAbsent) {
+    return false;
+  }
   if (observed.phase === "preview-ready") {
     return false;
   }
@@ -191,6 +213,57 @@ async function upsertWithRetry(
   throw lastError instanceof Error
     ? lastError
     : new Error(String(lastError ?? "CAS retry exhausted"));
+}
+
+/**
+ * Clear durable sandbox binding after Daytona confirms the VM is gone
+ * (console delete / GC). Bumps generation so stale observes drop.
+ */
+export async function markSandboxExternallyDeleted(
+  sessionId: string,
+  lastError =
+    "Daytona sandbox deleted externally — recreating from Freestyle",
+): Promise<DaytonaRuntimeSnapshot> {
+  const current = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  if (!current.sandboxId) {
+    return current;
+  }
+  logDaytonaBootstrap(
+    sessionId,
+    "reconcile",
+    `external delete — clear ${current.sandboxId.slice(0, 12)}`,
+  );
+  return upsertWithRetry(sessionId, {
+    sandboxId: null,
+    observed: "missing",
+    devSessionName: null,
+    previewUrl: null,
+    previewPort: null,
+    generation: current.generation + 1,
+    lastError,
+  });
+}
+
+/**
+ * Durable said preview-ready but the public URL is unhealthy (502 / no-IP).
+ * Demote so reconcile re-runs actionStartDev without recreating the VM or
+ * clearing .next (cheaper than restart: true).
+ */
+async function demoteStalePreviewReady(
+  sessionId: string,
+  http: number,
+): Promise<DaytonaRuntimeSnapshot> {
+  logDaytonaBootstrap(
+    sessionId,
+    "preview",
+    `stale ready — probe http=${http}; restarting pnpm dev only`,
+  );
+  return upsertWithRetry(sessionId, {
+    observed: "workspace-ready",
+    // Allow actionStartDev (reconcile skips when devSessionName is set).
+    devSessionName: null,
+    lastError: `Preview probe HTTP ${http} — restarting pnpm dev`,
+  });
 }
 
 /** Process-local create lock — duplicate after()/lease stealers share one VM create. */
@@ -506,10 +579,31 @@ async function reconcileOnce(
   }
 
   // sandbox-ready or preview-ready both need a live workspace.
-  const latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  let latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
   if (latest.desired === "stopped" || latest.desired === "deleted") {
     // Desired flipped under us — let the next loop iteration handle it.
     return true;
+  }
+
+  // Console / external delete confirmed this tick but applyObservation may have
+  // raced — clear durable id here so create can run.
+  if (observed.confirmedAbsent && latest.sandboxId) {
+    logDaytonaBootstrap(
+      sessionId,
+      "reconcile",
+      `clear stale sandbox after external delete ${latest.sandboxId.slice(0, 12)}`,
+    );
+    latest = await upsertWithRetry(sessionId, {
+      sandboxId: null,
+      observed: "missing",
+      devSessionName: null,
+      previewUrl: null,
+      previewPort: null,
+      generation: latest.generation + 1,
+      lastError:
+        observed.lastError ??
+        "Daytona sandbox deleted externally — recreating from Freestyle",
+    });
   }
 
   // Observe timeout returns phase=missing with no sandboxId — do NOT treat that
@@ -786,12 +880,47 @@ export async function ensureDesiredState(
   let targetDesired: DaytonaDesiredState = desired;
 
   // Already have what the caller asked for (e.g. workspace ready while preview installs).
+  // Do not trust durable preview-ready blindly — probe the public URL first so a
+  // dead pnpm/Next (502) or sleepy networking (400 no-IP) re-triggers startDev
+  // without a full restart/recreate.
   if (
     !options?.restart &&
     isDesiredSatisfied({ ...snapshot, desired: requestedDesired }) &&
     (requestedDesired !== "preview-ready" || hasFreshPreviewEmbed(snapshot))
   ) {
-    return snapshot;
+    if (
+      snapshot.sandboxId &&
+      (requestedDesired === "sandbox-ready" ||
+        requestedDesired === "preview-ready")
+    ) {
+      const exists = await sandboxRecordExists(snapshot.sandboxId);
+      if (!exists) {
+        // Console / external delete left a zombie id — clear and fall through to recreate.
+        snapshot = await markSandboxExternallyDeleted(sessionId);
+      } else if (
+        requestedDesired === "preview-ready" &&
+        snapshot.previewUrl
+      ) {
+        const tProbe = Date.now();
+        const probe = await httpStatus(snapshot.previewUrl);
+        logDaytonaTiming(
+          sessionId,
+          "ensure.previewProbe",
+          Date.now() - tProbe,
+          `http=${probe}`,
+        );
+        if (probe < 400) {
+          return snapshot;
+        }
+        snapshot = await demoteStalePreviewReady(sessionId, probe);
+        // Fall through → reconcile actionStartDev (keep VM + .next).
+      } else {
+        // sandbox-ready: VM record exists is enough.
+        return snapshot;
+      }
+    } else {
+      return snapshot;
+    }
   }
 
   // Never demote preview-ready → sandbox-ready (FS attach used to clobber warm).

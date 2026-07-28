@@ -6,10 +6,10 @@ import {
   isDesiredSatisfied,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
-import { ensureDesiredState } from "./runtime-reconciler";
+import { ensureDesiredState, markSandboxExternallyDeleted } from "./runtime-reconciler";
 import { getRuntimeSnapshot } from "./runtime-store";
 import { getSession } from "@/lib/session/store";
-import { reconnectSandbox, wrapSandbox } from "./vm";
+import { reconnectSandbox, sandboxRecordExists, wrapSandbox } from "./vm";
 
 /** If durable desired is still below preview, re-kick reconciler (non-blocking). */
 function kickPreviewWarmIfNeeded(snapshot: DaytonaRuntimeSnapshot): void {
@@ -97,6 +97,10 @@ async function attachDaytonaSandboxForFsOnce(
     if (project) {
       kickPreviewWarmIfNeeded(snapshot);
       return project;
+    }
+    // Reconnect miss: console delete vs transient. Only clear when get() confirms gone.
+    if (!(await sandboxRecordExists(snapshot.sandboxId))) {
+      await markSandboxExternallyDeleted(sessionId);
     }
   }
 

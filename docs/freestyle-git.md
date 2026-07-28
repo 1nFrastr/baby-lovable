@@ -20,6 +20,8 @@ Daytona 会话以 Freestyle 私有仓库的 `main` 为代码持久化真相源�
 | 下一轮写文件 | `awaitPreviousCheckpoint` 只等待；死 worker 时 CAS 踢一次后台任务 |
 | 删除 sandbox | 先 flush 未完成 checkpoint（kick + 等到终态），失败则拒绝删除 |
 | 重建 sandbox | 从 Freestyle `main` pull/恢复，不用 starter 覆盖已有仓库 |
+| Console 外删 VM | observe 确认 `confirmedAbsent` → 清僵尸 `sandboxId` → 重建并 hydrate（未 push 改动不可恢复） |
+| 切换 session 预览 | `ensureDesired(preview-ready)` 先 HTTP 探针缓存 URL；健康则复用；502/4xx 只重拉 `pnpm dev`（不删 VM、不 hydrate） |
 
 ## 存储
 

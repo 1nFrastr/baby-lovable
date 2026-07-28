@@ -51,6 +51,16 @@ export async function ensureSandboxPublic(sandbox: Sandbox): Promise<void> {
   }
 }
 
+/** True when Daytona still has a record for this id (asleep counts as present). */
+export async function sandboxRecordExists(sandboxId: string): Promise<boolean> {
+  try {
+    await getDaytonaClient().get(sandboxId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Get sandbox by id. wake=false never starts stopped/archived VMs. */
 export async function fetchSandbox(
   sessionId: string,
