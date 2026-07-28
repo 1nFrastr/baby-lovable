@@ -13,6 +13,7 @@ import {
 import { httpStatus } from "./app-server-health";
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
+import { clearDaytonaAttachCache } from "./fs-attach-cache";
 import type { DaytonaProjectSandbox } from "./provider";
 import {
   observeRuntime,
@@ -65,6 +66,7 @@ function applyObservation(
 ): Partial<DaytonaRuntimeSnapshot> {
   // Console / external delete: clear durable id so recreate + Freestyle hydrate run.
   if (observed.confirmedAbsent) {
+    clearDaytonaAttachCache(snapshot.sessionId);
     return {
       observed: "missing",
       sandboxId: null,
@@ -233,6 +235,8 @@ export async function markSandboxExternallyDeleted(
     "reconcile",
     `external delete — clear ${current.sandboxId.slice(0, 12)}`,
   );
+  // Drop process-local FS handle so files/tools never keep using the dead id.
+  clearDaytonaAttachCache(sessionId);
   return upsertWithRetry(sessionId, {
     sandboxId: null,
     observed: "missing",
@@ -593,6 +597,7 @@ async function reconcileOnce(
       "reconcile",
       `clear stale sandbox after external delete ${latest.sandboxId.slice(0, 12)}`,
     );
+    clearDaytonaAttachCache(sessionId);
     latest = await upsertWithRetry(sessionId, {
       sandboxId: null,
       observed: "missing",
