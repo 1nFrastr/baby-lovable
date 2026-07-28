@@ -22,6 +22,7 @@ Daytona 会话以 Freestyle 私有仓库的 `main` 为代码持久化真相源�
 | 重建 sandbox | 从 Freestyle `main` pull/恢复，不用 starter 覆盖已有仓库 |
 | Console 外删 VM | observe 确认 `confirmedAbsent` → 清僵尸 `sandboxId` → 重建并 hydrate（未 push 改动不可恢复） |
 | 切换 session 预览 | `ensureDesired(preview-ready)` 先 HTTP 探针缓存 URL；健康则复用；502/4xx 只重拉 `pnpm dev`（不删 VM、不 hydrate） |
+| Export 下载 | 等 checkpoint 后走 Freestyle `contents.downloadZip`（某 revision 的源码树；**不含** `.git` 历史；不含未提交的 sandbox 改动） |
 
 ## 存储
 

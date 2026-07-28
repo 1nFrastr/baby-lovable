@@ -1,11 +1,11 @@
-import { ensureDesiredState } from "./runtime-reconciler";
-import { getExistingDaytonaSandbox } from "./sandbox";
-import { DAYTONA_WORKSPACE_ROOT } from "./config";
-import type { DaytonaProjectSandbox } from "./provider";
+import { awaitPreviousCheckpoint } from "@/lib/git/await-checkpoint";
+import { getFreestyleAdapter } from "@/lib/git/freestyle-client";
+import { isFreestyleConfigured } from "@/lib/git/freestyle-config";
+import { readGitRepository } from "@/lib/git/repository-store";
 import { getSession } from "@/lib/session/store";
-import { NotImplementedError, type ProjectSandbox } from "../types";
+import { NotImplementedError } from "../types";
 
-export type ExportArchiveSource = "sandbox-zip";
+export type ExportArchiveSource = "freestyle-zip";
 
 export interface ExportArchiveResult {
   filename: string;
@@ -13,8 +13,6 @@ export interface ExportArchiveResult {
   bytes: Uint8Array;
   source: ExportArchiveSource;
 }
-
-const EXPORT_ZIP_PATH = "/tmp/baby-lovable-export.zip";
 
 function archiveFilename(sessionId: string, title?: string): string {
   const raw = (title ?? sessionId).trim() || sessionId;
@@ -26,59 +24,59 @@ function archiveFilename(sessionId: string, title?: string): string {
   return `${slug || sessionId}-workspace.zip`;
 }
 
-async function downloadExportZip(
-  daytona: DaytonaProjectSandbox,
-): Promise<Uint8Array> {
-  const buffer = await daytona.sdkSandbox.fs.downloadFile(EXPORT_ZIP_PATH);
-  return new Uint8Array(buffer);
-}
+/**
+ * Export Freestyle remote tree as a zip (source snapshot at a revision).
+ * Does not include `.git` history — Freestyle's archive APIs are contents-only.
+ *
+ * Waits for in-flight checkpoints first so finished turns are on remote.
+ * Mid-turn uncommitted sandbox edits are not included.
+ */
+async function exportFreestyleArchive(
+  sessionId: string,
+  title: string | undefined,
+  userId: string | null,
+): Promise<ExportArchiveResult> {
+  if (!isFreestyleConfigured()) {
+    throw new Error("FREESTYLE_API_KEY is required for Daytona export");
+  }
 
-/** Zip the workspace tree without requiring a git repository. */
-async function zipWorkspaceAt(
-  sandbox: ProjectSandbox,
-  workspaceDir: string,
-): Promise<void> {
-  const archive = await sandbox.process.executeCommand(
-    `rm -f ${EXPORT_ZIP_PATH} && (cd ${workspaceDir} && zip -rq ${EXPORT_ZIP_PATH} . -x './.git/*' './node_modules/*' './.next/*')`,
-    workspaceDir,
-    undefined,
-    120,
-  );
-  if (archive.exitCode !== 0) {
+  await awaitPreviousCheckpoint(sessionId, { userId });
+
+  const repo = await readGitRepository(sessionId, userId);
+  if (!repo?.repoId) {
+    throw new Error(`Freestyle repository not bound for session ${sessionId}`);
+  }
+  if (repo.provisionStatus !== "ready") {
     throw new Error(
-      `workspace zip failed in ${workspaceDir}: ${archive.stdout || archive.stderr || "unknown error"}`,
+      repo.provisionError ??
+        `Freestyle repository is not ready (status=${repo.provisionStatus})`,
     );
   }
-}
-
-/** Export live sandbox workspace as a plain zip (no git). */
-async function exportDaytonaArchive(
-  sessionId: string,
-  title?: string,
-): Promise<ExportArchiveResult> {
-  await ensureDesiredState(sessionId, "sandbox-ready", { wait: true });
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: true });
-  if (!sandbox) {
-    throw new Error(`Daytona sandbox not available for export: ${sessionId}`);
+  if (repo.unrecoverable) {
+    throw new Error(
+      repo.provisionError ??
+        "Freestyle repository is unrecoverable — nothing to export",
+    );
   }
-  const filename = archiveFilename(sessionId, title);
 
-  await zipWorkspaceAt(sandbox, DAYTONA_WORKSPACE_ROOT);
-  const bytes = await downloadExportZip(sandbox);
+  const rev = repo.defaultBranch || "main";
+  const bytes = await getFreestyleAdapter().downloadRepoZip(repo.repoId, rev);
+
   return {
-    filename,
+    filename: archiveFilename(sessionId, title),
     contentType: "application/zip",
     bytes,
-    source: "sandbox-zip",
+    source: "freestyle-zip",
   };
 }
 
 /**
- * Export the session workspace as a zip.
+ * Export the session workspace as a Freestyle source zip.
  * Local: not implemented yet — interface reserved.
  */
 export async function exportWorkspaceArchive(
   sessionId: string,
+  options: { userId?: string | null } = {},
 ): Promise<ExportArchiveResult> {
   const session = await getSession(sessionId);
   if (!session) {
@@ -89,5 +87,9 @@ export async function exportWorkspaceArchive(
     throw new NotImplementedError("Local workspace archive export");
   }
 
-  return exportDaytonaArchive(sessionId, session.title);
+  return exportFreestyleArchive(
+    sessionId,
+    session.title,
+    options.userId ?? session.userId ?? null,
+  );
 }

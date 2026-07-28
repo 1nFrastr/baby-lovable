@@ -99,5 +99,10 @@ describe("FakeFreestyleAdapter", () => {
     const token = await adapter.issueWriteToken(handle.identityId);
     expect(token.username).toBe("x-access-token");
     expect(token.password).toContain("fake-token");
+
+    const zip = await adapter.downloadRepoZip(handle.repoId, "main");
+    expect(zip[0]).toBe(0x50);
+    expect(zip[1]).toBe(0x4b);
+    expect(Buffer.from(zip).toString("latin1")).toContain("package.json");
   });
 });

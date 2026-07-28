@@ -1,5 +1,5 @@
 /**
- * Test Daytona workspace zip export (sandbox local FS, no git).
+ * Test Freestyle source-zip export for Daytona sessions.
  *
  * Usage:
  *   npm run test:daytona-export
@@ -15,6 +15,7 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local", quiet: true });
 loadEnv({ path: ".env", quiet: true });
 
+import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import { deleteDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
 import { ensureDesiredState } from "@/lib/sandbox/daytona/runtime-reconciler";
@@ -119,22 +120,25 @@ async function main() {
     console.error("DAYTONA_API_KEY (or DAYTONA_JWT_TOKEN) is required");
     process.exit(1);
   }
+  assertFreestyleForDaytona();
 
   const opts = parseArgs(process.argv.slice(2));
   const session = await resolveSession(opts);
 
   let failed = false;
   try {
-    console.log("Bootstrapping / reconnecting sandbox …");
+    console.log("Bootstrapping sandbox so Freestyle seed/hydrate completes …");
     await ensureDesiredState(session.id, "sandbox-ready", { wait: true });
 
-    console.log("\nExport via sandbox-zip …");
-    const result = await exportWorkspaceArchive(session.id);
-    if (result.source !== "sandbox-zip") {
-      throw new Error(`expected source=sandbox-zip, got ${result.source}`);
+    console.log("\nExport via freestyle-zip …");
+    const result = await exportWorkspaceArchive(session.id, {
+      userId: session.userId,
+    });
+    if (result.source !== "freestyle-zip") {
+      throw new Error(`expected source=freestyle-zip, got ${result.source}`);
     }
-    assertZipLooksValid(result, "sandbox-zip");
-    await saveZip(opts.outDir, `${session.id}-sandbox-zip.zip`, result);
+    assertZipLooksValid(result, "freestyle-zip");
+    await saveZip(opts.outDir, `${session.id}-freestyle-zip.zip`, result);
 
     console.log("\nPASS");
   } catch (error) {
