@@ -260,15 +260,46 @@ async function actionCreateSandbox(
       // iframe can wait until startDev; create still succeeds
     }
 
+    // Freestyle hydrate before workspace-ready — SDK git only, no shell.
+    // Skip when Freestyle is not configured (unit tests / local misconfig).
+    // Session create API still requires FREESTYLE_API_KEY for Daytona.
+    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
+    if (isFreestyleConfigured()) {
+      await upsertWithRetry(sessionId, {
+        sandboxId: sdk.id,
+        observed: "bootstrapping-workspace",
+        lastError: null,
+        previewPort,
+        ...(previewUrl ? { previewUrl } : {}),
+      });
+
+      const project = wrapSandbox(sessionId, sdk);
+      const { hydrateWorkspaceFromFreestyle } = await import(
+        "@/lib/git/hydrate-workspace"
+      );
+      const hydrate = await hydrateWorkspaceFromFreestyle(
+        sessionId,
+        project,
+        session.userId,
+      );
+      if (!hydrate.ok) {
+        await upsertWithRetry(sessionId, {
+          observed: "error",
+          lastError: hydrate.error ?? "Freestyle workspace hydrate failed",
+        });
+        throw new Error(hydrate.error ?? "Freestyle workspace hydrate failed");
+      }
+    }
+
     const createdPatch = {
       sandboxId: sdk.id,
-      // Snapshot already has starter + deps — no seed / bootstrap step.
       observed: "workspace-ready" as const,
       lastError: null,
       previewPort,
       ...(previewUrl ? { previewUrl } : {}),
     };
 
+    latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
     try {
       await upsertRuntimeSnapshot(sessionId, {
         expectedRevision: latest.revision,
@@ -395,6 +426,23 @@ async function actionDelete(
   if (sandboxId) {
     const project = await attachProject(sessionId, sandboxId, true);
     if (project) {
+      const { isFreestyleConfigured } = await import(
+        "@/lib/git/freestyle-config"
+      );
+      if (isFreestyleConfigured()) {
+        try {
+          const { flushPendingCheckpoints } = await import("@/lib/git/turn-sync");
+          await flushPendingCheckpoints(sessionId, project);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          await upsertWithRetry(sessionId, {
+            observed: "error",
+            lastError: `Delete blocked — flush Freestyle checkpoint failed: ${message}`,
+          });
+          throw error;
+        }
+      }
       await stopDevSession(project, sessionId);
       try {
         await project.sdkSandbox.delete(60);
@@ -481,15 +529,95 @@ async function reconcileOnce(
     return false;
   }
 
-  if (
-    latest.observed === "creating-sandbox" ||
-    latest.observed === "bootstrapping-workspace"
-  ) {
-    await upsertWithRetry(sessionId, {
-      observed: "workspace-ready",
-      lastError: null,
-    });
-    return true;
+  if (latest.observed === "creating-sandbox") {
+    // VM exists but Freestyle hydrate may still be running in actionCreateSandbox.
+    // Do not skip hydrate by promoting early.
+    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
+    if (!isFreestyleConfigured()) {
+      await upsertWithRetry(sessionId, {
+        observed: "workspace-ready",
+        lastError: null,
+      });
+      return true;
+    }
+    const { readGitRepository } = await import("@/lib/git/repository-store");
+    const repo = await readGitRepository(sessionId);
+    if (repo?.provisionStatus === "ready") {
+      await upsertWithRetry(sessionId, {
+        observed: "workspace-ready",
+        lastError: null,
+      });
+      return true;
+    }
+    return false;
+  }
+
+  if (latest.observed === "bootstrapping-workspace") {
+    // Legacy / in-flight hydrate — wait for actionCreateSandbox to finish.
+    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
+    if (!isFreestyleConfigured()) {
+      await upsertWithRetry(sessionId, {
+        observed: "workspace-ready",
+        lastError: null,
+      });
+      return true;
+    }
+    const { readGitRepository } = await import("@/lib/git/repository-store");
+    const repo = await readGitRepository(sessionId);
+    if (repo?.provisionStatus === "ready") {
+      await upsertWithRetry(sessionId, {
+        observed: "workspace-ready",
+        lastError: null,
+      });
+      return true;
+    }
+    if (repo?.provisionStatus === "error") {
+      await upsertWithRetry(sessionId, {
+        observed: "error",
+        lastError: repo.provisionError ?? "Freestyle hydrate failed",
+      });
+      return true;
+    }
+    return false;
+  }
+
+  // Existing Daytona sessions without Freestyle binding — hydrate once.
+  {
+    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
+    if (isFreestyleConfigured()) {
+      const { readGitRepository } = await import("@/lib/git/repository-store");
+      const repo = await readGitRepository(sessionId);
+      if (!repo || repo.provisionStatus !== "ready") {
+        const project = await attachProject(sessionId, latest.sandboxId, false);
+        if (project) {
+          await upsertWithRetry(sessionId, {
+            observed: "bootstrapping-workspace",
+            lastError: null,
+          });
+          const { hydrateWorkspaceFromFreestyle } = await import(
+            "@/lib/git/hydrate-workspace"
+          );
+          const session = await getSession(sessionId);
+          const hydrate = await hydrateWorkspaceFromFreestyle(
+            sessionId,
+            project,
+            session?.userId ?? null,
+          );
+          if (!hydrate.ok) {
+            await upsertWithRetry(sessionId, {
+              observed: "error",
+              lastError: hydrate.error ?? "Freestyle hydrate failed",
+            });
+            return true;
+          }
+          await upsertWithRetry(sessionId, {
+            observed: "workspace-ready",
+            lastError: null,
+          });
+          return true;
+        }
+      }
+    }
   }
 
   if (desired === "sandbox-ready") {

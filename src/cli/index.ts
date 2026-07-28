@@ -196,6 +196,20 @@ async function runTurn(
 
   session.messages = mergedMessages;
 
+  if (session.sandboxMode === "daytona") {
+    const { checkpointSessionTurn } = await import(
+      "@/lib/git/checkpoint-session-turn"
+    );
+    await checkpointSessionTurn({
+      sessionId: session.id,
+      sandboxMode: session.sandboxMode,
+      messages: mergedMessages,
+      outcome: "completed",
+      userId: session.userId,
+      sessionTitle: session.title,
+    });
+  }
+
   return mergedMessages;
 }
 

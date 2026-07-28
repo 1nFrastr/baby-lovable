@@ -59,6 +59,8 @@ export interface ProjectSandbox {
   readonly rootDir: string;
   fs: SandboxFileSystem;
   process: SandboxProcessRunner;
+  /** Present on Daytona sandboxes only — Freestyle sync uses SDK git, never shell. */
+  git?: import("./daytona/git-runner").DaytonaGitRunner;
 }
 
 export class NotImplementedError extends Error {

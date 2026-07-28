@@ -146,6 +146,18 @@ async function assembleRuntimeProjection(
     );
   }
 
+  try {
+    const { readGitRepository } = await import("@/lib/git/repository-store");
+    const { sourceControlFromRepository } = await import("@/lib/git/types");
+    const repo = await readGitRepository(sessionId, session?.userId);
+    base.sourceControl = sourceControlFromRepository(repo, now);
+  } catch (error) {
+    console.warn(
+      `[runtime-projection] assemble sourceControl failed for ${sessionId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+
   return base;
 }
 

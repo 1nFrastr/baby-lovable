@@ -18,6 +18,8 @@ import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
+import { SourceControlStatusChip } from "./source-control-status";
+import { VersionHistoryPanel } from "./version-history-panel";
 import { WorkspaceFileExplorer } from "./workspace-file-explorer";
 
 /** Survives React StrictMode remount — one warm POST per session per page load. */
@@ -55,7 +57,7 @@ const PIP_HOLD_AFTER_DONE_MS = 10_000;
 /** Retry once after ready so an early failed stylesheet request can recover. */
 const READY_EMBED_RELOAD_DELAY_MS = 1_000;
 
-type PreviewPanelTab = "preview" | "files";
+type PreviewPanelTab = "preview" | "files" | "history";
 
 /** Must match templates/nextjs-starter/src/instrumentation-client.ts */
 const PREVIEW_BRIDGE_SOURCE = "baby-lovable-preview";
@@ -215,10 +217,25 @@ export function PreviewPanel({
   );
   /** Bumped when an agent turn finishes — explorer re-lists from sandbox. */
   const [filesRefreshKey, setFilesRefreshKey] = useState(0);
+  /** Session id for which History panel stays mounted. */
+  const [historyMountSessionId, setHistoryMountSessionId] = useState<
+    string | null
+  >(null);
+  /** Bumped on turn end / sourceControl change — refetch version list. */
+  const [versionsRefreshKey, setVersionsRefreshKey] = useState(0);
   const filesMounted = filesMountSessionId === sessionId;
+  const historyMounted = historyMountSessionId === sessionId;
+  const sourceControl = projection?.sourceControl ?? null;
+  const showSourceControl = sandboxMode === "daytona";
   const prevAgentRunStatusRef = useRef<
     SessionRuntimeProjection["run"]["status"] | null
   >(null);
+
+  useEffect(() => {
+    if (!showSourceControl && panelTab === "history") {
+      setPanelTab("preview");
+    }
+  }, [showSourceControl, panelTab]);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -342,11 +359,33 @@ export function PreviewPanel({
 
     queueMicrotask(() => {
       setFilesRefreshKey((key) => key + 1);
+      setVersionsRefreshKey((key) => key + 1);
       if (readyPreviewUrl && iframeLoadedRef.current) {
         setPreviewRefreshPending(true);
       }
     });
   }, [runStatus, readyPreviewUrl]);
+
+  // Checkpoint finishes after the chat unlocks — refresh History when save settles.
+  useEffect(() => {
+    if (!showSourceControl || !sourceControl) {
+      return;
+    }
+    if (
+      sourceControl.status === "synced" ||
+      sourceControl.status === "error" ||
+      sourceControl.status === "conflict"
+    ) {
+      queueMicrotask(() => {
+        setVersionsRefreshKey((key) => key + 1);
+      });
+    }
+  }, [
+    showSourceControl,
+    sourceControl?.status,
+    sourceControl?.shortSha,
+    sourceControl?.updatedAt,
+  ]);
 
   const applyPreviewRefresh = useCallback(() => {
     setPreviewRefreshPending(false);
@@ -669,6 +708,24 @@ export function PreviewPanel({
               >
                 Files
               </button>
+              {showSourceControl ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={panelTab === "history"}
+                  onClick={() => {
+                    setHistoryMountSessionId(sessionId);
+                    setPanelTab("history");
+                  }}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                    panelTab === "history"
+                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                      : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  }`}
+                >
+                  History
+                </button>
+              ) : null}
             </div>
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
@@ -679,6 +736,10 @@ export function PreviewPanel({
             >
               {sandboxMode}
             </span>
+            <SourceControlStatusChip
+              sourceControl={sourceControl}
+              visible={showSourceControl}
+            />
             {appTestBusy ? (
               <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                 Testing
@@ -699,7 +760,9 @@ export function PreviewPanel({
                 : undefined
             }
           >
-            {panelTab === "files" ? "\u00a0" : (exportError ?? toolbarStatus)}
+            {panelTab === "files" || panelTab === "history"
+              ? "\u00a0"
+              : (exportError ?? toolbarStatus)}
           </p>
         </div>
 
@@ -712,6 +775,15 @@ export function PreviewPanel({
             >
               <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
               Sync
+            </button>
+          ) : panelTab === "history" ? (
+            <button
+              type="button"
+              onClick={() => setVersionsRefreshKey((key) => key + 1)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
+              Refresh
             </button>
           ) : (
             <>
@@ -824,6 +896,21 @@ export function PreviewPanel({
               key={sessionId}
               sessionId={sessionId}
               refreshKey={filesRefreshKey}
+            />
+          ) : null}
+        </div>
+
+        <div
+          className={`absolute inset-0 bg-white dark:bg-zinc-950 ${
+            panelTab === "history" ? "" : "hidden"
+          }`}
+          aria-hidden={panelTab !== "history"}
+        >
+          {historyMounted ? (
+            <VersionHistoryPanel
+              key={sessionId}
+              sessionId={sessionId}
+              refreshKey={versionsRefreshKey}
             />
           ) : null}
         </div>

@@ -17,13 +17,22 @@ function isProjection(
     return false;
   }
   const obj = value as SessionRuntimeProjection;
-  return (
-    typeof obj.sessionId === "string" &&
-    typeof obj.version === "number" &&
-    obj.run != null &&
-    obj.preview != null &&
-    obj.appTest != null
-  );
+  if (
+    typeof obj.sessionId !== "string" ||
+    typeof obj.version !== "number" ||
+    obj.run == null ||
+    obj.preview == null ||
+    obj.appTest == null
+  ) {
+    return false;
+  }
+  if (!obj.sourceControl) {
+    obj.sourceControl = {
+      status: "idle",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return true;
 }
 
 export async function readRuntimeProjectionSupabase(

@@ -58,6 +58,7 @@ publishRuntimeUpdate(...)
 - `run`
 - `preview`
 - `appTest`
+- `sourceControl`（Freestyle 仓库准备 / 轮次同步状态；聊天输入框仍只看 `run`）
 - `version`
 
 其中 `version` 是单调递增的版本号。每次 UI 相关状态发生变化，服务端都会生成一份新的 projection，并递增 `version`。
