@@ -57,6 +57,7 @@ function snap(
     observed: "starting-devserver",
     sandboxId: "sbx_1",
     devSessionName: "preview-sess_obs",
+    devCmdId: null,
     previewUrl: "https://preview.example/app",
     previewPort: 3000,
     lastError: null,

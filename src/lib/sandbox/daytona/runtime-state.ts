@@ -41,6 +41,8 @@ export interface DaytonaRuntimeSnapshot {
 
   sandboxId: string | null;
   devSessionName: string | null;
+  /** Daytona session command id for `pnpm dev` — used to reattach log streaming. */
+  devCmdId: string | null;
 
   previewUrl: string | null;
   previewPort: number | null;
@@ -73,6 +75,7 @@ export function emptyRuntimeSnapshot(
     observed: "missing",
     sandboxId: null,
     devSessionName: null,
+    devCmdId: null,
     previewUrl: null,
     previewPort: null,
     lastError: null,

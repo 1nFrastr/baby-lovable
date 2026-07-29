@@ -14,6 +14,7 @@ interface RuntimeRow {
   observed: string;
   sandbox_id: string | null;
   dev_session_name: string | null;
+  dev_cmd_id: string | null;
   preview_url: string | null;
   preview_port: number | null;
   last_error: string | null;
@@ -33,6 +34,7 @@ function rowToSnapshot(row: RuntimeRow): DaytonaRuntimeSnapshot {
     observed: row.observed as DaytonaRuntimeSnapshot["observed"],
     sandboxId: row.sandbox_id,
     devSessionName: row.dev_session_name,
+    devCmdId: row.dev_cmd_id ?? null,
     previewUrl: row.preview_url,
     previewPort: row.preview_port,
     lastError: row.last_error,
@@ -56,6 +58,7 @@ function snapshotToRow(
     observed: snapshot.observed,
     sandbox_id: snapshot.sandboxId,
     dev_session_name: snapshot.devSessionName,
+    dev_cmd_id: snapshot.devCmdId,
     preview_url: snapshot.previewUrl,
     preview_port: snapshot.previewPort,
     last_error: snapshot.lastError,
