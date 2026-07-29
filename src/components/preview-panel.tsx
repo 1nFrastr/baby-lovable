@@ -18,6 +18,7 @@ import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
+import { DevServerLogsPanel } from "./dev-server-logs-panel";
 import { SourceControlStatusChip } from "./source-control-status";
 import { VersionHistoryPanel } from "./version-history-panel";
 import { WorkspaceFileExplorer } from "./workspace-file-explorer";
@@ -211,6 +212,7 @@ export function PreviewPanel({
     null,
   );
   const [panelTab, setPanelTab] = useState<PreviewPanelTab>("preview");
+  const [consoleExpanded, setConsoleExpanded] = useState(false);
   /** Session id for which Files explorer stays mounted (avoids refetch on tab switch). */
   const [filesMountSessionId, setFilesMountSessionId] = useState<string | null>(
     null,
@@ -698,6 +700,7 @@ export function PreviewPanel({
                 aria-selected={panelTab === "files"}
                 onClick={() => {
                   setFilesMountSessionId(sessionId);
+                  setConsoleExpanded(false);
                   setPanelTab("files");
                 }}
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
@@ -715,6 +718,7 @@ export function PreviewPanel({
                   aria-selected={panelTab === "history"}
                   onClick={() => {
                     setHistoryMountSessionId(sessionId);
+                    setConsoleExpanded(false);
                     setPanelTab("history");
                   }}
                   className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
@@ -1090,6 +1094,17 @@ export function PreviewPanel({
           ) : null}
         </div>
       </div>
+
+      {sandboxMode === "daytona" && panelTab === "preview" ? (
+        <DevServerLogsPanel
+          sessionId={sessionId}
+          generation={previewGeneration}
+          appServerStatus={preview.status}
+          active={consoleExpanded}
+          expanded={consoleExpanded}
+          onExpandedChange={setConsoleExpanded}
+        />
+      ) : null}
     </section>
   );
 }

@@ -24,7 +24,7 @@ export function formatStartError(error: unknown): string {
 export async function startDevSession(
   sandbox: DaytonaProjectSandbox,
   sessionId: string,
-): Promise<{ sessionName: string; port: number }> {
+): Promise<{ sessionName: string; port: number; cmdId: string | null }> {
   const sdk = sandbox.sdkSandbox;
   const port = getDaytonaDevPort();
   const pm = resolvePackageManager("daytona");
@@ -39,7 +39,7 @@ export async function startDevSession(
   }
 
   await sdk.process.createSession(sessionName);
-  await sdk.process.executeSessionCommand(
+  const cmd = await sdk.process.executeSessionCommand(
     sessionName,
     {
       command: `cd ${JSON.stringify(DAYTONA_WORKSPACE_ROOT)} && ${pm.dev(port)}`,
@@ -48,7 +48,25 @@ export async function startDevSession(
     30,
   );
 
-  return { sessionName, port };
+  let cmdId = cmd.cmdId ?? null;
+  if (!cmdId) {
+    // Some SDK responses omit cmdId on runAsync — recover from session listing.
+    try {
+      const session = await sdk.process.getSession(sessionName);
+      const last = session.commands?.[session.commands.length - 1];
+      cmdId = last?.id ?? null;
+    } catch {
+      // keep null
+    }
+  }
+
+  logDaytonaBootstrap(
+    sessionId,
+    "preview",
+    `dev session=${sessionName} cmdId=${cmdId ?? "null"}`,
+  );
+
+  return { sessionName, port, cmdId };
 }
 
 /** Stop remote preview session. Does not clear runtime preview cache. */

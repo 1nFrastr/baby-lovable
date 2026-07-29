@@ -71,6 +71,7 @@ function applyObservation(
       observed: "missing",
       sandboxId: null,
       devSessionName: null,
+      devCmdId: null,
       previewUrl: null,
       previewPort: null,
       lastError:
@@ -241,6 +242,7 @@ export async function markSandboxExternallyDeleted(
     sandboxId: null,
     observed: "missing",
     devSessionName: null,
+    devCmdId: null,
     previewUrl: null,
     previewPort: null,
     generation: current.generation + 1,
@@ -266,6 +268,7 @@ async function demoteStalePreviewReady(
     observed: "workspace-ready",
     // Allow actionStartDev (reconcile skips when devSessionName is set).
     devSessionName: null,
+    devCmdId: null,
     lastError: `Preview probe HTTP ${http} — restarting pnpm dev`,
   });
 }
@@ -459,6 +462,7 @@ async function actionStartDev(
   await upsertWithRetry(sessionId, {
     observed: "starting-devserver",
     devSessionName: started.sessionName,
+    devCmdId: started.cmdId,
     previewPort: started.port,
     ...(previewUrl ? { previewUrl } : {}),
   });
@@ -483,6 +487,7 @@ async function actionStopPreview(
   await upsertWithRetry(sessionId, {
     observed: sandboxId ? "workspace-ready" : "missing",
     devSessionName: null,
+    devCmdId: null,
     previewUrl: null,
     previewPort: null,
     lastError: null,
@@ -539,6 +544,7 @@ async function actionDelete(
     observed: "missing",
     sandboxId: null,
     devSessionName: null,
+    devCmdId: null,
     previewUrl: null,
     previewPort: null,
     lastError: null,
@@ -602,6 +608,7 @@ async function reconcileOnce(
       sandboxId: null,
       observed: "missing",
       devSessionName: null,
+      devCmdId: null,
       previewUrl: null,
       previewPort: null,
       generation: latest.generation + 1,

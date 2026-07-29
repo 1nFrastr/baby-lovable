@@ -42,7 +42,10 @@ export async function readRuntimeLocal(
     if (!isValidSnapshot(parsed)) {
       return null;
     }
-    return parsed;
+    return {
+      ...parsed,
+      devCmdId: parsed.devCmdId ?? null,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
