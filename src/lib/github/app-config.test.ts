@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   getGithubAppSlug,
+  getPublicAppOrigin,
   isGithubAppConfigured,
   normalizePrivateKeyPem,
 } from "./app-config";
@@ -40,5 +41,33 @@ describe("getGithubAppSlug", () => {
 describe("isGithubAppConfigured", () => {
   it("is false without credentials", () => {
     expect(isGithubAppConfigured()).toBe(false);
+  });
+});
+
+describe("getPublicAppOrigin", () => {
+  const prev = {
+    vercelUrl: process.env.VERCEL_URL,
+  };
+
+  afterEach(() => {
+    if (prev.vercelUrl === undefined) delete process.env.VERCEL_URL;
+    else process.env.VERCEL_URL = prev.vercelUrl;
+  });
+
+  it("prefers request host", () => {
+    process.env.VERCEL_URL = "app.example.com";
+    expect(getPublicAppOrigin("http://localhost:3000")).toBe(
+      "http://localhost:3000",
+    );
+  });
+
+  it("falls back to VERCEL_URL when request host is omitted", () => {
+    process.env.VERCEL_URL = "app.example.com";
+    expect(getPublicAppOrigin()).toBe("https://app.example.com");
+  });
+
+  it("falls back to localhost without host or VERCEL_URL", () => {
+    delete process.env.VERCEL_URL;
+    expect(getPublicAppOrigin()).toBe("http://localhost:3000");
   });
 });

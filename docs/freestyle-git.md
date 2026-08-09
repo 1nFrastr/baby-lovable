@@ -32,7 +32,7 @@ Agent / checkpoint **仍只写 Freestyle**。GitHub 侧由 Freestyle GitHub Sync
 
 用户流：
 
-1. 运维：在 GitHub 创建/配置平台 App（与 Freestyle Dashboard → Git > Sync **同一 App**）；打开「安装时请求用户授权 (OAuth)」；Callback 可登记多条（本地 + 生产）。默认授权链接走 **安装页**（`/installations/new`，卸载后可重装；该路径忽略 `redirect_uri`，回跳用 App 设置里的第一条 Callback）。纯 OAuth + 显式 `redirect_uri` 仅作 fallback（`intent: "oauth"`）。配置下表环境变量；生产务必设 `NEXT_PUBLIC_APP_URL`
+1. 运维：在 GitHub 创建/配置平台 App（与 Freestyle Dashboard → Git > Sync **同一 App**）；打开「安装时请求用户授权 (OAuth)」；Callback 可登记多条（本地 + 生产）。默认授权链接走 **安装页**（`/installations/new`，卸载后可重装；该路径忽略 `redirect_uri`，回跳用 App 设置里的第一条 Callback）。纯 OAuth + 显式 `redirect_uri` 仅作 fallback（`intent: "oauth"`），callback / redirect 按当前请求 Host 自动识别。配置下表环境变量即可
 2. 用户（Daytona session）：预览栏 **同步到 GitHub** → 首次跳转安装/授权 → 回调后自动创建私有空仓并 enable Sync
 3. 之后：turn checkpoint → Freestyle →（Freestyle）→ GitHub；用户在 GitHub push 亦会镜像回 Freestyle
 
@@ -62,7 +62,6 @@ GITHUB_APP_CLIENT_SECRET=
 GITHUB_APP_INSTALL_URL=https://github.com/apps/<slug>/installations/new
 # Optional
 # GITHUB_APP_SLUG=
-# NEXT_PUBLIC_APP_URL=https://your.app
 ```
 
 Daytona 模式缺少 `FREESTYLE_API_KEY` 时创建 session 直接失败，不会静默退回 sandbox-only。
