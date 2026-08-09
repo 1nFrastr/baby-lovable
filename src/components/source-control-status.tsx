@@ -59,11 +59,14 @@ export function SourceControlStatusChip({
 
   const label = LABELS[sourceControl.status] ?? LABELS.idle;
   const sha = sourceControl.shortSha;
-  const title = sourceControl.error
-    ? sourceControl.error
-    : sha
-      ? `${label.text} · ${sha}`
-      : label.text;
+  const github = sourceControl.githubRepoName;
+  const title = [
+    sourceControl.error ?? label.text,
+    sha,
+    github ? `GitHub ${github}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <span

@@ -40,6 +40,16 @@ describe("freestyle git helpers", () => {
         syncError: "non-fast-forward",
       }).status,
     ).toBe("conflict");
+
+    expect(
+      sourceControlFromRepository({
+        ...base,
+        provisionStatus: "ready",
+        syncStatus: "idle",
+        githubSyncStatus: "linked",
+        githubRepoName: "acme/app",
+      }).githubRepoName,
+    ).toBe("acme/app");
   });
 
   it("builds turn commit messages with trailers", () => {

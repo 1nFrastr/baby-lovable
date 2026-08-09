@@ -19,6 +19,10 @@ export interface FreestyleGitCredentials {
   tokenId: string;
 }
 
+export interface FreestyleGithubSyncConfig {
+  githubRepoName: string;
+}
+
 export interface FreestyleAdapter {
   createPrivateRepo(options: {
     name: string;
@@ -28,6 +32,12 @@ export interface FreestyleAdapter {
   deleteRepo(repoId: string): Promise<void>;
   /** Source-tree zip at a revision (no `.git` history). */
   downloadRepoZip(repoId: string, rev?: string): Promise<Uint8Array>;
+  enableGithubSync(
+    repoId: string,
+    githubRepoName: string,
+  ): Promise<void>;
+  getGithubSync(repoId: string): Promise<FreestyleGithubSyncConfig | null>;
+  disableGithubSync(repoId: string): Promise<void>;
 }
 
 class LiveFreestyleAdapter implements FreestyleAdapter {
@@ -81,14 +91,88 @@ class LiveFreestyleAdapter implements FreestyleAdapter {
     );
     return new Uint8Array(buffer);
   }
+
+  async enableGithubSync(
+    repoId: string,
+    githubRepoName: string,
+  ): Promise<void> {
+    const repo = this.client.git.repos.ref({ repoId });
+    try {
+      await repo.githubSync.enable({ githubRepoName });
+    } catch (error) {
+      // SDK often loses Freestyle's body ("Failed to access GitHub repository").
+      const key = getFreestyleApiKey();
+      const res = await fetch(
+        `https://api.freestyle.sh/git/v1/repo/${repoId}/github-sync`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ githubRepoName }),
+        },
+      );
+      if (res.ok) {
+        return;
+      }
+      const text = await res.text();
+      let message = text;
+      try {
+        const json = JSON.parse(text) as { message?: string };
+        if (json.message) {
+          message = json.message;
+        }
+      } catch {
+        // keep text
+      }
+      throw new Error(
+        message ||
+          (error instanceof Error ? error.message : "GitHub Sync enable failed"),
+      );
+    }
+  }
+
+  async getGithubSync(
+    repoId: string,
+  ): Promise<FreestyleGithubSyncConfig | null> {
+    const repo = this.client.git.repos.ref({ repoId });
+    try {
+      const config = await repo.githubSync.get();
+      if (!config?.githubRepoName) {
+        return null;
+      }
+      return { githubRepoName: config.githubRepoName };
+    } catch (error) {
+      // Freestyle returns 404 when sync is not linked yet; treat as null.
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        /not found|not configured|404/i.test(message) ||
+        message.includes("Unknown error code: undefined")
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async disableGithubSync(repoId: string): Promise<void> {
+    const repo = this.client.git.repos.ref({ repoId });
+    await repo.githubSync.disable();
+  }
 }
 
 /** In-memory fake for local/unit tests — never calls Freestyle APIs. */
 export class FakeFreestyleAdapter implements FreestyleAdapter {
   readonly repos = new Map<string, FreestyleRepoHandle>();
+  readonly githubSync = new Map<string, string>();
   createCalls = 0;
   tokenCalls = 0;
   deleteCalls = 0;
+  enableGithubSyncCalls = 0;
+  disableGithubSyncCalls = 0;
+  /** When set, next enableGithubSync throws this message. */
+  enableGithubSyncError: string | null = null;
 
   async createPrivateRepo(options: {
     name: string;
@@ -117,6 +201,7 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
   async deleteRepo(repoId: string): Promise<void> {
     this.deleteCalls += 1;
     this.repos.delete(repoId);
+    this.githubSync.delete(repoId);
   }
 
   async downloadRepoZip(repoId: string, _rev?: string): Promise<Uint8Array> {
@@ -174,6 +259,34 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
     end.writeUInt16LE(0, 20);
 
     return new Uint8Array(Buffer.concat([local, central, end]));
+  }
+
+  async enableGithubSync(
+    repoId: string,
+    githubRepoName: string,
+  ): Promise<void> {
+    this.enableGithubSyncCalls += 1;
+    if (this.enableGithubSyncError) {
+      const message = this.enableGithubSyncError;
+      this.enableGithubSyncError = null;
+      throw new Error(message);
+    }
+    if (!this.repos.has(repoId)) {
+      throw new Error(`Fake Freestyle repo not found: ${repoId}`);
+    }
+    this.githubSync.set(repoId, githubRepoName);
+  }
+
+  async getGithubSync(
+    repoId: string,
+  ): Promise<FreestyleGithubSyncConfig | null> {
+    const githubRepoName = this.githubSync.get(repoId);
+    return githubRepoName ? { githubRepoName } : null;
+  }
+
+  async disableGithubSync(repoId: string): Promise<void> {
+    this.disableGithubSyncCalls += 1;
+    this.githubSync.delete(repoId);
   }
 }
 
