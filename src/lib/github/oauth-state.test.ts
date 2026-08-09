@@ -19,11 +19,17 @@ describe("github oauth state", () => {
       sessionId: "sess_abc",
       userId: "user-1",
       returnTo: "/sessions/sess_abc",
+      intent: "oauth",
+      redirectUri: "http://localhost:3000/api/github/app/callback",
     });
     const decoded = decodeGithubAppOAuthState(encoded);
     expect(decoded.sessionId).toBe("sess_abc");
     expect(decoded.userId).toBe("user-1");
     expect(decoded.returnTo).toBe("/sessions/sess_abc");
+    expect(decoded.intent).toBe("oauth");
+    expect(decoded.redirectUri).toBe(
+      "http://localhost:3000/api/github/app/callback",
+    );
   });
 
   it("rejects tampered state", () => {

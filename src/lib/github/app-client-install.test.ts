@@ -36,16 +36,23 @@ dvaYjnfADGLAzSpwrPg8sFMbPhp++SPKV4MExsCOic1707z9VIwxe+W1AogIFykp
 -----END PRIVATE KEY-----`;
 
 describe("isGithubAppInstallMissingError", () => {
-  it("treats 401/403/404 as missing install", () => {
+  it("detects missing-install signals without treating every 401 as uninstall", () => {
     expect(
-      isGithubAppInstallMissingError(new GithubAppError("gone", 404)),
+      isGithubAppInstallMissingError(new GithubAppError("Not Found", 404)),
     ).toBe(true);
     expect(
-      isGithubAppInstallMissingError(new GithubAppError("nope", 403)),
+      isGithubAppInstallMissingError(
+        new GithubAppError("Installation not found", 401),
+      ),
     ).toBe(true);
     expect(
-      isGithubAppInstallMissingError(new GithubAppError("auth", 401)),
+      isGithubAppInstallMissingError(
+        new GithubAppError("GitHub App 已卸载或未安装，请重新授权安装", 401),
+      ),
     ).toBe(true);
+    expect(
+      isGithubAppInstallMissingError(new GithubAppError("bad credentials", 401)),
+    ).toBe(false);
     expect(
       isGithubAppInstallMissingError(new GithubAppError("boom", 502)),
     ).toBe(false);

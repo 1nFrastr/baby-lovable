@@ -2,12 +2,21 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { getGithubAppClientSecret } from "./app-config";
 
+export type GithubAppOAuthIntent = "install" | "oauth";
+
 export interface GithubAppOAuthState {
   sessionId: string;
   userId: string;
   /** Absolute path to return to after callback, e.g. `/sessions/sess_x`. */
   returnTo: string;
   exp: number;
+  /**
+   * `install` → App install URL (no redirect_uri on authorize).
+   * `oauth` → /login/oauth/authorize with redirect_uri (must match on token exchange).
+   */
+  intent?: GithubAppOAuthIntent;
+  /** Present when intent is oauth — exact redirect_uri used in authorize. */
+  redirectUri?: string;
 }
 
 function stateSecret(): string {
@@ -61,6 +70,16 @@ export function decodeGithubAppOAuthState(raw: string): GithubAppOAuthState {
   ) {
     throw new Error("Invalid OAuth returnTo");
   }
+  if (
+    parsed.intent != null &&
+    parsed.intent !== "install" &&
+    parsed.intent !== "oauth"
+  ) {
+    throw new Error("Invalid OAuth intent");
+  }
+  if (parsed.redirectUri != null && typeof parsed.redirectUri !== "string") {
+    throw new Error("Invalid OAuth redirectUri");
+  }
   return parsed;
 }
 
@@ -68,14 +87,21 @@ export function buildGithubAppOAuthState(input: {
   sessionId: string;
   userId: string;
   returnTo?: string;
+  intent?: GithubAppOAuthIntent;
+  redirectUri?: string;
   /** TTL ms, default 15 minutes. */
   ttlMs?: number;
 }): string {
   const ttlMs = input.ttlMs ?? 15 * 60 * 1000;
+  const intent = input.intent ?? "install";
   return encodeGithubAppOAuthState({
     sessionId: input.sessionId,
     userId: input.userId,
     returnTo: input.returnTo ?? `/sessions/${input.sessionId}`,
     exp: Date.now() + ttlMs,
+    intent,
+    ...(intent === "oauth" && input.redirectUri
+      ? { redirectUri: input.redirectUri }
+      : {}),
   });
 }

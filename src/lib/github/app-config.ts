@@ -91,3 +91,8 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
 export function getGithubAppCallbackPath(): string {
   return "/api/github/app/callback";
 }
+
+/** Absolute Callback URL for the current app origin (must match App settings). */
+export function getGithubAppCallbackUrl(requestOrigin?: string): string {
+  return `${getPublicAppOrigin(requestOrigin)}${getGithubAppCallbackPath()}`;
+}

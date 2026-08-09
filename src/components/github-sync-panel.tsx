@@ -310,15 +310,34 @@ export function GithubSyncPanel({
       setBusyPhase("creating");
       void (async () => {
         clearGithubSyncQuery();
-        const ready = await waitForFreestyleReady();
+        // Binding write + GitHub install propagation can lag the first status read.
+        let ready: GithubSyncStatusResponse | null = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          ready = await waitForFreestyleReady(attempt === 0 ? 8 : 1);
+          if (!ready || abortRef.current) {
+            setBusyPhase("idle");
+            return;
+          }
+          if (ready.authorized) {
+            break;
+          }
+          await sleep(800);
+        }
         if (!ready || abortRef.current) {
           setBusyPhase("idle");
           return;
         }
-        if (ready.linked && ready.githubRepoName) {
+        // Linked in store is not enough — uninstall leaves Freestyle link but
+        // clears App authorization. Require authorized before treating as done.
+        if (ready.linked && ready.githubRepoName && ready.authorized) {
           setJustLinked(true);
           setBusyPhase("idle");
           invalidateRuntime(sessionId);
+          return;
+        }
+        if (!ready.authorized) {
+          setBusyPhase("idle");
+          setError("GitHub App 未安装或授权已失效，请重新授权安装");
           return;
         }
         await handleCreateAndLink();
@@ -501,8 +520,11 @@ export function GithubSyncPanel({
         ? status.suggestedRepoName
         : null;
 
+  const needsReauth = Boolean(status && !status.authorized && status.authUrl);
   const triggerTitle = linked
-    ? linkedName!
+    ? needsReauth
+      ? "GitHub 授权已失效，请重新安装"
+      : linkedName!
     : hasError
       ? (displayError ?? "GitHub 同步异常")
       : !status?.authorized && status?.authUrl
@@ -520,6 +542,8 @@ export function GithubSyncPanel({
         className={`inline-flex max-w-[11rem] items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
           hasError && !linked
             ? "border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+            : linked && needsReauth
+              ? "border-amber-300 text-zinc-800 hover:bg-amber-50 dark:border-amber-800 dark:text-zinc-100 dark:hover:bg-amber-950/40"
             : linked
               ? "border-emerald-300 text-zinc-800 hover:bg-emerald-50 dark:border-emerald-800 dark:text-zinc-100 dark:hover:bg-emerald-950/40"
               : "border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
@@ -536,7 +560,9 @@ export function GithubSyncPanel({
         </span>
         {linked && !busy ? (
           <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              needsReauth ? "bg-amber-500" : "bg-emerald-500"
+            }`}
             aria-hidden
           />
         ) : null}
@@ -595,7 +621,11 @@ export function GithubSyncPanel({
             <div className="space-y-2.5">
               <div className="flex items-start gap-2 rounded-lg bg-zinc-50 px-2.5 py-2 dark:bg-zinc-900">
                 <span
-                  className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"
+                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                    status && !status.authorized
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                  }`}
                   aria-hidden
                 />
                 <div className="min-w-0 flex-1">
@@ -611,15 +641,23 @@ export function GithubSyncPanel({
                       strokeWidth={2}
                     />
                   </a>
-                  <p className="mt-0.5 flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
-                    {justLinked ? (
-                      <>
-                        <Check className="h-3 w-3" strokeWidth={2} />
-                        已连接
-                      </>
-                    ) : (
-                      "双向同步已开启"
-                    )}
+                  <p
+                    className={`mt-0.5 flex items-center gap-1 text-[11px] ${
+                      status && !status.authorized
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-emerald-700 dark:text-emerald-400"
+                    }`}
+                  >
+                    {status && !status.authorized
+                      ? "授权已失效，需重新安装 App"
+                      : justLinked
+                        ? (
+                            <>
+                              <Check className="h-3 w-3" strokeWidth={2} />
+                              已连接
+                            </>
+                          )
+                        : "双向同步已开启"}
                   </p>
                 </div>
               </div>

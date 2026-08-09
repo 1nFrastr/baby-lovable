@@ -1,14 +1,13 @@
 import { createPrivateKey, createSign, randomUUID } from "node:crypto";
 
 import {
+  getGithubAppCallbackUrl,
   getGithubAppClientId,
   getGithubAppClientSecret,
   getGithubAppId,
   getGithubAppInstallUrl,
   getGithubAppPrivateKey,
   getGithubAppSlug,
-  getPublicAppOrigin,
-  getGithubAppCallbackPath,
   isGithubAppConfigured,
 } from "./app-config";
 import { buildGithubAppOAuthState } from "./oauth-state";
@@ -110,8 +109,14 @@ async function exchangeOAuthForm(
 
 export async function exchangeGithubAppOAuthCode(
   code: string,
+  options: { redirectUri?: string } = {},
 ): Promise<GithubUserAccessToken> {
-  return exchangeOAuthForm({ code });
+  const body: Record<string, string> = { code };
+  if (options.redirectUri) {
+    // Must match the redirect_uri used in the authorize step when one was sent.
+    body.redirect_uri = options.redirectUri;
+  }
+  return exchangeOAuthForm(body);
 }
 
 export async function refreshGithubAppUserToken(
@@ -163,17 +168,34 @@ export function isGithubAppInstallMissingError(error: unknown): boolean {
     return false;
   }
   const status = error instanceof GithubAppError ? error.status : 0;
-  if (status === 401 || status === 403 || status === 404) {
+  const message = error.message.toLowerCase();
+  // Only treat explicit installation-not-found style failures — not every 401
+  // (e.g. bad JWT / rate limit) which would wipe a freshly written binding.
+  if (status === 404) {
     return true;
   }
-  const message = error.message.toLowerCase();
-  return (
+  if (
     message.includes("installation") &&
     (message.includes("not found") ||
       message.includes("suspended") ||
       message.includes("disabled") ||
-      message.includes("uninstalled"))
-  );
+      message.includes("uninstalled") ||
+      message.includes("未安装") ||
+      message.includes("已卸载"))
+  ) {
+    return true;
+  }
+  if (
+    (status === 401 || status === 403) &&
+    (message.includes("installation") ||
+      message.includes("not found") ||
+      message.includes("uninstalled") ||
+      message.includes("已卸载") ||
+      message.includes("未安装"))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -210,7 +232,10 @@ export async function assertGithubAppInstalledForUser(
       await getInstallationAccessToken(installationId);
       return installationId;
     } catch (error) {
-      if (!isGithubAppInstallMissingError(error)) {
+      // Stale id after reinstall — always fall through to list.
+      // Only rethrow hard failures that are clearly not "wrong installation".
+      const status = error instanceof GithubAppError ? error.status : 0;
+      if (status === 502 || status === 503) {
         throw error;
       }
       // Fall through — user may have reinstalled under a new installation id.
@@ -444,14 +469,23 @@ export async function createEmptyUserRepo(
 }
 
 /**
- * Build Install App URL that also requests user OAuth (when enabled on the App).
- * `state` carries sessionId + userId for the callback.
+ * Build authorize / reinstall URL.
+ *
+ * Default `intent: "install"` uses `/apps/<slug>/installations/new` so uninstall →
+ * re-auth actually reinstalls the App (pure OAuth alone does not). GitHub ignores
+ * `redirect_uri` on that path and uses the App's first Callback URL.
+ *
+ * `intent: "oauth"` uses the web application flow with an explicit `redirect_uri`
+ * (honored for local vs prod multi-callback). Use when the App is already installed
+ * and only a fresh user token is needed.
  */
 export function buildGithubAppAuthorizeUrl(input: {
   sessionId: string;
   userId: string;
   returnTo?: string;
   requestOrigin?: string;
+  /** @default "install" */
+  intent?: "install" | "oauth";
 }): string {
   if (!isGithubAppConfigured()) {
     throw new GithubAppError(
@@ -460,40 +494,44 @@ export function buildGithubAppAuthorizeUrl(input: {
     );
   }
 
+  const intent = input.intent ?? "install";
+  const redirectUri =
+    intent === "oauth"
+      ? getGithubAppCallbackUrl(input.requestOrigin)
+      : undefined;
+
   const state = buildGithubAppOAuthState({
     sessionId: input.sessionId,
     userId: input.userId,
     returnTo: input.returnTo,
+    intent,
+    redirectUri,
   });
 
-  const installUrl = getGithubAppInstallUrl();
-  if (installUrl) {
-    const url = new URL(installUrl);
-    url.searchParams.set("state", state);
-    return url.toString();
+  if (intent === "install") {
+    const installUrl =
+      getGithubAppInstallUrl() ??
+      (getGithubAppSlug()
+        ? `https://github.com/apps/${getGithubAppSlug()}/installations/new`
+        : null);
+    if (installUrl) {
+      const url = new URL(installUrl);
+      url.searchParams.set("state", state);
+      return url.toString();
+    }
   }
 
-  const slug = getGithubAppSlug();
   const clientId = getGithubAppClientId();
-  if (slug) {
-    const url = new URL(
-      `https://github.com/apps/${slug}/installations/new`,
-    );
-    url.searchParams.set("state", state);
-    return url.toString();
-  }
-
-  // Fallback: user-to-server OAuth only (App must already be installed).
   if (!clientId) {
     throw new GithubAppError("GITHUB_APP_CLIENT_ID is not configured", 503);
   }
-  const origin = getPublicAppOrigin(input.requestOrigin);
+
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("state", state);
   url.searchParams.set(
     "redirect_uri",
-    `${origin}${getGithubAppCallbackPath()}`,
+    redirectUri ?? getGithubAppCallbackUrl(input.requestOrigin),
   );
   return url.toString();
 }

@@ -116,6 +116,8 @@ async function resolveAuthorizedFlag(
   }
   try {
     if (options.probeInstall) {
+      // Capture login before verify — missing install clears the binding.
+      const prior = await readGithubAppUserBinding(userId).catch(() => null);
       try {
         const verified = await verifyGithubAppUserBinding(userId);
         return {
@@ -127,12 +129,9 @@ async function resolveAuthorizedFlag(
           error instanceof GithubAppError &&
           (error.status === 401 || isGithubAppInstallMissingError(error))
         ) {
-          const binding = await readGithubAppUserBinding(userId).catch(
-            () => null,
-          );
           return {
             authorized: false,
-            githubLogin: binding?.githubLogin ?? null,
+            githubLogin: prior?.githubLogin ?? null,
           };
         }
         // Probe failed for transient reasons — fall back to stored flag.

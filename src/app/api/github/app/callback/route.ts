@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 
 import {
   exchangeGithubAppOAuthCode,
+  findUserInstallationForApp,
   getGithubAuthenticatedUser,
   GithubAppError,
 } from "@/lib/github/app-client";
-import { getPublicAppOrigin } from "@/lib/github/app-config";
+import {
+  getGithubAppCallbackUrl,
+  getPublicAppOrigin,
+} from "@/lib/github/app-config";
 import { decodeGithubAppOAuthState } from "@/lib/github/oauth-state";
 import { writeGithubAppUserBinding } from "@/lib/github/user-binding-store";
 import { getSessionAuthContext } from "@/lib/session/auth-context";
@@ -86,19 +90,37 @@ export async function GET(request: Request) {
   const userId = auth.userId ?? state.userId;
 
   try {
-    const token = await exchangeGithubAppOAuthCode(code);
+    // Install flow authorize does not send redirect_uri — must omit it on exchange
+    // or GitHub returns redirect_uri_mismatch and the binding is never saved.
+    // OAuth intent stores the exact redirect_uri in signed state.
+    const token = await exchangeGithubAppOAuthCode(code, {
+      redirectUri:
+        state.intent === "oauth"
+          ? (state.redirectUri ?? getGithubAppCallbackUrl(requestUrl.origin))
+          : undefined,
+    });
     const user = await getGithubAuthenticatedUser(token.accessToken);
-    const installationId = installationIdRaw
+    let installationId = installationIdRaw
       ? Number(installationIdRaw)
       : null;
+    if (installationId != null && !Number.isFinite(installationId)) {
+      installationId = null;
+    }
+
+    // Install callback sometimes omits installation_id; resolve from UAT.
+    if (installationId == null) {
+      try {
+        const found = await findUserInstallationForApp(token.accessToken);
+        installationId = found?.id ?? null;
+      } catch {
+        // Best-effort — binding can still be saved; status probe will re-check.
+      }
+    }
 
     await writeGithubAppUserBinding({
       userId,
       githubLogin: user.login,
-      installationId:
-        installationId != null && Number.isFinite(installationId)
-          ? installationId
-          : null,
+      installationId,
       userAccessToken: token.accessToken,
       refreshToken: token.refreshToken,
       expiresAt: token.expiresAt,
