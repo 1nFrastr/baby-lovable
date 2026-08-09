@@ -22,6 +22,9 @@ export type GitSyncTaskStatus =
 
 export type GitTurnOutcome = "completed" | "failed" | "cancelled";
 
+/** Freestyle ↔ GitHub Sync link state (not turn checkpoint status). */
+export type GithubSyncStatus = "idle" | "linked" | "error";
+
 /** Durable Freestyle repo binding for one session. */
 export interface SessionGitRepository {
   sessionId: string;
@@ -36,6 +39,10 @@ export interface SessionGitRepository {
   lastSyncedRunId: string | null;
   syncStatus: GitSyncStatus;
   syncError: string | null;
+  /** Linked GitHub repo as `owner/repo` when Freestyle GitHub Sync is enabled. */
+  githubRepoName: string | null;
+  githubSyncStatus: GithubSyncStatus;
+  githubSyncError: string | null;
   /** True when sandbox was lost and remote has no recoverable history. */
   unrecoverable: boolean;
   /** Durable Workflow DevKit run id for Freestyle repo provisioning. */
@@ -79,6 +86,8 @@ export interface SourceControlProjection {
     | "conflict";
   shortSha?: string;
   error?: string;
+  /** Present when Freestyle GitHub Sync is linked. */
+  githubRepoName?: string;
   updatedAt: string;
 }
 
@@ -111,6 +120,9 @@ export function emptyGitRepository(
     lastSyncedRunId: null,
     syncStatus: "idle",
     syncError: null,
+    githubRepoName: null,
+    githubSyncStatus: "idle",
+    githubSyncError: null,
     unrecoverable: false,
     provisionWorkflowRunId: null,
     revision: 0,
@@ -126,6 +138,9 @@ export function normalizeGitRepository(
 ): SessionGitRepository {
   return {
     ...repo,
+    githubRepoName: repo.githubRepoName ?? null,
+    githubSyncStatus: repo.githubSyncStatus ?? "idle",
+    githubSyncError: repo.githubSyncError ?? null,
     provisionWorkflowRunId: repo.provisionWorkflowRunId ?? null,
   };
 }
@@ -147,13 +162,23 @@ export function sourceControlFromRepository(
     return { status: "idle", updatedAt };
   }
 
+  const githubRepoName =
+    repo.githubSyncStatus === "linked" && repo.githubRepoName
+      ? repo.githubRepoName
+      : undefined;
+
   if (repo.provisionStatus === "preparing") {
-    return { status: "preparing", updatedAt: repo.updatedAt || updatedAt };
+    return {
+      status: "preparing",
+      githubRepoName,
+      updatedAt: repo.updatedAt || updatedAt,
+    };
   }
   if (repo.provisionStatus === "error" || repo.unrecoverable) {
     return {
       status: "error",
       error: repo.provisionError ?? repo.syncError ?? "source control error",
+      githubRepoName,
       updatedAt: repo.updatedAt || updatedAt,
     };
   }
@@ -168,12 +193,14 @@ export function sourceControlFromRepository(
       return {
         status: "syncing",
         shortSha,
+        githubRepoName,
         updatedAt: repo.updatedAt || updatedAt,
       };
     case "synced":
       return {
         status: "synced",
         shortSha,
+        githubRepoName,
         updatedAt: repo.updatedAt || updatedAt,
       };
     case "conflict":
@@ -181,6 +208,7 @@ export function sourceControlFromRepository(
         status: "conflict",
         shortSha,
         error: repo.syncError ?? "conflict with remote",
+        githubRepoName,
         updatedAt: repo.updatedAt || updatedAt,
       };
     case "error":
@@ -188,12 +216,14 @@ export function sourceControlFromRepository(
         status: "error",
         shortSha,
         error: repo.syncError ?? "sync failed",
+        githubRepoName,
         updatedAt: repo.updatedAt || updatedAt,
       };
     default:
       return {
         status: "ready",
         shortSha,
+        githubRepoName,
         updatedAt: repo.updatedAt || updatedAt,
       };
   }

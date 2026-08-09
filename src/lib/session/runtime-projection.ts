@@ -193,6 +193,7 @@ export function runtimeUiSignature(
       status: sourceControl.status,
       shortSha: sourceControl.shortSha ?? null,
       error: sourceControl.error ?? null,
+      githubRepoName: sourceControl.githubRepoName ?? null,
     },
   });
 }

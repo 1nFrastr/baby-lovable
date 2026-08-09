@@ -19,6 +19,7 @@ import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection"
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
 import { DevServerLogsPanel } from "./dev-server-logs-panel";
+import { GithubSyncPanel } from "./github-sync-panel";
 import { SourceControlStatusChip } from "./source-control-status";
 import { VersionHistoryPanel } from "./version-history-panel";
 import { WorkspaceFileExplorer } from "./workspace-file-explorer";
@@ -814,6 +815,11 @@ export function PreviewPanel({
                 )}
                 {exporting ? "Exporting…" : "Export"}
               </button>
+              <GithubSyncPanel
+                sessionId={sessionId}
+                visible={showSourceControl}
+                linkedRepoName={sourceControl?.githubRepoName ?? null}
+              />
               <button
                 type="button"
                 onClick={() => {

@@ -13,3 +13,12 @@ export {
   isClaimToken,
   newClaimToken,
 } from "./workflow-run";
+export {
+  getGithubSyncStatus,
+  linkGithubRepo,
+  createAndLinkGithubRepo,
+  unlinkGithubRepo,
+  normalizeGithubRepoName,
+  suggestedGithubRepoName,
+  GithubSyncError,
+} from "./github-sync";
