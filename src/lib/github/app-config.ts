@@ -71,19 +71,15 @@ export function isGithubAppConfigured(): boolean {
 }
 
 /**
- * Public origin for OAuth callback redirects.
- * Prefer explicit app URL; fall back to Vercel / request origin at call sites.
+ * Public origin for OAuth callback / success redirects.
+ * Prefer the incoming request host; otherwise VERCEL_URL, then localhost.
  */
 export function getPublicAppOrigin(requestOrigin?: string): string {
-  const fromEnv =
-    trimEnv("NEXT_PUBLIC_APP_URL") ??
-    trimEnv("BABY_LOVABLE_APP_URL") ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
-  if (fromEnv) {
-    return fromEnv.replace(/\/+$/, "");
-  }
   if (requestOrigin) {
     return requestOrigin.replace(/\/+$/, "");
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL.replace(/\/+$/, "")}`;
   }
   return "http://localhost:3000";
 }

@@ -18,11 +18,6 @@ describe("buildGithubAppAuthorizeUrl", () => {
       if (prev[key] === undefined) delete process.env[key];
       else process.env[key] = prev[key];
     }
-    if (prev.NEXT_PUBLIC_APP_URL === undefined) {
-      delete process.env.NEXT_PUBLIC_APP_URL;
-    } else {
-      process.env.NEXT_PUBLIC_APP_URL = prev.NEXT_PUBLIC_APP_URL;
-    }
     if (prev.GITHUB_APP_INSTALL_URL === undefined) {
       delete process.env.GITHUB_APP_INSTALL_URL;
     } else {
@@ -33,6 +28,11 @@ describe("buildGithubAppAuthorizeUrl", () => {
     } else {
       process.env.GITHUB_APP_SLUG = prev.GITHUB_APP_SLUG;
     }
+    if (prev.VERCEL_URL === undefined) {
+      delete process.env.VERCEL_URL;
+    } else {
+      process.env.VERCEL_URL = prev.VERCEL_URL;
+    }
   });
 
   function stubEnv() {
@@ -40,14 +40,13 @@ describe("buildGithubAppAuthorizeUrl", () => {
       prev[key] = process.env[key];
       process.env[key] = value;
     }
-    prev.NEXT_PUBLIC_APP_URL = process.env.NEXT_PUBLIC_APP_URL;
     prev.GITHUB_APP_INSTALL_URL = process.env.GITHUB_APP_INSTALL_URL;
     prev.GITHUB_APP_SLUG = process.env.GITHUB_APP_SLUG;
+    prev.VERCEL_URL = process.env.VERCEL_URL;
   }
 
   it("defaults to installations/new so uninstall can reinstall", () => {
     stubEnv();
-    delete process.env.NEXT_PUBLIC_APP_URL;
     process.env.GITHUB_APP_INSTALL_URL =
       "https://github.com/apps/demo/installations/new";
 
@@ -68,7 +67,6 @@ describe("buildGithubAppAuthorizeUrl", () => {
 
   it("intent=oauth uses authorize with explicit redirect_uri", () => {
     stubEnv();
-    delete process.env.NEXT_PUBLIC_APP_URL;
     process.env.GITHUB_APP_INSTALL_URL =
       "https://github.com/apps/demo/installations/new";
 
@@ -90,15 +88,14 @@ describe("buildGithubAppAuthorizeUrl", () => {
     );
   });
 
-  it("oauth intent prefers NEXT_PUBLIC_APP_URL for redirect_uri", () => {
+  it("oauth intent falls back to VERCEL_URL without requestOrigin", () => {
     stubEnv();
-    process.env.NEXT_PUBLIC_APP_URL = "https://app.example.com";
+    process.env.VERCEL_URL = "app.example.com";
 
     const url = new URL(
       buildGithubAppAuthorizeUrl({
         sessionId: "sess_abc",
         userId: "user_1",
-        requestOrigin: "http://localhost:3000",
         intent: "oauth",
       }),
     );
