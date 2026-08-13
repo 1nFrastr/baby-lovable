@@ -50,27 +50,3 @@ export function getSessionRoot(
   return resolveSessionRoot(sessionId, userId);
 }
 
-export function getWorkspaceRoot(
-  sessionId: string,
-  userId: string | null = null,
-): string {
-  return path.join(getSessionRoot(sessionId, userId), "workspace");
-}
-
-export function resolveWorkspacePath(
-  sessionId: string,
-  targetPath: string,
-  userId: string | null = null,
-): string {
-  const workspaceRoot = path.resolve(getWorkspaceRoot(sessionId, userId));
-  const resolved = path.resolve(workspaceRoot, targetPath);
-
-  if (
-    resolved !== workspaceRoot &&
-    !resolved.startsWith(`${workspaceRoot}${path.sep}`)
-  ) {
-    throw new Error(`Path escapes workspace: ${targetPath}`);
-  }
-
-  return resolved;
-}
