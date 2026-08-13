@@ -189,7 +189,7 @@ export function GithubSyncPanel({
   );
 
   const loadRepositories = useCallback(
-    async (clearError = true) => {
+    async (clearError = true, selectFirstRepository = false) => {
       setRepositoriesLoading(true);
       if (clearError) {
         setError(null);
@@ -208,7 +208,11 @@ export function GithubSyncPanel({
         const next = data?.repositories ?? [];
         setRepositories(next);
         setSelectedRepositoryId((current) => {
-          if (current && next.some((repo) => String(repo.id) === current)) {
+          if (
+            !selectFirstRepository &&
+            current &&
+            next.some((repo) => String(repo.id) === current)
+          ) {
             return current;
           }
           return next[0] ? String(next[0].id) : "";
@@ -600,7 +604,7 @@ export function GithubSyncPanel({
                     <button
                       type="button"
                       disabled={repositoriesLoading || busy}
-                      onClick={() => void loadRepositories()}
+                      onClick={() => void loadRepositories(true, true)}
                       className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400"
                     >
                       <RefreshCw
