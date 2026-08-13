@@ -5,7 +5,11 @@
  * enterIsolate() clears process L1 — matching cold Vercel/Workflow workers.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/session/runtime-projection-store", () => ({
+  publishRuntimeUpdate: vi.fn(),
+}));
 
 import {
   acquireRuntimeLease,

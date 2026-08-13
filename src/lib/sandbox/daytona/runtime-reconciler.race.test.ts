@@ -41,6 +41,10 @@ vi.mock("@/lib/session/store", () => ({
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
 }));
 
+vi.mock("@/lib/session/runtime-projection-store", () => ({
+  publishRuntimeUpdate: vi.fn(),
+}));
+
 vi.mock("./vm", () => ({
   createSandbox,
   deleteSandboxById,
