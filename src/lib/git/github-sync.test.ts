@@ -1,10 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GithubAppError } from "@/lib/github/app-client";
+import { installMemoryGitStores } from "./__tests__/memory-stores";
 import {
   FakeFreestyleAdapter,
   setFreestyleAdapterForTests,
@@ -89,10 +86,8 @@ describe("normalizeGitRepository github fields", () => {
 });
 
 describe("installation repository selection and Freestyle link", () => {
-  let dataDir: string;
   let adapter: FakeFreestyleAdapter;
-  let previousDataDir: string | undefined;
-  let previousLocalMode: string | undefined;
+  let resetStores: () => void;
 
   const identity = { id: 7, login: "octocat" };
   const binding = {
@@ -125,13 +120,9 @@ describe("installation repository selection and Freestyle link", () => {
     return provisioned;
   }
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    dataDir = await mkdtemp(join(tmpdir(), "github-sync-"));
-    previousDataDir = process.env.BABY_LOVABLE_DATA_DIR;
-    previousLocalMode = process.env.BABY_LOVABLE_LOCAL_MODE;
-    process.env.BABY_LOVABLE_DATA_DIR = dataDir;
-    process.env.BABY_LOVABLE_LOCAL_MODE = "1";
+    resetStores = installMemoryGitStores();
     process.env.FREESTYLE_API_KEY = "test-key";
     adapter = new FakeFreestyleAdapter();
     setFreestyleAdapterForTests(adapter);
@@ -161,20 +152,10 @@ describe("installation repository selection and Freestyle link", () => {
     ]);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
+    resetStores();
     setFreestyleAdapterForTests(null);
     delete process.env.FREESTYLE_API_KEY;
-    if (previousDataDir === undefined) {
-      delete process.env.BABY_LOVABLE_DATA_DIR;
-    } else {
-      process.env.BABY_LOVABLE_DATA_DIR = previousDataDir;
-    }
-    if (previousLocalMode === undefined) {
-      delete process.env.BABY_LOVABLE_LOCAL_MODE;
-    } else {
-      process.env.BABY_LOVABLE_LOCAL_MODE = previousLocalMode;
-    }
-    await rm(dataDir, { recursive: true, force: true });
   });
 
   it("lists only empty repositories from the verified installation", async () => {

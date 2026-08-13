@@ -152,7 +152,7 @@ Agent / Preview API
   → upsertRuntimeSnapshot(CAS)
   → publishRuntimeUpdate
   → SessionRuntimeProjection
-  → Supabase Realtime / SSE
+  → Supabase Realtime
   → Web UI
 ```
 
@@ -177,9 +177,9 @@ Agent / Preview API
 
 ## 本地开发
 
-- 支持本地文件存储，方便无 DB 启动
+- 本地与线上统一使用 Supabase 元数据存储与 Realtime
 - 本地与线上统一使用 Daytona Sandbox + Freestyle `main`
-- 支持 Supabase Auth / Realtime 接入
+- 本地开发必须配置 Supabase Auth、数据库和 CLI 用户
 - 支持 CLI 端到端验证，不维护本机沙箱模拟分支
 
 详见：[本地开发指南](./docs/local-development.md)

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
+import { assertSupabaseMetadataConfigured } from "@/lib/supabase/config";
 import {
   awaitRuntimeDesired,
   kickRuntimeDesired,
@@ -19,6 +20,7 @@ export const maxDuration = 300;
 
 export async function GET(request: Request) {
   try {
+    assertSupabaseMetadataConfigured();
     const auth = await requireSessionAuth(request);
     const sessions = await listSessions(auth);
     return NextResponse.json({
@@ -36,6 +38,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  try {
+    assertSupabaseMetadataConfigured();
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
+    );
+  }
+
   let auth;
   try {
     auth = await requireSessionAuth(request);

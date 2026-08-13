@@ -56,30 +56,16 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(getSupabaseUrl() && getSupabasePublishableKey());
 }
 
-function isTruthyEnv(value: string | undefined): boolean {
-  return value === "1" || value === "true";
-}
-
-/**
- * True when sessions use local `.baby-lovable/` files instead of Supabase.
- *
- * Active when Supabase env is absent, or when `BABY_LOVABLE_LOCAL_MODE=1`
- * (set in `.env.local` after `vercel env pull` to skip auth + Postgres for
- * CLI and `npm run dev`). For the web UI client bundle, also set
- * `NEXT_PUBLIC_BABY_LOVABLE_LOCAL_MODE=1`.
- */
-export function isLocalFileStorageMode(): boolean {
-  if (
-    isTruthyEnv(process.env.BABY_LOVABLE_LOCAL_MODE) ||
-    isTruthyEnv(process.env.NEXT_PUBLIC_BABY_LOVABLE_LOCAL_MODE)
-  ) {
-    return true;
-  }
-
-  return !isSupabaseConfigured();
-}
-
 /** True when the secret key is available for admin / workflow operations. */
 export function isSupabaseAdminConfigured(): boolean {
   return Boolean(getSupabaseUrl() && getSupabaseSecretKey());
+}
+
+/** Fail before a session operation can silently diverge from production. */
+export function assertSupabaseMetadataConfigured(): void {
+  if (!isSupabaseConfigured() || !isSupabaseAdminConfigured()) {
+    throw new Error(
+      "Supabase metadata storage is required. Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and SUPABASE_SECRET_KEY.",
+    );
+  }
 }

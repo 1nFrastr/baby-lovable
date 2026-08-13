@@ -20,6 +20,10 @@ import {
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import type { Session } from "@/lib/session/types";
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
+import {
+  assertSupabaseMetadataConfigured,
+  getDevUserId,
+} from "@/lib/supabase/config";
 
 import { logger } from "./logger";
 import { runAgentTurn } from "./run-agent";
@@ -131,6 +135,18 @@ function requireGatewayKey(): void {
 }
 
 function requireRemoteWorkspaceConfig(): void {
+  try {
+    assertSupabaseMetadataConfigured();
+  } catch (error) {
+    logger.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+  if (!getDevUserId()) {
+    logger.error(
+      "Missing BABY_LOVABLE_DEV_USER_ID. Set it to a real Supabase auth.users.id for CLI access.",
+    );
+    process.exit(1);
+  }
   if (!isDaytonaConfigured()) {
     logger.error(
       "Missing DAYTONA_API_KEY. Set it in .env.local.",

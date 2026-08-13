@@ -1,14 +1,11 @@
 import type { User } from "@supabase/supabase-js";
 
 import type { UserId } from "./types";
-import {
-  getDevUserId,
-  isLocalFileStorageMode,
-} from "@/lib/supabase/config";
+import { getDevUserId } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export interface SessionAuthContext {
-  /** `null` = anonymous local-dev; Supabase `auth.users.id` when configured. */
+  /** `null` is reserved for trusted workflow/CLI calls without a cookie. */
   userId: UserId;
   /** GitHub provider identity from the existing platform login; never a token. */
   githubIdentity?: GithubAuthIdentity | null;
@@ -73,17 +70,13 @@ export class UnauthenticatedError extends Error {
 /**
  * Resolve the authenticated user for session-scoped API routes.
  *
- * When Supabase is configured (via Vercel Marketplace env sync), reads the
- * JWT from cookies. Otherwise returns anonymous context for local file mode.
+ * Reads the Supabase JWT from cookies, with a configured dev user fallback
+ * for headless CLI calls.
  */
 export async function getSessionAuthContext(
   request?: Request,
 ): Promise<SessionAuthContext> {
   void request;
-
-  if (isLocalFileStorageMode()) {
-    return { userId: null, githubIdentity: null };
-  }
 
   const supabase = await createSupabaseServerClient();
   const {
@@ -97,7 +90,7 @@ export async function getSessionAuthContext(
 }
 
 /**
- * Require a logged-in user when Supabase is active.
+ * Require a logged-in Supabase user.
  * Throws `UnauthenticatedError` (maps to HTTP 401).
  */
 export async function requireSessionAuth(
@@ -105,7 +98,7 @@ export async function requireSessionAuth(
 ): Promise<SessionAuthContext & { userId: string }> {
   const auth = await getSessionAuthContext(request);
 
-  if (!isLocalFileStorageMode() && !auth.userId) {
+  if (!auth.userId) {
     throw new UnauthenticatedError();
   }
 
@@ -118,14 +111,8 @@ export function assertSessionOwner(
   auth: SessionAuthContext,
 ): void {
   // Trusted server context (workflow steps, CLI) — no user cookie available.
-  if (!isLocalFileStorageMode() && auth.userId === null) {
+  if (auth.userId === null) {
     return;
-  }
-
-  if (isLocalFileStorageMode()) {
-    if (sessionUserId === null && auth.userId === null) {
-      return;
-    }
   }
 
   if (sessionUserId !== auth.userId) {

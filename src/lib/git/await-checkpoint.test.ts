@@ -1,9 +1,6 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { installMemoryGitStores } from "./__tests__/memory-stores";
 import {
   FakeFreestyleAdapter,
   setFreestyleAdapterForTests,
@@ -36,20 +33,18 @@ describe("workflow-run claim tokens", () => {
 });
 
 describe("awaitPreviousCheckpoint barrier", () => {
-  let dataDir: string;
+  let resetStores: () => void;
 
-  beforeEach(async () => {
-    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "baby-git-barrier-"));
-    process.env.BABY_LOVABLE_LOCAL_MODE = "1";
-    process.env.BABY_LOVABLE_DATA_DIR = dataDir;
+  beforeEach(() => {
+    resetStores = installMemoryGitStores();
     process.env.FREESTYLE_API_KEY = "test-key";
     setFreestyleAdapterForTests(new FakeFreestyleAdapter());
   });
 
-  afterEach(async () => {
+  afterEach(() => {
+    resetStores();
     setFreestyleAdapterForTests(null);
     delete process.env.FREESTYLE_API_KEY;
-    await fs.rm(dataDir, { recursive: true, force: true });
   });
 
   it("returns immediately when repo ready and no open tasks", async () => {

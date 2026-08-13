@@ -5,7 +5,7 @@ function lastMessage(messages: UIMessage[]): UIMessage | undefined {
 }
 
 /**
- * useChat keeps the SSE assistant id; the server persists draft.json's id after
+ * useChat keeps the SSE assistant id; the server persists the draft row's id after
  * the workflow completes. Skip the extra client-only assistant when persisted
  * already ended with an assistant for that turn.
  */
@@ -99,8 +99,8 @@ export function persistedMessagesLagChat(
 }
 
 /**
- * Live-turn display: keep completed history from session.json, overlay the
- * in-flight useChat thread, then fall back to draft.json when SSE has not
+ * Live-turn display: keep completed history from Supabase, overlay the
+ * in-flight useChat thread, then fall back to the draft row when SSE has not
  * produced assistant parts yet (e.g. refresh mid-run).
  *
  * When the turn is no longer live but persisted history has not caught up yet,

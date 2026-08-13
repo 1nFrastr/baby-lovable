@@ -158,7 +158,7 @@ function countTextParts(message: UIMessage): number {
 }
 
 /**
- * Headless draft-resume test — simulates refresh by reading draft.json via API
+ * Headless draft-resume test — simulates refresh by reading the Supabase draft via API
  * while the workflow is still running (requires `npm run dev`).
  */
 export async function runResumeStreamTest(options?: {
@@ -201,8 +201,8 @@ export async function runResumeStreamTest(options?: {
   const onDiskDraft = await readDraft(session.id);
   details.push(
     onDiskDraft
-      ? `draft.json on disk: parts=${onDiskDraft.message.parts.length}, runId=${onDiskDraft.runId}`
-      : "draft.json on disk: missing",
+      ? `Supabase draft: parts=${onDiskDraft.message.parts.length}, runId=${onDiskDraft.runId}`
+      : "Supabase draft: missing",
   );
 
   const finished = await waitForTerminalRun(
@@ -216,7 +216,7 @@ export async function runResumeStreamTest(options?: {
 
   const afterComplete = await readDraft(session.id);
   details.push(
-    afterComplete ? "FAIL: draft.json still present after complete" : "draft.json deleted after complete",
+    afterComplete ? "FAIL: draft row still present after complete" : "draft row deleted after complete",
   );
 
   const assistant = finished.messages.find((message) => message.role === "assistant");

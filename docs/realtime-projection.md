@@ -67,21 +67,13 @@ publishRuntimeUpdate(...)
 
 ## 输送层
 
-投影后的读模型会根据不同持久化后端走不同通道。
-
-本地开发时：
-
-```txt
-local file store → host SSE → Web UI
-```
-
-云端部署时：
+本地与云端使用同一条通道：
 
 ```txt
 Supabase Postgres → Supabase Realtime → Web UI
 ```
 
-云端使用的表是 `session_runtime_projection`。前端订阅这张表中当前 session 对应的行。
+使用的表是 `session_runtime_projection`。前端订阅这张表中当前 session 对应的行。
 
 ## 前端消费方式
 
@@ -174,7 +166,7 @@ Agent / Preview API
   → upsertRuntimeSnapshot(CAS)
   → publishRuntimeUpdate
   → SessionRuntimeProjection
-  → Supabase Realtime / SSE
+  → Supabase Realtime
   → Web UI
 ```
 

@@ -36,7 +36,7 @@ export async function consumeUiStreamToDraftMessage(
 }
 
 /**
- * Background task: read the durable workflow stream and overwrite `draft.json`
+ * Background task: read the durable workflow stream and update the Supabase draft
  * on each materialized update. Independent of the HTTP response lifecycle.
  */
 export async function materializeDraftFromRun(

@@ -42,7 +42,7 @@ Agent / checkpoint **仍只写 Freestyle**。GitHub 侧由 Freestyle GitHub Sync
 - 平台不创建 GitHub 仓库，也不接受手填 `owner/repo`；下拉只显示空仓库，POST 接收 `repositoryId` 后会再次校验仓库没有 commit
 - App JWT 只用于读取 installation；短期 installation token 只用于列出/校验仓库，均不落库。平台不获取或存储 GitHub user access token
 - 分支分叉时 Freestyle **不 force-push**；需在 GitHub 或 Freestyle 侧手动合拢后再同步
-- 本地文件存储模式仅按单用户开发环境处理 installation 归属；工作区仍使用 Daytona
+- installation 归属始终绑定当前 Supabase 用户
 
 ## Preview Console 日志一致性
 
@@ -53,8 +53,7 @@ Agent / checkpoint **仍只写 Freestyle**。GitHub 侧由 Freestyle GitHub Sync
 
 ## 存储
 
-- Local：`.baby-lovable/sessions/<id>/git-repository.json` + `git-sync-tasks/`；installation 元数据 `.baby-lovable/users/<userId>/github-app-installation.json`
-- Supabase：`session_git_repositories`、`session_git_sync_tasks`、`user_github_app_installations`（无 token）
+- Supabase：`session_git_repositories`、`session_git_sync_tasks`、`user_github_app_installations`（无 token）；本地 Host 使用相同存储
 - Session GitHub 字段在 `repository` jsonb：`githubRepoName`、`githubSyncStatus`、`githubSyncError`
 
 ## 环境变量

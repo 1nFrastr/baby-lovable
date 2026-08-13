@@ -95,7 +95,7 @@ export async function POST(
       auth.userId,
     );
 
-    // Detached — survives client disconnect; overwrites draft.json as chunks arrive.
+    // Detached — survives client disconnect; updates the Supabase draft as chunks arrive.
     void materializeDraftFromRun(sessionId, run.runId, auth.userId).catch(
       (error) => {
         console.error(

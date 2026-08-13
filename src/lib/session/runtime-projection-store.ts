@@ -1,6 +1,3 @@
-import { isLocalFileStorageMode } from "@/lib/supabase/config";
-
-import { notifyRuntimeEvents } from "./runtime-events-hub";
 import {
   appTestFromLatest,
   emptyRuntimeProjection,
@@ -13,10 +10,6 @@ import {
   type SessionRuntimeProjection,
 } from "./runtime-projection";
 import {
-  readRuntimeProjectionLocal,
-  writeRuntimeProjectionLocal,
-} from "./runtime-projection-store-local";
-import {
   readRuntimeProjectionSupabase,
   writeRuntimeProjectionSupabase,
 } from "./runtime-projection-store-supabase";
@@ -24,7 +17,7 @@ import {
 export type { SessionRuntimeProjection, RuntimeTransport };
 
 export function getRuntimeTransport(): RuntimeTransport {
-  return isLocalFileStorageMode() ? "sse" : "realtime";
+  return "realtime";
 }
 
 async function resolveUserId(
@@ -43,21 +36,16 @@ export async function readRuntimeProjectionStore(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionRuntimeProjection | null> {
-  if (!isLocalFileStorageMode()) {
-    return readRuntimeProjectionSupabase(sessionId);
-  }
-  return readRuntimeProjectionLocal(sessionId, userId);
+  void userId;
+  return readRuntimeProjectionSupabase(sessionId);
 }
 
 export async function writeRuntimeProjectionStore(
   projection: SessionRuntimeProjection,
   userId: string | null = null,
 ): Promise<void> {
-  if (!isLocalFileStorageMode()) {
-    const ownerId = await resolveUserId(projection.sessionId, userId);
-    return writeRuntimeProjectionSupabase(projection, ownerId);
-  }
-  return writeRuntimeProjectionLocal(projection, userId);
+  const ownerId = await resolveUserId(projection.sessionId, userId);
+  return writeRuntimeProjectionSupabase(projection, ownerId);
 }
 
 /**
@@ -81,10 +69,6 @@ export async function ensureRuntimeProjection(
     version: 1,
   };
   await writeRuntimeProjectionStore(initial, ownerId);
-
-  if (isLocalFileStorageMode()) {
-    notifyRuntimeEvents(initial);
-  }
 
   return initial;
 }
@@ -157,7 +141,7 @@ async function assembleRuntimeProjection(
 
 /**
  * Merge domain patch into durable projection. Bumps version only when
- * UI-visible fields change, then notifies file-store SSE listeners.
+ * UI-visible fields change.
  *
  * Does not call ensure/assemble (avoids peekAllStatus side effects on writers).
  */
@@ -183,10 +167,6 @@ export async function publishRuntimeUpdate(
     };
 
     await writeRuntimeProjectionStore(next, ownerId);
-
-    if (isLocalFileStorageMode()) {
-      notifyRuntimeEvents(next);
-    }
 
     return next;
   } catch (error) {

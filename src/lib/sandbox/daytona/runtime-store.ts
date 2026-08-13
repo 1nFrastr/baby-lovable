@@ -1,12 +1,11 @@
 /**
  * Daytona runtime store — durable snapshot + lease for single-writer reconcile.
- * Local: session `daytona-runtime.json`. Supabase: `session_daytona_runtime`.
+ * Supabase `session_daytona_runtime` is the production durable store.
  *
  * L1 `memory` is process-local (one serverless isolate). Writers always CAS
  * against durable state so a stale L1 cannot clobber another isolate's write.
  */
 
-import { isLocalFileStorageMode } from "@/lib/supabase/config";
 import { getSession } from "@/lib/session/store";
 
 import {
@@ -14,11 +13,6 @@ import {
   type DaytonaRuntimePatch,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
-import {
-  deleteRuntimeLocal,
-  readRuntimeLocal,
-  writeRuntimeLocal,
-} from "./runtime-store-local";
 import {
   deleteRuntimeSupabase,
   readRuntimeSupabase,
@@ -28,6 +22,32 @@ import {
 const memory = new Map<string, DaytonaRuntimeSnapshot>();
 
 const DEFAULT_LEASE_TTL_MS = 30_000;
+
+export interface RuntimeDurableAdapter {
+  read(sessionId: string): Promise<DaytonaRuntimeSnapshot | null>;
+  write(
+    snapshot: DaytonaRuntimeSnapshot,
+    userId: string | null,
+    expectedRevision: number | null,
+  ): Promise<DaytonaRuntimeSnapshot>;
+  delete(sessionId: string): Promise<void>;
+}
+
+const supabaseAdapter: RuntimeDurableAdapter = {
+  read: readRuntimeSupabase,
+  write: writeRuntimeSupabase,
+  delete: deleteRuntimeSupabase,
+};
+
+let durableAdapter: RuntimeDurableAdapter = supabaseAdapter;
+
+/** Unit tests inject an in-memory CAS adapter; production always uses Supabase. */
+export function setRuntimeDurableAdapterForTests(
+  adapter: RuntimeDurableAdapter | null,
+): void {
+  durableAdapter = adapter ?? supabaseAdapter;
+  clearRuntimeMemory();
+}
 
 function isLeaseActive(snapshot: DaytonaRuntimeSnapshot, now = Date.now()): boolean {
   if (!snapshot.leaseOwner || !snapshot.leaseExpiresAt) {
@@ -51,10 +71,8 @@ async function loadDurable(
   sessionId: string,
   userId: string | null,
 ): Promise<DaytonaRuntimeSnapshot | null> {
-  if (!isLocalFileStorageMode()) {
-    return readRuntimeSupabase(sessionId);
-  }
-  return readRuntimeLocal(sessionId, userId);
+  void userId;
+  return durableAdapter.read(sessionId);
 }
 
 /**
@@ -67,28 +85,7 @@ async function saveDurable(
   userId: string | null,
   expectedRevision: number | null,
 ): Promise<DaytonaRuntimeSnapshot> {
-  if (!isLocalFileStorageMode()) {
-    return writeRuntimeSupabase(snapshot, userId, expectedRevision);
-  }
-
-  const current = await readRuntimeLocal(snapshot.sessionId, userId);
-
-  if (expectedRevision === null) {
-    if (current) {
-      throw new Error(
-        `Daytona runtime CAS conflict for ${snapshot.sessionId} (create lost race, on-disk revision ${current.revision})`,
-      );
-    }
-    await writeRuntimeLocal(snapshot, userId, { createOnly: true });
-    return snapshot;
-  } else if (!current || current.revision !== expectedRevision) {
-    throw new Error(
-      `Daytona runtime CAS conflict for ${snapshot.sessionId} (expected ${expectedRevision}, got ${current?.revision ?? "missing"})`,
-    );
-  }
-
-  await writeRuntimeLocal(snapshot, userId);
-  return snapshot;
+  return durableAdapter.write(snapshot, userId, expectedRevision);
 }
 
 export type GetRuntimeOptions = {
@@ -274,11 +271,8 @@ export async function clearRuntimeSnapshot(
   const ownerId = await resolveUserId(sessionId, userId);
 
   try {
-    if (!isLocalFileStorageMode()) {
-      await deleteRuntimeSupabase(sessionId);
-      return;
-    }
-    await deleteRuntimeLocal(sessionId, ownerId);
+    void ownerId;
+    await durableAdapter.delete(sessionId);
   } catch {
     // ignore
   }
@@ -295,7 +289,7 @@ export function clearRuntimeMemory(sessionId?: string): void {
 
 /**
  * Test / debug helper: run `fn` as if on a fresh isolate (empty L1),
- * while still sharing the durable session store on disk.
+ * while still sharing the injected or Supabase durable store.
  */
 export async function withFreshIsolate<T>(
   sessionId: string,

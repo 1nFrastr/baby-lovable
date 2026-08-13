@@ -7,7 +7,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    // Isolate file-store races are easier to reason about serially across files.
+    // Test adapters are process-global, so metadata race suites run serially.
     fileParallelism: false,
   },
   resolve: {

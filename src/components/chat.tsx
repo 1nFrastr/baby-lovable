@@ -29,9 +29,9 @@ const APP_TEST_USER_PROMPT = "Please run a quick happy-path UI test of the main 
 
 interface ChatProps {
   sessionId: string;
-  /** Completed messages from session.json (persistent layer). */
+  /** Completed messages from the Supabase session row. */
   messages: UIMessage[];
-  /** In-flight assistant from draft.json (cache layer); null when idle. */
+  /** In-flight assistant from the Supabase draft row; null when idle. */
   draft: UIMessage | null;
   runStatus?: SessionRunStatus;
   onSessionRefresh?: () => void;

@@ -4,14 +4,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import {
   getSupabasePublishableKey,
   getSupabaseUrl,
-  isLocalFileStorageMode,
 } from "@/lib/supabase/config";
 
 export async function middleware(request: NextRequest) {
-  if (isLocalFileStorageMode()) {
-    return NextResponse.next();
-  }
-
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
