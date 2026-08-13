@@ -49,4 +49,3 @@ export function getSessionRoot(
 ): string {
   return resolveSessionRoot(sessionId, userId);
 }
-
