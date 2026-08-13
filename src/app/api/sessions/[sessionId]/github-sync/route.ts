@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 
 import {
-  createAndLinkGithubRepo,
   getGithubSyncStatus,
   GithubSyncError,
-  linkGithubRepo,
+  linkSelectedGithubRepository,
   unlinkGithubRepo,
 } from "@/lib/git/github-sync";
 import {
@@ -25,10 +24,7 @@ function assertDaytonaSession(sandboxMode: string | undefined): void {
 
 function githubSyncErrorResponse(error: GithubSyncError) {
   return NextResponse.json(
-    {
-      error: error.message,
-      ...(error.authUrl ? { authUrl: error.authUrl } : {}),
-    },
+    { error: error.message },
     { status: error.status },
   );
 }
@@ -36,9 +32,7 @@ function githubSyncErrorResponse(error: GithubSyncError) {
 /**
  * Freestyle ↔ GitHub Sync for a Daytona session.
  *
- * POST modes:
- * - `{ mode: "create_and_link", repoName? }` — OAuth (if needed) → create empty repo → enable sync
- * - `{ githubRepoName }` — link an existing owner/repo (advanced)
+ * POST accepts only a repository id returned by the installation repository API.
  */
 export async function GET(
   request: Request,
@@ -67,7 +61,7 @@ export async function GET(
     const reconcile = url.searchParams.get("reconcile") === "1";
     const status = await getGithubSyncStatus(sessionId, auth.userId, {
       reconcile,
-      requestOrigin: url.origin,
+      githubIdentity: auth.githubIdentity ?? null,
     });
 
     return NextResponse.json(status, {
@@ -111,47 +105,25 @@ export async function POST(
     assertDaytonaSession(session.sandboxMode);
 
     const body = (await request.json().catch(() => null)) as {
-      mode?: unknown;
-      githubRepoName?: unknown;
-      repoName?: unknown;
+      repositoryId?: unknown;
     } | null;
-
-    const mode =
-      typeof body?.mode === "string" ? body.mode : "link_existing";
-    const requestOrigin = new URL(request.url).origin;
-
-    if (mode === "create_and_link") {
-      const repoName =
-        typeof body?.repoName === "string" ? body.repoName : undefined;
-      const repo = await createAndLinkGithubRepo(sessionId, auth.userId, {
-        repoName,
-        requestOrigin,
-        returnTo: `/sessions/${sessionId}`,
-      });
+    const repositoryId =
+      typeof body?.repositoryId === "number"
+        ? body.repositoryId
+        : Number.NaN;
+    if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
       return NextResponse.json(
-        {
-          linked: true,
-          githubRepoName: repo.githubRepoName,
-          githubSyncStatus: repo.githubSyncStatus,
-          githubSyncError: repo.githubSyncError,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
-    }
-
-    const githubRepoName =
-      typeof body?.githubRepoName === "string" ? body.githubRepoName : "";
-    if (!githubRepoName.trim()) {
-      return NextResponse.json(
-        {
-          error:
-            "githubRepoName is required (owner/repo), or use mode: create_and_link",
-        },
+        { error: "repositoryId is required" },
         { status: 400 },
       );
     }
 
-    const repo = await linkGithubRepo(sessionId, githubRepoName, auth.userId);
+    const repo = await linkSelectedGithubRepository(
+      sessionId,
+      repositoryId,
+      auth.userId,
+      auth.githubIdentity ?? null,
+    );
     return NextResponse.json(
       {
         linked: true,

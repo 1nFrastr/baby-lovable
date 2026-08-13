@@ -40,9 +40,3 @@ export function getFreestyleRepoRetentionDays(): number {
   const parsed = raw ? Number(raw) : 30;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30;
 }
-
-/**
- * GitHub App installation URL from Freestyle Dashboard → Git > Sync.
- * Optional — when unset, UI still allows linking a known `owner/repo`.
- */
-export { getGithubAppInstallUrl } from "@/lib/github/app-config";

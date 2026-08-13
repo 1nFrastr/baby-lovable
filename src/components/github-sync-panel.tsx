@@ -2,29 +2,42 @@
 
 import {
   Check,
-  ChevronDown,
   ExternalLink,
   Loader2,
+  RefreshCw,
   Unlink,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
+import type {
+  GithubSyncStatus,
+  SourceControlProjection,
+} from "@/lib/git/types";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
-import type { GithubSyncStatus } from "@/lib/git/types";
 
 interface GithubSyncStatusResponse {
   linked: boolean;
   githubRepoName: string | null;
   githubSyncStatus: GithubSyncStatus;
   githubSyncError: string | null;
-  installUrl: string | null;
   freestyleReady: boolean;
-  authorized: boolean;
+  installed: boolean;
   githubLogin: string | null;
-  authUrl: string | null;
-  suggestedRepoName: string;
-  createAndLinkAvailable: boolean;
+  installUrl: string | null;
+  configureUrl: string | null;
+  githubIdentityRequired: boolean;
+}
+
+interface GithubRepositoryOption {
+  id: number;
+  fullName: string;
+  name: string;
+  ownerLogin: string;
+  private: boolean;
+  htmlUrl: string;
+  createdAt: string;
+  size: number;
 }
 
 interface GithubSyncPanelProps {
@@ -33,9 +46,11 @@ interface GithubSyncPanelProps {
   visible?: boolean;
   /** From runtime projection — linked state without waiting for panel fetch. */
   linkedRepoName?: string | null;
+  /** Live runtime state — unlocks linking as soon as provisioning is ready. */
+  sourceControlStatus?: SourceControlProjection["status"] | null;
 }
 
-type BusyPhase = "idle" | "auth" | "creating" | "linking" | "disconnecting";
+type BusyPhase = "idle" | "auth" | "linking" | "disconnecting";
 
 function GitHubMark({ className }: { className?: string }) {
   return (
@@ -51,12 +66,17 @@ function GitHubMark({ className }: { className?: string }) {
 }
 
 function shortRepoLabel(fullName: string): string {
-  const slash = fullName.indexOf("/");
-  if (slash < 0) {
-    return fullName;
-  }
-  const repo = fullName.slice(slash + 1);
+  const repo = fullName.split("/").at(-1) ?? fullName;
   return repo.length > 18 ? `${repo.slice(0, 16)}…` : repo;
+}
+
+function newGithubRepositoryUrl(sessionId: string): string {
+  const shortId = sessionId.replace(/^sess_/, "").slice(0, 10) || "app";
+  const params = new URLSearchParams({
+    name: `baby-lovable-${shortId}`,
+    description: "Built with baby-lovable",
+  });
+  return `https://github.com/new?${params.toString()}`;
 }
 
 function readGithubSyncQuery(): {
@@ -78,21 +98,9 @@ function clearGithubSyncQuery(): void {
     return;
   }
   const url = new URL(window.location.href);
-  if (
-    !url.searchParams.has("github_sync") &&
-    !url.searchParams.has("github_sync_error")
-  ) {
-    return;
-  }
   url.searchParams.delete("github_sync");
   url.searchParams.delete("github_sync_error");
   window.history.replaceState({}, "", url.pathname + url.search);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
 }
 
 function applyStatusPatch(
@@ -110,15 +118,20 @@ function applyStatusPatch(
       patch.githubSyncError !== undefined
         ? patch.githubSyncError
         : (prev?.githubSyncError ?? null),
-    installUrl: patch.installUrl ?? prev?.installUrl ?? null,
     freestyleReady: patch.freestyleReady ?? prev?.freestyleReady ?? false,
-    authorized: patch.authorized ?? prev?.authorized ?? false,
-    githubLogin: patch.githubLogin ?? prev?.githubLogin ?? null,
-    authUrl:
-      patch.authUrl !== undefined ? patch.authUrl : (prev?.authUrl ?? null),
-    suggestedRepoName: patch.suggestedRepoName ?? prev?.suggestedRepoName ?? "",
-    createAndLinkAvailable:
-      patch.createAndLinkAvailable ?? prev?.createAndLinkAvailable ?? false,
+    installed: patch.installed ?? prev?.installed ?? false,
+    githubLogin:
+      patch.githubLogin !== undefined
+        ? patch.githubLogin
+        : (prev?.githubLogin ?? null),
+    installUrl:
+      patch.installUrl !== undefined ? patch.installUrl : (prev?.installUrl ?? null),
+    configureUrl:
+      patch.configureUrl !== undefined
+        ? patch.configureUrl
+        : (prev?.configureUrl ?? null),
+    githubIdentityRequired:
+      patch.githubIdentityRequired ?? prev?.githubIdentityRequired ?? false,
   };
 }
 
@@ -126,34 +139,35 @@ export function GithubSyncPanel({
   sessionId,
   visible = true,
   linkedRepoName = null,
+  sourceControlStatus = null,
 }: GithubSyncPanelProps) {
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const callbackHandled = useRef(false);
   const invalidateRuntime = useInvalidateSessionRuntime();
-  const autoSyncTriggered = useRef(false);
-  const abortRef = useRef(false);
 
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
   const [busyPhase, setBusyPhase] = useState<BusyPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [justLinked, setJustLinked] = useState(false);
   const [status, setStatus] = useState<GithubSyncStatusResponse | null>(null);
-  const [repoInput, setRepoInput] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [repositories, setRepositories] =
+    useState<GithubRepositoryOption[] | null>(null);
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
 
   const busy = busyPhase !== "idle";
 
   const loadStatus = useCallback(
-    async (reconcile = false, options?: { clearError?: boolean }) => {
+    async (reconcile = false, clearError = true) => {
       setLoading(true);
-      if (options?.clearError !== false) {
+      if (clearError) {
         setError(null);
       }
       try {
-        const qs = reconcile ? "?reconcile=1" : "";
         const response = await fetch(
-          `/api/sessions/${sessionId}/github-sync${qs}`,
+          `/api/sessions/${sessionId}/github-sync${reconcile ? "?reconcile=1" : ""}`,
         );
         const data = (await response.json().catch(() => null)) as
           | (GithubSyncStatusResponse & { error?: string })
@@ -163,11 +177,6 @@ export function GithubSyncPanel({
         }
         const next = data as GithubSyncStatusResponse;
         setStatus(next);
-        if (next.githubRepoName) {
-          setRepoInput(next.githubRepoName);
-        } else if (next.suggestedRepoName && next.githubLogin) {
-          setRepoInput(`${next.githubLogin}/${next.suggestedRepoName}`);
-        }
         return next;
       } catch (err) {
         setError(err instanceof Error ? err.message : "加载状态失败");
@@ -179,177 +188,105 @@ export function GithubSyncPanel({
     [sessionId],
   );
 
-  const waitForFreestyleReady = useCallback(
-    async (maxAttempts = 24): Promise<GithubSyncStatusResponse | null> => {
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        if (abortRef.current) {
-          return null;
-        }
-        const next = await loadStatus(attempt === 0, { clearError: false });
-        if (!next) {
-          return null;
-        }
-        if (next.linked && next.githubRepoName) {
-          return next;
-        }
-        if (next.freestyleReady) {
-          return next;
-        }
-        await sleep(1250);
+  const loadRepositories = useCallback(
+    async (clearError = true) => {
+      setRepositoriesLoading(true);
+      if (clearError) {
+        setError(null);
       }
-      setError("代码库仍在准备中，请稍后再试");
-      return null;
+      try {
+        const response = await fetch(
+          `/api/sessions/${sessionId}/github-sync/repositories`,
+        );
+        const data = (await response.json().catch(() => null)) as {
+          repositories?: GithubRepositoryOption[];
+          error?: string;
+        } | null;
+        if (!response.ok) {
+          throw new Error(data?.error ?? `加载仓库失败 (${response.status})`);
+        }
+        const next = data?.repositories ?? [];
+        setRepositories(next);
+        setSelectedRepositoryId((current) => {
+          if (current && next.some((repo) => String(repo.id) === current)) {
+            return current;
+          }
+          return next[0] ? String(next[0].id) : "";
+        });
+      } catch (err) {
+        setRepositories([]);
+        setSelectedRepositoryId("");
+        setError(err instanceof Error ? err.message : "加载仓库失败");
+        void loadStatus(false, false);
+      } finally {
+        setRepositoriesLoading(false);
+      }
     },
-    [loadStatus],
+    [loadStatus, sessionId],
   );
 
-  const handleCreateAndLink = useCallback(async () => {
-    setBusyPhase("creating");
-    setError(null);
-    setJustLinked(false);
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/github-sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "create_and_link" }),
-      });
-      const data = (await response.json().catch(() => null)) as {
-        error?: string;
-        authUrl?: string;
-        githubRepoName?: string | null;
-        githubSyncStatus?: GithubSyncStatus;
-        githubSyncError?: string | null;
-      } | null;
-
-      if (response.status === 401 && data?.authUrl) {
-        setBusyPhase("auth");
-        window.location.href = data.authUrl;
-        return;
-      }
-
-      if (!response.ok) {
-        if (data?.authUrl) {
-          setBusyPhase("auth");
-          window.location.href = data.authUrl;
-          return;
-        }
-        throw new Error(data?.error ?? `同步失败 (${response.status})`);
-      }
-
-      setStatus((prev) =>
-        applyStatusPatch(prev, {
-          linked: true,
-          githubRepoName: data?.githubRepoName ?? null,
-          githubSyncStatus: data?.githubSyncStatus ?? "linked",
-          githubSyncError: null,
-          authorized: true,
-          authUrl: null,
-        }),
-      );
-      setJustLinked(true);
-      invalidateRuntime(sessionId);
-      void loadStatus(false, { clearError: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "同步失败");
-      void loadStatus(false, { clearError: false });
-    } finally {
-      setBusyPhase("idle");
-    }
-  }, [sessionId, invalidateRuntime, loadStatus]);
-
-  // Prefetch so the trigger / first open reflect auth + link state.
   useEffect(() => {
     if (!visible) {
       return;
     }
-    abortRef.current = false;
-    setStatus(null);
-    setError(null);
-    setJustLinked(false);
-    setAdvancedOpen(false);
-    setBusyPhase("idle");
+    callbackHandled.current = false;
     queueMicrotask(() => {
+      setStatus(null);
+      setRepositories(null);
+      setSelectedRepositoryId("");
+      setError(null);
+      setJustLinked(false);
+      setBusyPhase("idle");
       void loadStatus(false);
     });
-    return () => {
-      abortRef.current = true;
-    };
   }, [visible, loadStatus, sessionId]);
 
-  // Soft refresh when opening (reconcile Freestyle ↔ stored link).
   useEffect(() => {
     if (!visible || !open) {
       return;
     }
-    queueMicrotask(() => {
-      void loadStatus(true, { clearError: false });
-    });
+    queueMicrotask(() => void loadStatus(true, false));
   }, [visible, open, loadStatus, sessionId]);
 
-  // After OAuth callback: ?github_sync=1 → open panel, wait for Freestyle, auto create.
   useEffect(() => {
-    if (!visible || autoSyncTriggered.current) {
+    if (
+      open &&
+      status?.installed &&
+      !status.linked &&
+      repositories === null &&
+      !repositoriesLoading
+    ) {
+      queueMicrotask(() => void loadRepositories(false));
+    }
+  }, [
+    open,
+    status?.installed,
+    status?.linked,
+    repositories,
+    repositoriesLoading,
+    loadRepositories,
+  ]);
+
+  useEffect(() => {
+    if (!visible || callbackHandled.current) {
       return;
     }
     const query = readGithubSyncQuery();
-    if (query.flag === "error") {
-      autoSyncTriggered.current = true;
-      queueMicrotask(() => {
-        setOpen(true);
-        setError(query.error ?? "GitHub 授权失败，请重试");
-        clearGithubSyncQuery();
-      });
+    if (!query.flag) {
       return;
     }
-    if (query.flag !== "1") {
-      return;
-    }
-    autoSyncTriggered.current = true;
+    callbackHandled.current = true;
     queueMicrotask(() => {
       setOpen(true);
-      setBusyPhase("creating");
-      void (async () => {
-        clearGithubSyncQuery();
-        // Binding write + GitHub install propagation can lag the first status read.
-        let ready: GithubSyncStatusResponse | null = null;
-        for (let attempt = 0; attempt < 5; attempt++) {
-          ready = await waitForFreestyleReady(attempt === 0 ? 8 : 1);
-          if (!ready || abortRef.current) {
-            setBusyPhase("idle");
-            return;
-          }
-          if (ready.authorized) {
-            break;
-          }
-          await sleep(800);
-        }
-        if (!ready || abortRef.current) {
-          setBusyPhase("idle");
-          return;
-        }
-        // Linked in store is not enough — uninstall leaves Freestyle link but
-        // clears App authorization. Require authorized before treating as done.
-        if (ready.linked && ready.githubRepoName && ready.authorized) {
-          setJustLinked(true);
-          setBusyPhase("idle");
-          invalidateRuntime(sessionId);
-          return;
-        }
-        if (!ready.authorized) {
-          setBusyPhase("idle");
-          setError("GitHub App 未安装或授权已失效，请重新授权安装");
-          return;
-        }
-        await handleCreateAndLink();
-      })();
+      if (query.flag === "error") {
+        setError(query.error ?? "GitHub App 安装失败，请重试");
+      } else if (query.flag === "installed" || query.flag === "1") {
+        setRepositories(null);
+        void loadStatus(false);
+      }
+      clearGithubSyncQuery();
     });
-  }, [
-    visible,
-    waitForFreestyleReady,
-    handleCreateAndLink,
-    invalidateRuntime,
-    sessionId,
-  ]);
+  }, [visible, loadStatus]);
 
   useEffect(() => {
     if (!open) {
@@ -385,28 +322,26 @@ export function GithubSyncPanel({
     return null;
   }
 
-  // Prefer local status once loaded; fall back to runtime projection for instant chrome.
   const linkedName = status
     ? status.linked && status.githubRepoName
       ? status.githubRepoName
       : null
     : linkedRepoName || null;
   const linked = Boolean(linkedName);
-  const hasError = Boolean(
-    error || status?.githubSyncStatus === "error" || status?.githubSyncError,
-  );
   const displayError = error ?? status?.githubSyncError ?? null;
-  const freestyleReady = linked || status?.freestyleReady === true;
-  const canPrimary =
-    !busy &&
-    Boolean(status) &&
-    freestyleReady &&
-    Boolean(status?.createAndLinkAvailable || status?.authUrl);
+  const hasError = Boolean(displayError || status?.githubSyncStatus === "error");
+  const runtimeFreestyleReady =
+    sourceControlStatus === "ready" ||
+    sourceControlStatus === "syncing" ||
+    sourceControlStatus === "synced" ||
+    sourceControlStatus === "conflict";
+  const freestyleReady =
+    linked || status?.freestyleReady === true || runtimeFreestyleReady;
 
-  const handleConnectExisting = async () => {
-    const trimmed = repoInput.trim();
-    if (!trimmed.includes("/")) {
-      setError("格式：owner/repo");
+  const handleLink = async () => {
+    const repositoryId = Number(selectedRepositoryId);
+    if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
+      setError("请选择一个 GitHub 仓库");
       return;
     }
     setBusyPhase("linking");
@@ -416,13 +351,12 @@ export function GithubSyncPanel({
       const response = await fetch(`/api/sessions/${sessionId}/github-sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ githubRepoName: trimmed }),
+        body: JSON.stringify({ repositoryId }),
       });
       const data = (await response.json().catch(() => null)) as {
         error?: string;
         githubRepoName?: string | null;
         githubSyncStatus?: GithubSyncStatus;
-        githubSyncError?: string | null;
       } | null;
       if (!response.ok) {
         throw new Error(data?.error ?? `连接失败 (${response.status})`);
@@ -430,17 +364,16 @@ export function GithubSyncPanel({
       setStatus((prev) =>
         applyStatusPatch(prev, {
           linked: true,
-          githubRepoName: data?.githubRepoName ?? trimmed,
+          githubRepoName: data?.githubRepoName ?? null,
           githubSyncStatus: data?.githubSyncStatus ?? "linked",
           githubSyncError: null,
         }),
       );
       setJustLinked(true);
-      setAdvancedOpen(false);
       invalidateRuntime(sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "连接失败");
-      void loadStatus(false, { clearError: false });
+      void loadStatus(false, false);
     } finally {
       setBusyPhase("idle");
     }
@@ -468,68 +401,28 @@ export function GithubSyncPanel({
           githubSyncError: null,
         }),
       );
+      setRepositories(null);
       invalidateRuntime(sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "断开失败");
-      void loadStatus(false, { clearError: false });
+      void loadStatus(false, false);
     } finally {
       setBusyPhase("idle");
     }
   };
 
-  const handleTriggerClick = () => {
-    if (
-      !linked &&
-      !busy &&
-      status &&
-      !status.authorized &&
-      status.authUrl &&
-      freestyleReady
-    ) {
-      setBusyPhase("auth");
-      window.location.href = status.authUrl;
+  const startInstall = () => {
+    if (!status?.installUrl) {
+      setError(
+        status?.githubIdentityRequired
+          ? "请先退出当前账号，并使用 GitHub 登录"
+          : "GitHub App 尚未配置",
+      );
       return;
     }
-    setOpen((value) => !value);
+    setBusyPhase("auth");
+    window.location.href = status.installUrl;
   };
-
-  const handlePrimaryClick = () => {
-    if (status?.authUrl && !status.authorized) {
-      setBusyPhase("auth");
-      window.location.href = status.authUrl;
-      return;
-    }
-    void handleCreateAndLink();
-  };
-
-  const primaryLabel =
-    busyPhase === "auth"
-      ? "跳转授权…"
-      : busyPhase === "creating"
-        ? "正在创建仓库…"
-        : status?.authorized
-          ? "创建并连接"
-          : status?.githubLogin
-            ? "重新授权安装"
-            : "授权并连接";
-
-  const suggestedFull =
-    status?.githubLogin && status.suggestedRepoName
-      ? `${status.githubLogin}/${status.suggestedRepoName}`
-      : status?.suggestedRepoName
-        ? status.suggestedRepoName
-        : null;
-
-  const needsReauth = Boolean(status && !status.authorized && status.authUrl);
-  const triggerTitle = linked
-    ? needsReauth
-      ? "GitHub 授权已失效，请重新安装"
-      : linkedName!
-    : hasError
-      ? (displayError ?? "GitHub 同步异常")
-      : !status?.authorized && status?.authUrl
-        ? "授权 GitHub"
-        : "连接到 GitHub";
 
   return (
     <div ref={rootRef} className="relative">
@@ -537,21 +430,18 @@ export function GithubSyncPanel({
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={handleTriggerClick}
-        title={triggerTitle}
+        onClick={() => setOpen((value) => !value)}
+        title={linked ? linkedName! : "连接到 GitHub"}
         className={`inline-flex max-w-[11rem] items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
           hasError && !linked
             ? "border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
-            : linked && needsReauth
-              ? "border-amber-300 text-zinc-800 hover:bg-amber-50 dark:border-amber-800 dark:text-zinc-100 dark:hover:bg-amber-950/40"
             : linked
               ? "border-emerald-300 text-zinc-800 hover:bg-emerald-50 dark:border-emerald-800 dark:text-zinc-100 dark:hover:bg-emerald-950/40"
               : "border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
         }`}
       >
-
         {busy ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" strokeWidth={2} />
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
         ) : (
           <GitHubMark className="h-3.5 w-3.5 shrink-0" />
         )}
@@ -559,18 +449,7 @@ export function GithubSyncPanel({
           {linked ? shortRepoLabel(linkedName!) : "GitHub"}
         </span>
         {linked && !busy ? (
-          <span
-            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-              needsReauth ? "bg-amber-500" : "bg-emerald-500"
-            }`}
-            aria-hidden
-          />
-        ) : null}
-        {hasError && !linked && !busy ? (
-          <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-            aria-hidden
-          />
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
         ) : null}
       </button>
 
@@ -579,11 +458,11 @@ export function GithubSyncPanel({
           id={panelId}
           role="dialog"
           aria-label="GitHub"
-          className="absolute right-0 top-full z-40 mt-2 w-[20rem] rounded-xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
+          className="absolute right-0 top-full z-40 mt-2 w-[21rem] rounded-xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
         >
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5">
-              <GitHubMark className="h-3.5 w-3.5 shrink-0 text-zinc-700 dark:text-zinc-200" />
+              <GitHubMark className="h-3.5 w-3.5 text-zinc-700 dark:text-zinc-200" />
               <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                 GitHub
               </p>
@@ -597,199 +476,168 @@ export function GithubSyncPanel({
               type="button"
               aria-label="关闭"
               onClick={() => setOpen(false)}
-              className="rounded p-0.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
             >
-              <X className="h-3.5 w-3.5" strokeWidth={2} />
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
 
           {loading && !status ? (
             <p className="flex items-center gap-1.5 text-xs text-zinc-500">
-              <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+              <Loader2 className="h-3 w-3 animate-spin" />
               加载中…
             </p>
           ) : null}
 
           {!freestyleReady && !linked ? (
-            <p className="mb-2 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
-              代码库准备中…
+            <p className="mb-2 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              代码库准备中，请稍后再选择 GitHub 仓库。
             </p>
           ) : null}
 
           {linked && linkedName ? (
             <div className="space-y-2.5">
-              <div className="flex items-start gap-2 rounded-lg bg-zinc-50 px-2.5 py-2 dark:bg-zinc-900">
-                <span
-                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                    status && !status.authorized
-                      ? "bg-amber-500"
-                      : "bg-emerald-500"
-                  }`}
-                  aria-hidden
-                />
-                <div className="min-w-0 flex-1">
-                  <a
-                    href={`https://github.com/${linkedName}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex max-w-full items-center gap-1 font-mono text-xs text-zinc-800 hover:underline dark:text-zinc-200"
-                  >
-                    <span className="truncate">{linkedName}</span>
-                    <ExternalLink
-                      className="h-3 w-3 shrink-0 opacity-60"
-                      strokeWidth={2}
-                    />
-                  </a>
-                  <p
-                    className={`mt-0.5 flex items-center gap-1 text-[11px] ${
-                      status && !status.authorized
-                        ? "text-amber-700 dark:text-amber-400"
-                        : "text-emerald-700 dark:text-emerald-400"
-                    }`}
-                  >
-                    {status && !status.authorized
-                      ? "授权已失效，需重新安装 App"
-                      : justLinked
-                        ? (
-                            <>
-                              <Check className="h-3 w-3" strokeWidth={2} />
-                              已连接
-                            </>
-                          )
-                        : "双向同步已开启"}
-                  </p>
-                </div>
+              <div className="rounded-lg bg-zinc-50 px-2.5 py-2 dark:bg-zinc-900">
+                <a
+                  href={`https://github.com/${linkedName}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex max-w-full items-center gap-1 font-mono text-xs text-zinc-800 hover:underline dark:text-zinc-200"
+                >
+                  <span className="truncate">{linkedName}</span>
+                  <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                </a>
+                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
+                  {justLinked ? <Check className="h-3 w-3" /> : null}
+                  {justLinked ? "已连接" : "双向同步已开启"}
+                </p>
               </div>
-              {status && !status.authorized && status.authUrl ? (
+              {!status?.installed && status?.installUrl ? (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => {
-                    setBusyPhase("auth");
-                    window.location.href = status.authUrl!;
-                  }}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                  onClick={startInstall}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                 >
-                  {busyPhase === "auth" ? (
-                    <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
-                  ) : (
-                    <GitHubMark className="h-3 w-3" />
-                  )}
-                  重新授权安装
+                  重新安装 GitHub App
                 </button>
               ) : null}
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => {
-                  void handleDisconnect();
-                }}
-                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 transition hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-200"
+                onClick={() => void handleDisconnect()}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400"
               >
                 {busyPhase === "disconnecting" ? (
-                  <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+                  <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  <Unlink className="h-3 w-3" strokeWidth={2} />
+                  <Unlink className="h-3 w-3" />
                 )}
                 断开连接
               </button>
             </div>
-          ) : (
-            <div className="space-y-2">
-              <button
-                type="button"
-                disabled={!canPrimary}
-                title={
-                  busy
-                    ? undefined
-                    : !status
-                      ? "加载中…"
-                      : !freestyleReady
-                        ? "代码库尚未就绪"
-                        : !status.createAndLinkAvailable && !status.authUrl
-                          ? "暂不可用"
-                          : undefined
-                }
-                onClick={handlePrimaryClick}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-              >
-                {busy ? (
-                  <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
-                ) : (
-                  <GitHubMark className="h-3 w-3" />
-                )}
-                {primaryLabel}
-              </button>
-
-              {suggestedFull && !busy ? (
-                <p className="truncate text-center font-mono text-[10px] text-zinc-400">
-                  {suggestedFull}
+          ) : status ? (
+            <div className="space-y-2.5">
+              {status.githubIdentityRequired ? (
+                <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                  请使用 GitHub 登录，才能校验个人仓库 installation 的归属。
                 </p>
-              ) : null}
-
-              {!status?.createAndLinkAvailable && status ? (
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  一键创建暂不可用，可连接已有仓库。
-                </p>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={() => setAdvancedOpen((v) => !v)}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-              >
-                <ChevronDown
-                  className={`h-3 w-3 transition ${advancedOpen ? "rotate-180" : ""}`}
-                  strokeWidth={2}
-                />
-                连接已有仓库
-              </button>
-
-              {advancedOpen ? (
-                <div className="space-y-2 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
-                  {status?.installUrl ? (
+              ) : !status.installed ? (
+                <>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                    安装 GitHub App，并在 GitHub 中选择要开放的已有仓库。
+                  </p>
+                  <button
+                    type="button"
+                    disabled={busy || !status.installUrl || !freestyleReady}
+                    onClick={startInstall}
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                  >
+                    {busyPhase === "auth" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <GitHubMark className="h-3 w-3" />
+                    )}
+                    安装 GitHub App
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                    选择空仓库
+                    <select
+                      value={selectedRepositoryId}
+                      onChange={(event) =>
+                        setSelectedRepositoryId(event.target.value)
+                      }
+                      disabled={
+                        busy || repositoriesLoading || !freestyleReady
+                      }
+                      className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 font-mono text-xs text-zinc-900 outline-none ring-sky-500 focus:ring-2 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    >
+                      {repositoriesLoading ? (
+                        <option value="">正在加载仓库…</option>
+                      ) : repositories?.length ? (
+                        repositories.map((repo) => (
+                          <option key={repo.id} value={repo.id}>
+                            {repo.fullName}
+                            {repo.private ? " · private" : ""}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">没有可连接的空仓库</option>
+                      )}
+                    </select>
+                  </label>
+                  {!repositoriesLoading &&
+                  repositories !== null &&
+                  repositories.length === 0 ? (
+                    <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+                      请创建仓库时不要添加 README、.gitignore 或 License，然后刷新列表。
+                    </p>
+                  ) : null}
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={repositoriesLoading || busy}
+                      onClick={() => void loadRepositories()}
+                      className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400"
+                    >
+                      <RefreshCw
+                        className={`h-3 w-3 ${repositoriesLoading ? "animate-spin" : ""}`}
+                      />
+                      刷新
+                    </button>
                     <a
-                      href={status.installUrl}
+                      href={newGithubRepositoryUrl(sessionId)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                      className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 dark:text-zinc-400"
                     >
-                      安装 App
-                      <ExternalLink className="h-3 w-3" strokeWidth={2} />
+                      <ExternalLink className="h-3 w-3" />
+                      新建空仓库
                     </a>
-                  ) : null}
-                  <input
-                    type="text"
-                    value={repoInput}
-                    onChange={(event) => setRepoInput(event.target.value)}
-                    placeholder="owner/repo"
-                    disabled={busy || !freestyleReady}
-                    aria-label="仓库 owner/repo"
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 font-mono text-xs text-zinc-900 outline-none ring-sky-500 placeholder:text-zinc-400 focus:ring-2 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  />
+                  </div>
                   <button
                     type="button"
                     disabled={
-                      busy || !repoInput.trim() || !freestyleReady
+                      busy ||
+                      repositoriesLoading ||
+                      !selectedRepositoryId ||
+                      !freestyleReady
                     }
-                    onClick={() => {
-                      void handleConnectExisting();
-                    }}
-                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    onClick={() => void handleLink()}
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                   >
                     {busyPhase === "linking" ? (
-                      <Loader2
-                        className="h-3 w-3 animate-spin"
-                        strokeWidth={2}
-                      />
+                      <Loader2 className="h-3 w-3 animate-spin" />
                     ) : null}
-                    连接
+                    连接所选仓库
                   </button>
-                </div>
-              ) : null}
+                </>
+              )}
             </div>
-          )}
+          ) : null}
 
           {displayError ? (
             <p

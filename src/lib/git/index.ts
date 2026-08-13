@@ -15,10 +15,9 @@ export {
 } from "./workflow-run";
 export {
   getGithubSyncStatus,
-  linkGithubRepo,
-  createAndLinkGithubRepo,
+  listAvailableGithubRepositories,
+  linkSelectedGithubRepository,
   unlinkGithubRepo,
   normalizeGithubRepoName,
-  suggestedGithubRepoName,
   GithubSyncError,
 } from "./github-sync";

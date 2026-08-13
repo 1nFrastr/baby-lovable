@@ -1,9 +1,11 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
-  assertGithubAppInstalledForUser,
+  getGithubAppInstallation,
+  getGithubInstallationRepository,
   GithubAppError,
   isGithubAppInstallMissingError,
+  listGithubInstallationRepositories,
 } from "./app-client";
 
 const TEST_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
@@ -59,7 +61,7 @@ describe("isGithubAppInstallMissingError", () => {
   });
 });
 
-describe("assertGithubAppInstalledForUser", () => {
+describe("installation-scoped GitHub APIs", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -67,43 +69,21 @@ describe("assertGithubAppInstalledForUser", () => {
     delete process.env.GITHUB_APP_PRIVATE_KEY;
   });
 
-  it("returns stored installation id when mint succeeds", async () => {
+  it("reads installation metadata with an App JWT", async () => {
     process.env.GITHUB_APP_ID = "12345";
     process.env.GITHUB_APP_PRIVATE_KEY = TEST_PRIVATE_KEY;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("/app/installations/99/access_tokens")) {
-          return new Response(JSON.stringify({ token: "ghs_x" }), {
-            status: 201,
-          });
-        }
-        throw new Error(`unexpected ${url}`);
-      }),
-    );
-
-    await expect(
-      assertGithubAppInstalledForUser("token", 99),
-    ).resolves.toBe(99);
-  });
-
-  it("falls back to user installations when stored id is gone", async () => {
-    process.env.GITHUB_APP_ID = "12345";
-    process.env.GITHUB_APP_PRIVATE_KEY = TEST_PRIVATE_KEY;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/app/installations/99/access_tokens")) {
-          return new Response(JSON.stringify({ message: "Not Found" }), {
-            status: 404,
-          });
-        }
-        if (url.includes("/user/installations")) {
+        if (url.endsWith("/app/installations/99")) {
           return new Response(
             JSON.stringify({
-              installations: [{ id: 77, app_id: 12345 }],
+              id: 99,
+              app_id: 12345,
+              repository_selection: "selected",
+              suspended_at: null,
+              account: { id: 7, login: "octocat", type: "User" },
             }),
             { status: 200 },
           );
@@ -112,31 +92,125 @@ describe("assertGithubAppInstalledForUser", () => {
       }),
     );
 
-    await expect(
-      assertGithubAppInstalledForUser("token", 99),
-    ).resolves.toBe(77);
+    await expect(getGithubAppInstallation(99)).resolves.toMatchObject({
+      id: 99,
+      accountId: 7,
+      accountLogin: "octocat",
+      accountType: "User",
+    });
   });
 
-  it("throws 401 when app is not installed", async () => {
+  it("lists every repository page with an installation token", async () => {
+    process.env.GITHUB_APP_ID = "12345";
+    process.env.GITHUB_APP_PRIVATE_KEY = TEST_PRIVATE_KEY;
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      full_name: `octocat/repo-${String(index + 1).padStart(3, "0")}`,
+      name: `repo-${index + 1}`,
+      private: true,
+      html_url: `https://github.com/octocat/repo-${index + 1}`,
+      created_at: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      size: 0,
+      owner: { login: "octocat" },
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/app/installations/99/access_tokens")) {
+          expect(init?.body).toBeUndefined();
+          return new Response(JSON.stringify({ token: "ghs_x" }), {
+            status: 201,
+          });
+        }
+        if (url.includes("/installation/repositories?per_page=100&page=1")) {
+          return new Response(
+            JSON.stringify({
+              total_count: 101,
+              repositories: firstPage,
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/installation/repositories?per_page=100&page=2")) {
+          return new Response(
+            JSON.stringify({
+              total_count: 101,
+              repositories: [
+                {
+                  id: 101,
+                  full_name: "octocat/repo-101",
+                  name: "repo-101",
+                  private: false,
+                  html_url: "https://github.com/octocat/repo-101",
+                  created_at: "2027-01-01T00:00:00Z",
+                  size: 0,
+                  owner: { login: "octocat" },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected ${url}`);
+      }),
+    );
+
+    const repos = await listGithubInstallationRepositories(99);
+    expect(repos).toHaveLength(101);
+    expect(repos[0]).toMatchObject({
+      fullName: "octocat/repo-101",
+      createdAt: "2027-01-01T00:00:00Z",
+    });
+    expect(repos.at(-1)?.fullName).toBe("octocat/repo-001");
+  });
+
+  it("restricts repository lookup and verifies the selection is empty", async () => {
     process.env.GITHUB_APP_ID = "12345";
     process.env.GITHUB_APP_PRIVATE_KEY = TEST_PRIVATE_KEY;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.includes("/user/installations")) {
-          return new Response(JSON.stringify({ installations: [] }), {
-            status: 200,
+        if (url.includes("/app/installations/99/access_tokens")) {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            repository_ids: [321],
           });
+          return new Response(JSON.stringify({ token: "ghs_scoped" }), {
+            status: 201,
+          });
+        }
+        if (url.endsWith("/repositories/321")) {
+          return new Response(
+            JSON.stringify({
+              id: 321,
+              full_name: "octocat/existing",
+              name: "existing",
+              private: true,
+              html_url: "https://github.com/octocat/existing",
+              created_at: "2026-08-13T08:00:00Z",
+              size: 0,
+              owner: { login: "octocat" },
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.endsWith("/repos/octocat/existing/commits?per_page=1")) {
+          return new Response(
+            JSON.stringify({ message: "Git Repository is empty." }),
+            { status: 409 },
+          );
         }
         throw new Error(`unexpected ${url}`);
       }),
     );
 
     await expect(
-      assertGithubAppInstalledForUser("token", null),
-    ).rejects.toMatchObject({
-      status: 401,
+      getGithubInstallationRepository(99, 321, { requireEmpty: true }),
+    ).resolves.toMatchObject({
+      id: 321,
+      fullName: "octocat/existing",
+      size: 0,
     });
   });
 });

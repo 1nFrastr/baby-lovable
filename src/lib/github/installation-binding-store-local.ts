@@ -1,23 +1,28 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getDataRoot } from "@/lib/sandbox/paths";
 
 import {
-  normalizeGithubAppUserBinding,
-  type GithubAppUserBinding,
-} from "./user-binding";
+  normalizeGithubAppInstallationBinding,
+  type GithubAppInstallationBinding,
+} from "./installation-binding";
 
 function bindingPath(userId: string): string {
-  return path.join(getDataRoot(), "users", userId, "github-app.json");
+  return path.join(
+    getDataRoot(),
+    "users",
+    userId,
+    "github-app-installation.json",
+  );
 }
 
-export async function readGithubAppUserBindingLocal(
+export async function readGithubAppInstallationBindingLocal(
   userId: string,
-): Promise<GithubAppUserBinding | null> {
+): Promise<GithubAppInstallationBinding | null> {
   try {
     const raw = await readFile(bindingPath(userId), "utf8");
-    return normalizeGithubAppUserBinding(JSON.parse(raw));
+    return normalizeGithubAppInstallationBinding(JSON.parse(raw));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
@@ -26,13 +31,13 @@ export async function readGithubAppUserBindingLocal(
   }
 }
 
-export async function writeGithubAppUserBindingLocal(
-  binding: GithubAppUserBinding,
-): Promise<GithubAppUserBinding> {
+export async function writeGithubAppInstallationBindingLocal(
+  binding: GithubAppInstallationBinding,
+): Promise<GithubAppInstallationBinding> {
   const filePath = bindingPath(binding.userId);
   await mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.${process.pid}.tmp`;
-  const payload: GithubAppUserBinding = {
+  const payload: GithubAppInstallationBinding = {
     ...binding,
     updatedAt: new Date().toISOString(),
   };
@@ -41,10 +46,9 @@ export async function writeGithubAppUserBindingLocal(
   return payload;
 }
 
-export async function deleteGithubAppUserBindingLocal(
+export async function deleteGithubAppInstallationBindingLocal(
   userId: string,
 ): Promise<void> {
-  const { unlink } = await import("node:fs/promises");
   try {
     await unlink(bindingPath(userId));
   } catch (error) {

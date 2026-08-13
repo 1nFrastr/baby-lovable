@@ -1,19 +1,22 @@
 import {
-  buildGithubAppAuthorizeUrl,
-  createEmptyUserRepo,
+  buildGithubAppInstallUrl,
+  getGithubAppInstallation,
+  getGithubInstallationRepository,
+  getGithubInstallationSettingsUrl,
   GithubAppError,
   isGithubAppInstallMissingError,
+  listGithubInstallationRepositories,
+  type GithubInstallationRepository,
 } from "@/lib/github/app-client";
 import { isGithubAppConfigured } from "@/lib/github/app-config";
-import { isGithubAccessTokenExpired } from "@/lib/github/user-binding";
+import type { GithubAppInstallationBinding } from "@/lib/github/installation-binding";
 import {
-  deleteGithubAppUserBinding,
-  readGithubAppUserBinding,
-  verifyGithubAppUserBinding,
-} from "@/lib/github/user-binding-store";
+  deleteGithubAppInstallationBinding,
+  readGithubAppInstallationBinding,
+} from "@/lib/github/installation-binding-store";
+import type { GithubAuthIdentity } from "@/lib/session/auth-context";
 
 import { getFreestyleAdapter } from "./freestyle-client";
-import { getGithubAppInstallUrl } from "./freestyle-config";
 import { redactSecrets } from "./provision-repo";
 import {
   readGitRepository,
@@ -26,17 +29,11 @@ import type {
 
 export class GithubSyncError extends Error {
   readonly status: number;
-  readonly authUrl: string | null;
 
-  constructor(
-    message: string,
-    status = 400,
-    options: { authUrl?: string | null } = {},
-  ) {
+  constructor(message: string, status = 400) {
     super(message);
     this.name = "GithubSyncError";
     this.status = status;
-    this.authUrl = options.authUrl ?? null;
   }
 }
 
@@ -48,16 +45,9 @@ export function normalizeGithubRepoName(raw: string): string {
   const trimmed = raw.trim().replace(/^https?:\/\/github\.com\//i, "");
   const withoutGit = trimmed.replace(/\.git$/i, "").replace(/\/+$/, "");
   if (!GITHUB_REPO_NAME_RE.test(withoutGit)) {
-    throw new GithubSyncError(
-      "仓库格式无效，请使用 owner/repo（如 acme/my-app）",
-    );
+    throw new GithubSyncError("GitHub 返回了无效的仓库名称");
   }
   return withoutGit;
-}
-
-export function suggestedGithubRepoName(sessionId: string): string {
-  const short = sessionId.replace(/^sess_/, "").slice(0, 10);
-  return `baby-lovable-${short || "app"}`;
 }
 
 export interface GithubSyncStatusPayload {
@@ -65,15 +55,12 @@ export interface GithubSyncStatusPayload {
   githubRepoName: string | null;
   githubSyncStatus: GithubSyncStatus;
   githubSyncError: string | null;
-  installUrl: string | null;
   freestyleReady: boolean;
-  /** User has a stored GitHub App binding with a usable (or refreshable) token. */
-  authorized: boolean;
+  installed: boolean;
   githubLogin: string | null;
-  /** Present when App OAuth is configured and user is not authorized. */
-  authUrl: string | null;
-  suggestedRepoName: string;
-  createAndLinkAvailable: boolean;
+  installUrl: string | null;
+  configureUrl: string | null;
+  githubIdentityRequired: boolean;
 }
 
 function assertRepoReadyForGithubSync(
@@ -91,94 +78,157 @@ function assertRepoReadyForGithubSync(
   return repo;
 }
 
-export function buildGithubSyncAuthUrl(input: {
-  sessionId: string;
-  userId: string;
-  requestOrigin?: string;
-  returnTo?: string;
-}): string {
-  try {
-    return buildGithubAppAuthorizeUrl(input);
-  } catch (error) {
-    if (error instanceof GithubAppError) {
-      throw new GithubSyncError(error.message, error.status);
-    }
-    throw error;
+function assertBindingMatchesIdentity(
+  binding: GithubAppInstallationBinding,
+  userId: string | null,
+  githubIdentity: GithubAuthIdentity | null,
+): void {
+  if (userId && !githubIdentity) {
+    throw new GithubSyncError("请使用 GitHub 账号登录后再连接仓库", 401);
+  }
+  if (
+    githubIdentity &&
+    binding.githubAccountId !== githubIdentity.id
+  ) {
+    throw new GithubSyncError(
+      "GitHub App installation 不属于当前登录账号",
+      403,
+    );
   }
 }
 
-async function resolveAuthorizedFlag(
+async function verifyGithubInstallation(
   userId: string | null,
-  options: { probeInstall?: boolean } = {},
-): Promise<{ authorized: boolean; githubLogin: string | null }> {
-  if (!userId) {
-    return { authorized: false, githubLogin: null };
+  githubIdentity: GithubAuthIdentity | null,
+): Promise<{
+  binding: GithubAppInstallationBinding;
+  installationId: number;
+}> {
+  const binding = await readGithubAppInstallationBinding(userId);
+  if (!binding) {
+    throw new GithubSyncError("请先安装 GitHub App 并选择仓库", 401);
+  }
+  assertBindingMatchesIdentity(binding, userId, githubIdentity);
+
+  try {
+    const installation = await getGithubAppInstallation(binding.installationId);
+    if (
+      installation.suspended ||
+      installation.accountType !== "User" ||
+      installation.accountId !== binding.githubAccountId
+    ) {
+      await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
+      throw new GithubSyncError(
+        installation.suspended
+          ? "GitHub App installation 已暂停"
+          : "GitHub App installation 归属已变化，请重新安装",
+        401,
+      );
+    }
+    return { binding, installationId: installation.id };
+  } catch (error) {
+    if (error instanceof GithubSyncError) {
+      throw error;
+    }
+    if (isGithubAppInstallMissingError(error)) {
+      await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
+      throw new GithubSyncError(
+        "GitHub App 已卸载或不可访问，请重新安装",
+        401,
+      );
+    }
+    throw new GithubSyncError(
+      redactSecrets(
+        error instanceof Error ? error.message : "GitHub installation 验证失败",
+      ),
+      error instanceof GithubAppError ? error.status : 502,
+    );
+  }
+}
+
+async function resolveInstallationStatus(
+  userId: string | null,
+  githubIdentity: GithubAuthIdentity | null,
+): Promise<{
+  installed: boolean;
+  githubLogin: string | null;
+  installationId: number | null;
+}> {
+  const binding = await readGithubAppInstallationBinding(userId).catch(
+    () => null,
+  );
+  if (!binding) {
+    return { installed: false, githubLogin: null, installationId: null };
   }
   try {
-    if (options.probeInstall) {
-      // Capture login before verify — missing install clears the binding.
-      const prior = await readGithubAppUserBinding(userId).catch(() => null);
-      try {
-        const verified = await verifyGithubAppUserBinding(userId);
-        return {
-          authorized: true,
-          githubLogin: verified.binding.githubLogin,
-        };
-      } catch (error) {
-        if (
-          error instanceof GithubAppError &&
-          (error.status === 401 || isGithubAppInstallMissingError(error))
-        ) {
-          return {
-            authorized: false,
-            githubLogin: prior?.githubLogin ?? null,
-          };
-        }
-        // Probe failed for transient reasons — fall back to stored flag.
-      }
+    assertBindingMatchesIdentity(binding, userId, githubIdentity);
+    const installation = await getGithubAppInstallation(binding.installationId);
+    if (
+      installation.suspended ||
+      installation.accountType !== "User" ||
+      installation.accountId !== binding.githubAccountId
+    ) {
+      await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
+      return {
+        installed: false,
+        githubLogin: binding.githubLogin,
+        installationId: null,
+      };
     }
-
-    const binding = await readGithubAppUserBinding(userId);
-    if (!binding) {
-      return { authorized: false, githubLogin: null };
+    return {
+      installed: true,
+      githubLogin: installation.accountLogin,
+      installationId: installation.id,
+    };
+  } catch (error) {
+    if (
+      error instanceof GithubSyncError ||
+      isGithubAppInstallMissingError(error)
+    ) {
+      await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
+      return {
+        installed: false,
+        githubLogin: binding.githubLogin,
+        installationId: null,
+      };
     }
-    const expired = isGithubAccessTokenExpired(binding);
-    if (expired && !binding.refreshToken) {
-      return { authorized: false, githubLogin: binding.githubLogin };
-    }
-    return { authorized: true, githubLogin: binding.githubLogin };
-  } catch {
-    // Binding store may be unavailable (e.g. migration not applied yet).
-    return { authorized: false, githubLogin: null };
+    // A transient GitHub failure must not make a valid installation disappear.
+    return {
+      installed: true,
+      githubLogin: binding.githubLogin,
+      installationId: binding.installationId,
+    };
   }
 }
 
 export async function getGithubSyncStatus(
   sessionId: string,
   userId: string | null = null,
-  options: { reconcile?: boolean; requestOrigin?: string } = {},
+  options: {
+    reconcile?: boolean;
+    githubIdentity?: GithubAuthIdentity | null;
+  } = {},
 ): Promise<GithubSyncStatusPayload> {
-  const installUrl = getGithubAppInstallUrl();
   const repo = await readGitRepository(sessionId, userId);
-  const { authorized, githubLogin } = await resolveAuthorizedFlag(userId, {
-    // Status reads are infrequent; probe so uninstall is noticed without a webhook.
-    probeInstall: Boolean(userId),
-  });
-  const createAndLinkAvailable = isGithubAppConfigured();
-  const suggestedRepoName = suggestedGithubRepoName(sessionId);
+  const githubIdentity = options.githubIdentity ?? null;
+  const installation = await resolveInstallationStatus(userId, githubIdentity);
+  const githubIdentityRequired = Boolean(userId && !githubIdentity);
 
-  let authUrl: string | null = null;
-  if (createAndLinkAvailable && userId && !authorized) {
+  let installUrl: string | null = null;
+  if (isGithubAppConfigured() && !githubIdentityRequired) {
     try {
-      authUrl = buildGithubSyncAuthUrl({
+      installUrl = buildGithubAppInstallUrl({
         sessionId,
         userId,
-        requestOrigin: options.requestOrigin,
+        returnTo: `/sessions/${sessionId}`,
       });
     } catch {
-      authUrl = null;
+      installUrl = null;
     }
   }
+  const configureUrl = installation.installationId
+    ? getGithubInstallationSettingsUrl(installation.installationId)
+    : null;
 
   if (!repo?.repoId) {
     return {
@@ -186,13 +236,12 @@ export async function getGithubSyncStatus(
       githubRepoName: null,
       githubSyncStatus: "idle",
       githubSyncError: null,
-      installUrl,
       freestyleReady: false,
-      authorized,
-      githubLogin,
-      authUrl,
-      suggestedRepoName,
-      createAndLinkAvailable,
+      installed: installation.installed,
+      githubLogin: installation.githubLogin,
+      installUrl,
+      configureUrl,
+      githubIdentityRequired,
     };
   }
 
@@ -245,26 +294,53 @@ export async function getGithubSyncStatus(
     githubRepoName,
     githubSyncStatus,
     githubSyncError,
-    installUrl,
     freestyleReady: repo.provisionStatus === "ready",
-    authorized,
-    githubLogin,
-    authUrl,
-    suggestedRepoName,
-    createAndLinkAvailable,
+    installed: installation.installed,
+    githubLogin: installation.githubLogin,
+    installUrl,
+    configureUrl,
+    githubIdentityRequired,
   };
 }
 
-export async function linkGithubRepo(
+export async function listAvailableGithubRepositories(
+  userId: string | null,
+  githubIdentity: GithubAuthIdentity | null,
+): Promise<GithubInstallationRepository[]> {
+  const { installationId } = await verifyGithubInstallation(
+    userId,
+    githubIdentity,
+  );
+  try {
+    const repositories =
+      await listGithubInstallationRepositories(installationId);
+    return repositories.filter((repository) => repository.size === 0);
+  } catch (error) {
+    if (isGithubAppInstallMissingError(error)) {
+      await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
+      throw new GithubSyncError(
+        "GitHub App 已卸载或仓库权限已失效，请重新安装",
+        401,
+      );
+    }
+    throw new GithubSyncError(
+      redactSecrets(
+        error instanceof Error ? error.message : "加载 GitHub 仓库失败",
+      ),
+      error instanceof GithubAppError ? error.status : 502,
+    );
+  }
+}
+
+async function enableGithubRepoSync(
   sessionId: string,
   githubRepoNameRaw: string,
-  userId: string | null = null,
+  userId: string | null,
 ): Promise<SessionGitRepository> {
   const githubRepoName = normalizeGithubRepoName(githubRepoNameRaw);
   const repo = assertRepoReadyForGithubSync(
     await readGitRepository(sessionId, userId),
   );
-
   try {
     await getFreestyleAdapter().enableGithubSync(repo.repoId!, githubRepoName);
   } catch (error) {
@@ -281,7 +357,6 @@ export async function linkGithubRepo(
     );
     throw new GithubSyncError(message, 502);
   }
-
   return updateGitRepositoryWithRetry(
     sessionId,
     () => ({
@@ -293,107 +368,56 @@ export async function linkGithubRepo(
   );
 }
 
-/**
- * Create a private empty GitHub repo for the user, then enable Freestyle Sync.
- * Requires a stored GitHub App user binding; otherwise throws with `authUrl`.
- */
-export async function createAndLinkGithubRepo(
+export async function linkSelectedGithubRepository(
   sessionId: string,
+  repositoryId: number,
   userId: string | null,
-  options: {
-    repoName?: string;
-    requestOrigin?: string;
-    returnTo?: string;
-  } = {},
+  githubIdentity: GithubAuthIdentity | null,
 ): Promise<SessionGitRepository> {
-  if (!userId) {
-    throw new GithubSyncError(
-      "请先登录后再同步到 GitHub（需要稳定的用户身份保存授权）",
-      401,
-    );
+  if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
+    throw new GithubSyncError("请选择有效的 GitHub 仓库");
   }
-
-  if (!isGithubAppConfigured()) {
-    throw new GithubSyncError(
-      "平台未配置 GitHub App（GITHUB_APP_ID / PRIVATE_KEY / CLIENT_ID / SECRET）",
-      503,
-    );
-  }
-
   assertRepoReadyForGithubSync(await readGitRepository(sessionId, userId));
+  const { binding, installationId } = await verifyGithubInstallation(
+    userId,
+    githubIdentity,
+  );
 
-  let authUrl: string | null = null;
+  let selected: GithubInstallationRepository;
   try {
-    authUrl = buildGithubSyncAuthUrl({
-      sessionId,
-      userId,
-      requestOrigin: options.requestOrigin,
-      returnTo: options.returnTo,
-    });
-  } catch {
-    authUrl = null;
-  }
-
-  let accessToken: string;
-  let githubLogin: string;
-  try {
-    const resolved = await verifyGithubAppUserBinding(userId);
-    accessToken = resolved.token;
-    githubLogin = resolved.binding.githubLogin;
+    selected = await getGithubInstallationRepository(
+      installationId,
+      repositoryId,
+      { requireEmpty: true },
+    );
   } catch (error) {
-    const message =
-      error instanceof GithubAppError
-        ? error.message
-        : "需要先授权安装 GitHub App";
-    throw new GithubSyncError(message, 401, { authUrl });
-  }
-
-  const baseName =
-    options.repoName?.trim() || suggestedGithubRepoName(sessionId);
-
-  let created;
-  try {
-    created = await createEmptyUserRepo(accessToken, baseName, {
-      ownerLogin: githubLogin,
-    });
-  } catch (error) {
-    if (isGithubAppInstallMissingError(error)) {
-      await deleteGithubAppUserBinding(userId).catch(() => undefined);
+    if (error instanceof GithubAppError && error.status === 409) {
+      throw new GithubSyncError(error.message, 409);
+    }
+    if (
+      error instanceof GithubAppError &&
+      (error.status === 403 ||
+        error.status === 404 ||
+        error.status === 422)
+    ) {
       throw new GithubSyncError(
-        error instanceof Error
-          ? error.message
-          : "GitHub App 已卸载，请重新授权安装",
-        401,
-        { authUrl },
+        "所选仓库不在当前 GitHub App installation 的授权范围内",
+        403,
       );
     }
-    const message = redactSecrets(
-      error instanceof Error ? error.message : "创建 GitHub 仓库失败",
+    throw new GithubSyncError(
+      redactSecrets(
+        error instanceof Error ? error.message : "GitHub 仓库校验失败",
+      ),
+      502,
     );
-    await updateGitRepositoryWithRetry(
-      sessionId,
-      () => ({
-        githubSyncStatus: "error" as const,
-        githubSyncError: message,
-      }),
-      userId,
-    );
-    throw new GithubSyncError(message, 502);
   }
-
-  const fullName = created.fullName || `${githubLogin}/${created.name}`;
-  try {
-    return await linkGithubRepo(sessionId, fullName, userId);
-  } catch (error) {
-    // Repo was created; surface Freestyle enable failure with full name.
-    if (error instanceof GithubSyncError) {
-      throw new GithubSyncError(
-        `${error.message}（已创建仓库 ${fullName}，可稍后用「连接已有仓库」重试）`,
-        error.status,
-      );
-    }
-    throw error;
+  if (
+    selected.ownerLogin.toLowerCase() !== binding.githubLogin.toLowerCase()
+  ) {
+    throw new GithubSyncError("当前仅支持个人账号名下的 GitHub 仓库", 403);
   }
+  return enableGithubRepoSync(sessionId, selected.fullName, userId);
 }
 
 export async function unlinkGithubRepo(
@@ -403,7 +427,6 @@ export async function unlinkGithubRepo(
   const repo = assertRepoReadyForGithubSync(
     await readGitRepository(sessionId, userId),
   );
-
   try {
     await getFreestyleAdapter().disableGithubSync(repo.repoId!);
   } catch (error) {
@@ -420,7 +443,6 @@ export async function unlinkGithubRepo(
     );
     throw new GithubSyncError(message, 502);
   }
-
   return updateGitRepositoryWithRetry(
     sessionId,
     () => ({

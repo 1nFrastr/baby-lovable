@@ -1,6 +1,6 @@
 /**
- * Platform GitHub App credentials for user OAuth + empty-repo creation.
- * Same App must be bound in Freestyle Dashboard → Git > Sync.
+ * Platform GitHub App credentials for installation-scoped repository access.
+ * The same App must be bound in Freestyle Dashboard → Git > Sync.
  */
 
 function trimEnv(name: string): string | undefined {
@@ -31,14 +31,6 @@ export function getGithubAppPrivateKey(): string | null {
   return raw ? normalizePrivateKeyPem(raw) : null;
 }
 
-export function getGithubAppClientId(): string | null {
-  return trimEnv("GITHUB_APP_CLIENT_ID") ?? null;
-}
-
-export function getGithubAppClientSecret(): string | null {
-  return trimEnv("GITHUB_APP_CLIENT_SECRET") ?? null;
-}
-
 /**
  * GitHub App installation URL (Freestyle Dashboard → Git > Sync, or App settings).
  * Example: https://github.com/apps/<slug>/installations/new
@@ -47,7 +39,7 @@ export function getGithubAppInstallUrl(): string | null {
   return trimEnv("GITHUB_APP_INSTALL_URL") ?? null;
 }
 
-/** App slug for assembling install / OAuth URLs when install URL is unset. */
+/** App slug for assembling the installation URL when it is unset. */
 export function getGithubAppSlug(): string | null {
   const explicit = trimEnv("GITHUB_APP_SLUG");
   if (explicit) {
@@ -65,13 +57,12 @@ export function isGithubAppConfigured(): boolean {
   return Boolean(
     getGithubAppId() &&
       getGithubAppPrivateKey() &&
-      getGithubAppClientId() &&
-      getGithubAppClientSecret(),
+      (getGithubAppInstallUrl() || getGithubAppSlug()),
   );
 }
 
 /**
- * Public origin for OAuth callback / success redirects.
+ * Public origin for GitHub Setup and success redirects.
  * Prefer the incoming request host; otherwise VERCEL_URL, then localhost.
  */
 export function getPublicAppOrigin(requestOrigin?: string): string {
@@ -84,11 +75,11 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
   return "http://localhost:3000";
 }
 
-export function getGithubAppCallbackPath(): string {
-  return "/api/github/app/callback";
+export function getGithubAppSetupPath(): string {
+  return "/api/github/app/setup";
 }
 
-/** Absolute Callback URL for the current app origin (must match App settings). */
-export function getGithubAppCallbackUrl(requestOrigin?: string): string {
-  return `${getPublicAppOrigin(requestOrigin)}${getGithubAppCallbackPath()}`;
+/** Absolute Setup URL for the current app origin (must match App settings). */
+export function getGithubAppSetupUrl(requestOrigin?: string): string {
+  return `${getPublicAppOrigin(requestOrigin)}${getGithubAppSetupPath()}`;
 }

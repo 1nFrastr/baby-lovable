@@ -819,6 +819,7 @@ export function PreviewPanel({
                 sessionId={sessionId}
                 visible={showSourceControl}
                 linkedRepoName={sourceControl?.githubRepoName ?? null}
+                sourceControlStatus={sourceControl?.status ?? null}
               />
               <button
                 type="button"

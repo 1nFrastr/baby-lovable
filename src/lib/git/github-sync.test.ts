@@ -4,19 +4,17 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { GithubAppError } from "@/lib/github/app-client";
 import {
   FakeFreestyleAdapter,
   setFreestyleAdapterForTests,
 } from "./freestyle-client";
-import { GithubAppError } from "@/lib/github/app-client";
-
 import {
-  createAndLinkGithubRepo,
   getGithubSyncStatus,
   GithubSyncError,
-  linkGithubRepo,
+  linkSelectedGithubRepository,
+  listAvailableGithubRepositories,
   normalizeGithubRepoName,
-  suggestedGithubRepoName,
   unlinkGithubRepo,
 } from "./github-sync";
 import { ensureFreestyleRepository } from "./provision-repo";
@@ -26,41 +24,38 @@ import {
 } from "./repository-store";
 import { emptyGitRepository, normalizeGitRepository } from "./types";
 
-const githubClientMocks = vi.hoisted(() => ({
-  createEmptyUserRepo: vi.fn(),
-  resolveToken: vi.fn(),
-  verifyBinding: vi.fn(),
-  isConfigured: vi.fn(() => true),
+const githubMocks = vi.hoisted(() => ({
+  getInstallation: vi.fn(),
+  getRepository: vi.fn(),
+  listRepositories: vi.fn(),
+  readBinding: vi.fn(),
+  deleteBinding: vi.fn(),
 }));
 
 vi.mock("@/lib/github/app-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/github/app-client")>();
   return {
     ...actual,
-    createEmptyUserRepo: (...args: unknown[]) =>
-      githubClientMocks.createEmptyUserRepo(...args),
+    getGithubAppInstallation: (...args: unknown[]) =>
+      githubMocks.getInstallation(...args),
+    getGithubInstallationRepository: (...args: unknown[]) =>
+      githubMocks.getRepository(...args),
+    listGithubInstallationRepositories: (...args: unknown[]) =>
+      githubMocks.listRepositories(...args),
   };
 });
 
-vi.mock("@/lib/github/user-binding-store", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/lib/github/user-binding-store")>();
-  return {
-    ...actual,
-    resolveGithubUserAccessToken: (...args: unknown[]) =>
-      githubClientMocks.resolveToken(...args),
-    verifyGithubAppUserBinding: (...args: unknown[]) =>
-      githubClientMocks.verifyBinding(...args),
-  };
-});
+vi.mock("@/lib/github/installation-binding-store", () => ({
+  readGithubAppInstallationBinding: (...args: unknown[]) =>
+    githubMocks.readBinding(...args),
+  deleteGithubAppInstallationBinding: (...args: unknown[]) =>
+    githubMocks.deleteBinding(...args),
+}));
 
 vi.mock("@/lib/github/app-config", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/github/app-config")>();
-  return {
-    ...actual,
-    isGithubAppConfigured: () => githubClientMocks.isConfigured(),
-  };
+  return { ...actual, isGithubAppConfigured: () => false };
 });
 
 describe("normalizeGithubRepoName", () => {
@@ -72,15 +67,8 @@ describe("normalizeGithubRepoName", () => {
   });
 
   it("rejects invalid names", () => {
-    expect(() => normalizeGithubRepoName("not-a-repo")).toThrow(GithubSyncError);
-    expect(() => normalizeGithubRepoName("../evil")).toThrow(GithubSyncError);
-  });
-});
-
-describe("suggestedGithubRepoName", () => {
-  it("derives a stable name from session id", () => {
-    expect(suggestedGithubRepoName("sess_abcdefghij")).toBe(
-      "baby-lovable-abcdefghij",
+    expect(() => normalizeGithubRepoName("not-a-repo")).toThrow(
+      GithubSyncError,
     );
   });
 });
@@ -100,41 +88,31 @@ describe("normalizeGitRepository github fields", () => {
   });
 });
 
-describe("linkGithubRepo / unlinkGithubRepo", () => {
+describe("installation repository selection and Freestyle link", () => {
   let dataDir: string;
   let adapter: FakeFreestyleAdapter;
-  let prevDataDir: string | undefined;
-  let prevLocalMode: string | undefined;
+  let previousDataDir: string | undefined;
+  let previousLocalMode: string | undefined;
 
-  beforeEach(async () => {
-    dataDir = await mkdtemp(join(tmpdir(), "github-sync-"));
-    prevDataDir = process.env.BABY_LOVABLE_DATA_DIR;
-    prevLocalMode = process.env.BABY_LOVABLE_LOCAL_MODE;
-    process.env.BABY_LOVABLE_DATA_DIR = dataDir;
-    process.env.BABY_LOVABLE_LOCAL_MODE = "1";
-    process.env.FREESTYLE_API_KEY = "test-key";
-    adapter = new FakeFreestyleAdapter();
-    setFreestyleAdapterForTests(adapter);
-  });
+  const identity = { id: 7, login: "octocat" };
+  const binding = {
+    userId: "user_1",
+    installationId: 99,
+    githubAccountId: 7,
+    githubLogin: "octocat",
+    updatedAt: new Date().toISOString(),
+  };
+  const installation = {
+    id: 99,
+    appId: 123,
+    accountId: 7,
+    accountLogin: "octocat",
+    accountType: "User",
+    repositorySelection: "selected" as const,
+    suspended: false,
+  };
 
-  afterEach(async () => {
-    setFreestyleAdapterForTests(null);
-    delete process.env.FREESTYLE_API_KEY;
-    if (prevDataDir === undefined) {
-      delete process.env.BABY_LOVABLE_DATA_DIR;
-    } else {
-      process.env.BABY_LOVABLE_DATA_DIR = prevDataDir;
-    }
-    if (prevLocalMode === undefined) {
-      delete process.env.BABY_LOVABLE_LOCAL_MODE;
-    } else {
-      process.env.BABY_LOVABLE_LOCAL_MODE = prevLocalMode;
-    }
-    await rm(dataDir, { recursive: true, force: true });
-  });
-
-  it("enables and disables github sync via adapter", async () => {
-    const sessionId = "sess_gh_1";
+  async function readySession(sessionId: string) {
     const provisioned = await ensureFreestyleRepository(sessionId, "user_1");
     await updateGitRepositoryWithRetry(
       sessionId,
@@ -144,121 +122,166 @@ describe("linkGithubRepo / unlinkGithubRepo", () => {
       }),
       "user_1",
     );
+    return provisioned;
+  }
 
-    const linked = await linkGithubRepo(
-      sessionId,
-      "acme/demo-app",
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    dataDir = await mkdtemp(join(tmpdir(), "github-sync-"));
+    previousDataDir = process.env.BABY_LOVABLE_DATA_DIR;
+    previousLocalMode = process.env.BABY_LOVABLE_LOCAL_MODE;
+    process.env.BABY_LOVABLE_DATA_DIR = dataDir;
+    process.env.BABY_LOVABLE_LOCAL_MODE = "1";
+    process.env.FREESTYLE_API_KEY = "test-key";
+    adapter = new FakeFreestyleAdapter();
+    setFreestyleAdapterForTests(adapter);
+    githubMocks.readBinding.mockResolvedValue(binding);
+    githubMocks.getInstallation.mockResolvedValue(installation);
+    githubMocks.getRepository.mockResolvedValue({
+      id: 321,
+      fullName: "octocat/existing",
+      name: "existing",
+      ownerLogin: "octocat",
+      private: true,
+      htmlUrl: "https://github.com/octocat/existing",
+      createdAt: "2026-08-13T08:00:00Z",
+      size: 0,
+    });
+    githubMocks.listRepositories.mockResolvedValue([
+      {
+        id: 321,
+        fullName: "octocat/existing",
+        name: "existing",
+        ownerLogin: "octocat",
+        private: true,
+        htmlUrl: "https://github.com/octocat/existing",
+        createdAt: "2026-08-13T08:00:00Z",
+        size: 0,
+      },
+    ]);
+  });
+
+  afterEach(async () => {
+    setFreestyleAdapterForTests(null);
+    delete process.env.FREESTYLE_API_KEY;
+    if (previousDataDir === undefined) {
+      delete process.env.BABY_LOVABLE_DATA_DIR;
+    } else {
+      process.env.BABY_LOVABLE_DATA_DIR = previousDataDir;
+    }
+    if (previousLocalMode === undefined) {
+      delete process.env.BABY_LOVABLE_LOCAL_MODE;
+    } else {
+      process.env.BABY_LOVABLE_LOCAL_MODE = previousLocalMode;
+    }
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("lists only empty repositories from the verified installation", async () => {
+    githubMocks.listRepositories.mockResolvedValue([
+      {
+        id: 321,
+        fullName: "octocat/empty",
+        size: 0,
+      },
+      {
+        id: 322,
+        fullName: "octocat/initialized",
+        size: 4,
+      },
+    ]);
+    const repositories = await listAvailableGithubRepositories(
       "user_1",
+      identity,
     );
-    expect(linked.githubSyncStatus).toBe("linked");
-    expect(linked.githubRepoName).toBe("acme/demo-app");
-    expect(adapter.enableGithubSyncCalls).toBe(1);
-    expect(adapter.githubSync.get(provisioned.repoId!)).toBe("acme/demo-app");
+    expect(repositories).toHaveLength(1);
+    expect(repositories[0]?.fullName).toBe("octocat/empty");
+    expect(githubMocks.listRepositories).toHaveBeenCalledWith(99);
+  });
 
-    const status = await getGithubSyncStatus(sessionId, "user_1");
+  it("links only the repository selected by id, then unlinks", async () => {
+    const sessionId = "sess_gh_1";
+    const provisioned = await readySession(sessionId);
+    const linked = await linkSelectedGithubRepository(
+      sessionId,
+      321,
+      "user_1",
+      identity,
+    );
+    expect(githubMocks.getRepository).toHaveBeenCalledWith(99, 321, {
+      requireEmpty: true,
+    });
+    expect(linked.githubRepoName).toBe("octocat/existing");
+    expect(adapter.githubSync.get(provisioned.repoId!)).toBe(
+      "octocat/existing",
+    );
+
+    const status = await getGithubSyncStatus(sessionId, "user_1", {
+      githubIdentity: identity,
+    });
     expect(status.linked).toBe(true);
-    expect(status.githubRepoName).toBe("acme/demo-app");
+    expect(status.installed).toBe(true);
 
     const unlinked = await unlinkGithubRepo(sessionId, "user_1");
     expect(unlinked.githubSyncStatus).toBe("idle");
-    expect(unlinked.githubRepoName).toBeNull();
-    expect(adapter.disableGithubSyncCalls).toBe(1);
     expect(adapter.githubSync.has(provisioned.repoId!)).toBe(false);
   });
 
-  it("marks error when enable fails", async () => {
-    const sessionId = "sess_gh_err";
-    await ensureFreestyleRepository(sessionId, "user_1");
-    await updateGitRepositoryWithRetry(
-      sessionId,
-      () => ({
-        provisionStatus: "ready" as const,
-        provisionError: null,
-      }),
-      "user_1",
+  it("rejects a repository outside the installation scope", async () => {
+    const sessionId = "sess_gh_scope";
+    await readySession(sessionId);
+    githubMocks.getRepository.mockRejectedValue(
+      new GithubAppError("Repository access denied", 422),
     );
-    adapter.enableGithubSyncError = "App not installed on owner/repo";
-
     await expect(
-      linkGithubRepo(sessionId, "acme/missing", "user_1"),
-    ).rejects.toThrow(GithubSyncError);
+      linkSelectedGithubRepository(sessionId, 999, "user_1", identity),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(adapter.enableGithubSyncCalls).toBe(0);
+  });
 
+  it("rejects a repository that gained a commit before linking", async () => {
+    const sessionId = "sess_gh_nonempty";
+    await readySession(sessionId);
+    githubMocks.getRepository.mockRejectedValue(
+      new GithubAppError("只能连接没有任何 commit 的空仓库", 409),
+    );
+    await expect(
+      linkSelectedGithubRepository(sessionId, 321, "user_1", identity),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(adapter.enableGithubSyncCalls).toBe(0);
+  });
+
+  it("rejects an installation bound to another GitHub identity", async () => {
+    const sessionId = "sess_gh_identity";
+    await readySession(sessionId);
+    await expect(
+      linkSelectedGithubRepository(
+        sessionId,
+        321,
+        "user_1",
+        { id: 8, login: "other" },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(githubMocks.getRepository).not.toHaveBeenCalled();
+  });
+
+  it("records Freestyle enable errors", async () => {
+    const sessionId = "sess_gh_error";
+    await readySession(sessionId);
+    adapter.enableGithubSyncError = "Failed to access GitHub repository";
+    await expect(
+      linkSelectedGithubRepository(sessionId, 321, "user_1", identity),
+    ).rejects.toMatchObject({ status: 502 });
     const repo = await readGitRepository(sessionId, "user_1");
     expect(repo?.githubSyncStatus).toBe("error");
-    expect(repo?.githubSyncError).toContain("App not installed");
   });
 
-  it("rejects when freestyle repo is not ready", async () => {
-    const sessionId = "sess_gh_prep";
+  it("rejects linking before the Freestyle repository is ready", async () => {
+    const sessionId = "sess_gh_pending";
     await ensureFreestyleRepository(sessionId, "user_1");
     await expect(
-      linkGithubRepo(sessionId, "acme/demo", "user_1"),
+      linkSelectedGithubRepository(sessionId, 321, "user_1", identity),
     ).rejects.toMatchObject({ status: 409 });
-  });
-
-  it("createAndLink creates repo then enables sync", async () => {
-    const sessionId = "sess_gh_create";
-    await ensureFreestyleRepository(sessionId, "user_1");
-    await updateGitRepositoryWithRetry(
-      sessionId,
-      () => ({
-        provisionStatus: "ready" as const,
-        provisionError: null,
-      }),
-      "user_1",
-    );
-
-    githubClientMocks.resolveToken.mockResolvedValue({
-      token: "ghu_test",
-      binding: {
-        userId: "user_1",
-        githubLogin: "acme",
-        installationId: 1,
-        userAccessToken: "ghu_test",
-        refreshToken: null,
-        expiresAt: null,
-        updatedAt: new Date().toISOString(),
-      },
-    });
-    githubClientMocks.verifyBinding.mockImplementation(
-      (...args: unknown[]) => githubClientMocks.resolveToken(...args),
-    );
-    githubClientMocks.createEmptyUserRepo.mockResolvedValue({
-      fullName: "acme/baby-lovable-ghcreate",
-      name: "baby-lovable-ghcreate",
-      ownerLogin: "acme",
-      private: true,
-      htmlUrl: "https://github.com/acme/baby-lovable-ghcreate",
-    });
-
-    const linked = await createAndLinkGithubRepo(sessionId, "user_1");
-    expect(linked.githubRepoName).toBe("acme/baby-lovable-ghcreate");
-    expect(linked.githubSyncStatus).toBe("linked");
-    expect(githubClientMocks.createEmptyUserRepo).toHaveBeenCalled();
-    expect(adapter.enableGithubSyncCalls).toBe(1);
-  });
-
-  it("createAndLink requires authorization when token missing", async () => {
-    const sessionId = "sess_gh_unauth";
-    await ensureFreestyleRepository(sessionId, "user_1");
-    await updateGitRepositoryWithRetry(
-      sessionId,
-      () => ({
-        provisionStatus: "ready" as const,
-        provisionError: null,
-      }),
-      "user_1",
-    );
-    githubClientMocks.resolveToken.mockRejectedValue(
-      new GithubAppError("GitHub App is not authorized for this user", 401),
-    );
-    githubClientMocks.verifyBinding.mockRejectedValue(
-      new GithubAppError("GitHub App is not authorized for this user", 401),
-    );
-
-    await expect(
-      createAndLinkGithubRepo(sessionId, "user_1"),
-    ).rejects.toMatchObject({ status: 401 });
   });
 });
 

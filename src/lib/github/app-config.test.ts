@@ -39,8 +39,35 @@ describe("getGithubAppSlug", () => {
 });
 
 describe("isGithubAppConfigured", () => {
+  const previous = {
+    id: process.env.GITHUB_APP_ID,
+    key: process.env.GITHUB_APP_PRIVATE_KEY,
+    install: process.env.GITHUB_APP_INSTALL_URL,
+  };
+
+  afterEach(() => {
+    const restore = (name: string, value: string | undefined) => {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    };
+    restore("GITHUB_APP_ID", previous.id);
+    restore("GITHUB_APP_PRIVATE_KEY", previous.key);
+    restore("GITHUB_APP_INSTALL_URL", previous.install);
+  });
+
   it("is false without credentials", () => {
+    delete process.env.GITHUB_APP_ID;
+    delete process.env.GITHUB_APP_PRIVATE_KEY;
+    delete process.env.GITHUB_APP_INSTALL_URL;
     expect(isGithubAppConfigured()).toBe(false);
+  });
+
+  it("requires only App credentials and an installation URL", () => {
+    process.env.GITHUB_APP_ID = "123";
+    process.env.GITHUB_APP_PRIVATE_KEY = "private-key";
+    process.env.GITHUB_APP_INSTALL_URL =
+      "https://github.com/apps/demo/installations/new";
+    expect(isGithubAppConfigured()).toBe(true);
   });
 });
 

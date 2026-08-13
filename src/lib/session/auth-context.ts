@@ -1,3 +1,5 @@
+import type { User } from "@supabase/supabase-js";
+
 import type { UserId } from "./types";
 import {
   getDevUserId,
@@ -8,6 +10,57 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export interface SessionAuthContext {
   /** `null` = anonymous local-dev; Supabase `auth.users.id` when configured. */
   userId: UserId;
+  /** GitHub provider identity from the existing platform login; never a token. */
+  githubIdentity?: GithubAuthIdentity | null;
+}
+
+export interface GithubAuthIdentity {
+  id: number;
+  login: string | null;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** Extract the stable GitHub account id from Supabase's GitHub OAuth identity. */
+export function extractGithubAuthIdentity(
+  user: Pick<User, "identities" | "user_metadata"> | null,
+): GithubAuthIdentity | null {
+  const identity = user?.identities?.find(
+    (entry) => entry.provider === "github",
+  );
+  if (!identity) {
+    return null;
+  }
+  const data = identity.identity_data ?? {};
+  const id =
+    positiveInteger(data.provider_id) ??
+    positiveInteger(data.sub) ??
+    positiveInteger(user?.user_metadata?.provider_id) ??
+    positiveInteger(user?.user_metadata?.sub);
+  if (!id) {
+    return null;
+  }
+  const loginCandidates = [
+    data.user_name,
+    data.preferred_username,
+    data.login,
+    user?.user_metadata?.user_name,
+    user?.user_metadata?.preferred_username,
+  ];
+  const login =
+    loginCandidates.find(
+      (value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+    )?.trim() ?? null;
+  return { id, login };
 }
 
 export class UnauthenticatedError extends Error {
@@ -29,7 +82,7 @@ export async function getSessionAuthContext(
   void request;
 
   if (isLocalFileStorageMode()) {
-    return { userId: null };
+    return { userId: null, githubIdentity: null };
   }
 
   const supabase = await createSupabaseServerClient();
@@ -37,7 +90,10 @@ export async function getSessionAuthContext(
     data: { user },
   } = await supabase.auth.getUser();
 
-  return { userId: user?.id ?? getDevUserId() ?? null };
+  return {
+    userId: user?.id ?? getDevUserId() ?? null,
+    githubIdentity: extractGithubAuthIdentity(user),
+  };
 }
 
 /**
