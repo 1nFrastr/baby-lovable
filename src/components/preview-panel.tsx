@@ -708,9 +708,6 @@ export function PreviewPanel({
                 History
               </button>
             </div>
-            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-              daytona
-            </span>
             <SourceControlStatusChip
               sourceControl={sourceControl}
               visible

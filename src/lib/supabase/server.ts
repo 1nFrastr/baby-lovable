@@ -9,7 +9,7 @@ import {
 
 /**
  * Cookie-scoped Supabase client for Server Components, Route Handlers, and
- * Server Actions. Reads the Vercel Marketplace–synced env vars.
+ * Server Actions.
  */
 export async function createSupabaseServerClient() {
   if (!isSupabaseConfigured()) {

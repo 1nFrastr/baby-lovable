@@ -15,7 +15,7 @@ let adminClient: SupabaseClient | null = null;
 export function getSupabaseAdminClient(): SupabaseClient {
   if (!isSupabaseAdminConfigured()) {
     throw new Error(
-      "Supabase admin client is not configured. Set SUPABASE_SECRET_KEY (synced via Vercel Marketplace).",
+      "Supabase admin client is not configured. Set SUPABASE_SECRET_KEY.",
     );
   }
 

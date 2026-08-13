@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   assertSandboxMode,
@@ -6,19 +6,8 @@ import {
   parseSandboxMode,
 } from "./types";
 
-const previousMode = process.env.BABY_LOVABLE_SANDBOX_MODE;
-
-afterEach(() => {
-  if (previousMode === undefined) {
-    delete process.env.BABY_LOVABLE_SANDBOX_MODE;
-  } else {
-    process.env.BABY_LOVABLE_SANDBOX_MODE = previousMode;
-  }
-});
-
 describe("Daytona-only sandbox mode", () => {
-  it("always selects Daytona even when a legacy env flag requests local", () => {
-    process.env.BABY_LOVABLE_SANDBOX_MODE = "local";
+  it("selects Daytona by default", () => {
     expect(getDefaultSandboxMode()).toBe("daytona");
   });
 

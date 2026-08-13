@@ -79,7 +79,7 @@ export function mergeClientMessagesWithPersisted(
 
 /**
  * Session detail can lag the in-memory useChat thread when runStatus flips
- * idle via runtime SSE before `invalidateSessionDetail` lands.
+ * idle via runtime Realtime before `invalidateSessionDetail` lands.
  */
 export function persistedMessagesLagChat(
   persisted: UIMessage[],

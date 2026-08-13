@@ -17,7 +17,6 @@ import {
 
 export const toolContextSchema = z.object({
   sessionId: z.string(),
-  sandboxMode: z.literal("daytona"),
 });
 
 export type ToolContext = z.infer<typeof toolContextSchema>;
@@ -63,7 +62,7 @@ export const appTestActionSchema = z.object({
 });
 
 export function createToolsContext(sessionId: string) {
-  const context: ToolContext = { sessionId, sandboxMode: "daytona" };
+  const context: ToolContext = { sessionId };
 
   return {
     readFile: context,

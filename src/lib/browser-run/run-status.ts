@@ -56,7 +56,7 @@ async function readDurableStatus(
 
 /**
  * Read Live View / run status for the Web UI poller.
- * Always durable store only (session file / Supabase) — same path local + Vercel.
+ * Always reads the durable Supabase store.
  */
 export async function readLatestAppTestStatus(
   sessionId: string,
@@ -67,7 +67,7 @@ export async function readLatestAppTestStatus(
 
 /**
  * Publish Live View / run status for the Web UI poller.
- * Durable store only so local next dev matches Vercel multi-isolate timing.
+ * Supabase keeps local Next.js development aligned with Vercel multi-isolate timing.
  */
 export async function writeLatestAppTestStatus(
   sessionId: string,

@@ -50,8 +50,6 @@ export type RuntimeProjectionPatch = {
   sourceControl?: Partial<SourceControlProjection>;
 };
 
-export type RuntimeTransport = "realtime";
-
 export function mapSessionRunStatus(
   status: SessionRunStatus,
 ): RuntimeRunStatus {

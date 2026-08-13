@@ -21,14 +21,8 @@ function pathGuard(
   return { ok: false as const, error };
 }
 
-export const toolContextSchema = {
-  sessionId: "string",
-  sandboxMode: "daytona",
-} as const;
-
 export type ToolContext = {
   sessionId: string;
-  sandboxMode: "daytona";
 };
 
 async function getSandboxFromContext(context: ToolContext) {

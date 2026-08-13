@@ -15,7 +15,7 @@
  */
 
 import type { DaytonaDesiredState } from "./daytona/runtime-state";
-import { createPreviewBackend, getPreviewBackend } from "./preview-backend";
+import { getPreviewBackend } from "./preview-backend";
 import { isTempFailure as isPreviewTempFailure } from "./preview-errors";
 import type {
   AllStatus,
@@ -38,13 +38,13 @@ function previewUrlFromAppServer(appServer: AppServerStatus): PreviewUrlStatus {
 export async function getSandboxStatus(
   sessionId: string,
 ): Promise<SandboxStatus> {
-  return (await getPreviewBackend(sessionId)).getSandboxStatus(sessionId);
+  return (await getPreviewBackend()).getSandboxStatus(sessionId);
 }
 
 export async function getAppServerStatus(
   sessionId: string,
 ): Promise<AppServerStatus> {
-  return (await getPreviewBackend(sessionId)).getAppServerStatus(sessionId);
+  return (await getPreviewBackend()).getAppServerStatus(sessionId);
 }
 
 export async function getPreviewUrlStatus(
@@ -55,7 +55,7 @@ export async function getPreviewUrlStatus(
 
 /** Read-only snapshot of all three layers. Never starts anything. */
 export async function getAllStatus(sessionId: string): Promise<AllStatus> {
-  const backend = await getPreviewBackend(sessionId);
+  const backend = await getPreviewBackend();
   const [sandbox, appServer] = await Promise.all([
     backend.getSandboxStatus(sessionId),
     backend.getAppServerStatus(sessionId),
@@ -119,14 +119,6 @@ export async function awaitRuntimeDesired(
 }
 
 /**
- * @deprecated Prefer {@link kickRuntimeDesired}("preview-ready").
- * Enter/re-enter session: non-blocking preview-ready prelude.
- */
-export async function warmPreview(sessionId: string): Promise<AllStatus> {
-  return kickRuntimeDesired(sessionId, "preview-ready");
-}
-
-/**
  * Check app server health (HTTP readiness).
  * Daytona: does not read compile logs (those are on write/edit peek).
  * Does not start sandbox or app server.
@@ -134,13 +126,13 @@ export async function warmPreview(sessionId: string): Promise<AllStatus> {
 export async function checkAppServer(
   sessionId: string,
 ): Promise<AppServerCheck> {
-  return (await getPreviewBackend(sessionId)).checkAppServer(sessionId);
+  return (await getPreviewBackend()).checkAppServer(sessionId);
 }
 
 export async function getBuildError(
   sessionId: string,
 ): Promise<string | null> {
-  return (await getPreviewBackend(sessionId)).getBuildError(sessionId);
+  return (await getPreviewBackend()).getBuildError(sessionId);
 }
 
 /**
@@ -151,7 +143,7 @@ export async function getBuildError(
 export async function peekCompileErrorIfPreviewReady(
   sessionId: string,
 ): Promise<string | null> {
-  const backend = await getPreviewBackend(sessionId);
+  const backend = await getPreviewBackend();
   const status = await backend.getAppServerStatus(sessionId);
   if (status.status !== "ready") {
     return null;
@@ -272,7 +264,7 @@ export async function runCheckPreviewProbe(
 
 /** Background: sandbox → app server → preview URL. Call at agent turn start. */
 export function startPreview(sessionId: string): void {
-  void getPreviewBackend(sessionId).then((backend) => {
+  void getPreviewBackend().then((backend) => {
     backend.startPreview(sessionId);
   });
 }
@@ -280,28 +272,28 @@ export function startPreview(sessionId: string): void {
 export async function startAppServer(
   sessionId: string,
 ): Promise<AppServerStatus> {
-  return (await getPreviewBackend(sessionId)).startAppServer(sessionId);
+  return (await getPreviewBackend()).startAppServer(sessionId);
 }
 
 export async function restartAppServer(
   sessionId: string,
 ): Promise<AppServerStatus> {
-  return (await getPreviewBackend(sessionId)).restartAppServer(sessionId);
+  return (await getPreviewBackend()).restartAppServer(sessionId);
 }
 
 export async function stopAppServer(sessionId: string): Promise<void> {
-  await (await getPreviewBackend(sessionId)).stopAppServer(sessionId);
+  await (await getPreviewBackend()).stopAppServer(sessionId);
 }
 
 export async function deleteSandbox(sessionId: string): Promise<void> {
-  await (await getPreviewBackend(sessionId)).deleteSandbox(sessionId);
+  await (await getPreviewBackend()).deleteSandbox(sessionId);
 }
 
 export function isTempFailure(check: AppServerCheck): boolean {
   return isPreviewTempFailure(check);
 }
 
-export { createPreviewBackend, getPreviewBackend };
+export { getPreviewBackend };
 export type { PreviewBackend } from "./preview-backend";
 export type {
   AllStatus,

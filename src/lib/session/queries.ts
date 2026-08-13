@@ -10,10 +10,6 @@ import { useEffect } from "react";
 import type { SessionDraft } from "@/lib/session/draft-store";
 import type { Session, SessionSummary } from "@/lib/session/types";
 
-export type SessionsFeatures = {
-  daytona: boolean;
-};
-
 export const sessionKeys = {
   all: ["sessions"] as const,
   lists: () => [...sessionKeys.all, "list"] as const,
@@ -28,7 +24,6 @@ export interface SessionDetailData {
 
 export interface SessionsListData {
   sessions: SessionSummary[];
-  features: SessionsFeatures;
 }
 
 function sessionToSummary(session: Session): SessionSummary {
@@ -40,7 +35,6 @@ function sessionToSummary(session: Session): SessionSummary {
     updatedAt: session.updatedAt,
     lastRunId: session.lastRunId,
     runStatus: session.runStatus,
-    sandboxMode: session.sandboxMode,
     messageCount: session.messages.length,
   };
 }
@@ -66,16 +60,7 @@ async function fetchSessions(): Promise<SessionsListData> {
     throw new Error("Failed to load sessions");
   }
 
-  const data = (await response.json()) as {
-    sessions: SessionSummary[];
-    features?: { daytona?: boolean };
-  };
-  return {
-    sessions: data.sessions,
-    features: {
-      daytona: Boolean(data.features?.daytona),
-    },
-  };
+  return (await response.json()) as SessionsListData;
 }
 
 async function fetchSessionDetail(
@@ -156,9 +141,6 @@ export function useCreateSessionMutation() {
         if (!current) {
           return {
             sessions: [sessionToSummary(session)],
-            features: {
-              daytona: true,
-            },
           };
         }
         return {

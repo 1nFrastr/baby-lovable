@@ -6,7 +6,6 @@ import {
   previewFromAllStatus,
   shouldBumpRuntimeVersion,
   type RuntimeProjectionPatch,
-  type RuntimeTransport,
   type SessionRuntimeProjection,
 } from "./runtime-projection";
 import {
@@ -14,11 +13,7 @@ import {
   writeRuntimeProjectionSupabase,
 } from "./runtime-projection-store-supabase";
 
-export type { SessionRuntimeProjection, RuntimeTransport };
-
-export function getRuntimeTransport(): RuntimeTransport {
-  return "realtime";
-}
+export type { SessionRuntimeProjection };
 
 async function resolveUserId(
   sessionId: string,

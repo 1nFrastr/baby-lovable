@@ -45,7 +45,6 @@ export async function GET(
     return NextResponse.json({
       ...latest,
       browserRunConfigured: browserRunConfigured(),
-      sandboxMode: session.sandboxMode,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {

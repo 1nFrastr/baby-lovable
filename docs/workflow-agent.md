@@ -146,7 +146,7 @@ src/tools/
 src/cli/
 ```
 
-它负责 Agent 编排、工具定义、运行状态和对外接口。每个会话生成的应用运行在独立 workspace 或 Daytona sandbox 中。这样用户项目和 Host 系统隔离，多个会话之间也不会互相污染。
+它负责 Agent 编排、工具定义、运行状态和对外接口。每个会话生成的应用都运行在独立 Daytona workspace 中。这样用户项目和 Host 系统隔离，多个会话之间也不会互相污染。
 
 ## Web 和 CLI 复用同一套 Agent
 

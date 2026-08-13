@@ -45,13 +45,6 @@ const daytonaBackend: PreviewBackend = {
   },
 };
 
-export function createPreviewBackend(): PreviewBackend {
-  return daytonaBackend;
-}
-
-export async function getPreviewBackend(
-  sessionId: string,
-): Promise<PreviewBackend> {
-  void sessionId;
+export async function getPreviewBackend(): Promise<PreviewBackend> {
   return daytonaBackend;
 }

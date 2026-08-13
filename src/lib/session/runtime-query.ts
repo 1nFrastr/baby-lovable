@@ -5,10 +5,7 @@ import { useCallback, useEffect } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-import type {
-  RuntimeTransport,
-  SessionRuntimeProjection,
-} from "./runtime-projection";
+import type { SessionRuntimeProjection } from "./runtime-projection";
 
 export const runtimeKeys = {
   detail: (sessionId: string) => ["session-runtime", sessionId] as const,
@@ -16,7 +13,6 @@ export const runtimeKeys = {
 
 export interface SessionRuntimeData {
   projection: SessionRuntimeProjection;
-  transport: RuntimeTransport;
 }
 
 async function fetchRuntime(sessionId: string): Promise<SessionRuntimeData> {
@@ -39,10 +35,7 @@ function applyProjectionIfNewer(
     runtimeKeys.detail(sessionId),
     (current) => {
       if (!current || next.version > current.projection.version) {
-        return {
-          projection: next,
-          transport: current?.transport ?? "realtime",
-        };
+        return { projection: next };
       }
       return current;
     },

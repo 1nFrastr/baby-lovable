@@ -122,7 +122,7 @@ export function AppShell() {
     prevRuntimeRunStatus.current = undefined;
   }, [activeSessionId]);
 
-  // Runtime SSE can flip run→done before onChatEnd's detail invalidate lands.
+  // Runtime Realtime can flip run→done before onChatEnd's detail invalidate lands.
   // Refetch the durable session as soon as the projection leaves "running".
   useEffect(() => {
     const status = runtimeQuery.data?.projection.run?.status;

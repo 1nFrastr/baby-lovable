@@ -57,7 +57,6 @@ export async function GET(
       previewUrl: all.previewUrl,
       // keep old field for existing UI during transition
       preview: all.appServer,
-      sandboxMode: session.sandboxMode,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
@@ -98,7 +97,6 @@ export async function POST(
         appServer: all.appServer,
         previewUrl: all.previewUrl,
         preview: all.appServer,
-        sandboxMode: session.sandboxMode,
       });
     }
 
@@ -113,7 +111,6 @@ export async function POST(
       appServer,
       previewUrl: all.previewUrl,
       preview: appServer,
-      sandboxMode: session.sandboxMode,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
@@ -160,7 +157,6 @@ export async function DELETE(
       appServer: all.appServer,
       previewUrl: all.previewUrl,
       preview: all.appServer,
-      sandboxMode: session.sandboxMode,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {

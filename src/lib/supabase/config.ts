@@ -1,6 +1,5 @@
 /**
- * Supabase env vars synced by the Vercel Marketplace integration.
- * @see https://supabase.com/docs/guides/integrations/vercel-marketplace
+ * Supabase direct-connection environment variables.
  *
  * NEXT_PUBLIC_* must use static `process.env.NEXT_PUBLIC_…` access so Next.js
  * can inline them into client bundles. Dynamic `process.env[name]` only works
@@ -14,7 +13,7 @@ function firstNonEmpty(...values: (string | undefined)[]): string | undefined {
   return undefined;
 }
 
-/** Public Supabase project URL (Vercel syncs `NEXT_PUBLIC_SUPABASE_URL`). */
+/** Public Supabase project URL. */
 export function getSupabaseUrl(): string | undefined {
   return firstNonEmpty(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -23,8 +22,8 @@ export function getSupabaseUrl(): string | undefined {
 }
 
 /**
- * Publishable (anon) key — Vercel Marketplace uses the new naming convention;
- * fall back to legacy `*_ANON_KEY` for projects created before the rename.
+ * Publishable (anon) key using the current naming convention, with legacy
+ * `*_ANON_KEY` fallbacks for projects created before the rename.
  */
 export function getSupabasePublishableKey(): string | undefined {
   return firstNonEmpty(

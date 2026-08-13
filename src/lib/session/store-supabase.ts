@@ -71,7 +71,6 @@ function toSummary(session: Session): SessionSummary {
     updatedAt: session.updatedAt,
     lastRunId: session.lastRunId,
     runStatus: session.runStatus,
-    sandboxMode: session.sandboxMode,
     messageCount: session.messages.length,
   };
 }

@@ -187,6 +187,7 @@ Agent / Preview API
 ## 文档
 
 - [声明式资源调和设计](./docs/declarative-reconciliation.md)
+- [Freestyle Git 持久化设计](./docs/freestyle-git.md)
 - [实时状态同步设计](./docs/realtime-projection.md)
 - [Workflow Agent 设计](./docs/workflow-agent.md)
 - [本地开发指南](./docs/local-development.md)
@@ -194,6 +195,5 @@ Agent / Preview API
 ## Roadmap
 
 - [ ] Agent Runtime 治理：长上下文治理、工具结果压缩等
-- [ ] 代码产物持久化：云端版本控制，接入 Freestyle Git 和 GitHub 双向同步
 - [ ] 产品体验优化：UI / UX 优化
 - [ ] 第三方连接器：Supabase BaaS、Vercel Deploy、图片素材生成 MCP 工具等

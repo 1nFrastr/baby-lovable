@@ -23,12 +23,7 @@ export async function GET(request: Request) {
     assertSupabaseMetadataConfigured();
     const auth = await requireSessionAuth(request);
     const sessions = await listSessions(auth);
-    return NextResponse.json({
-      sessions,
-      features: {
-        daytona: isDaytonaConfigured(),
-      },
-    });
+    return NextResponse.json({ sessions });
   } catch (error) {
     if (error instanceof UnauthenticatedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -9,7 +9,6 @@ const { getPreviewBackend } = vi.hoisted(() => ({
 
 vi.mock("./preview-backend", () => ({
   getPreviewBackend,
-  createPreviewBackend: vi.fn(),
 }));
 
 import {

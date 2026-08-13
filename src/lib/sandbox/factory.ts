@@ -12,10 +12,4 @@ export async function getProjectSandbox(
   return attachDaytonaSandboxForFs(sessionId);
 }
 
-export async function createSandbox(
-  sessionId: string,
-): Promise<ProjectSandbox> {
-  return getProjectSandbox(sessionId);
-}
-
 export { deleteDaytonaSandbox };

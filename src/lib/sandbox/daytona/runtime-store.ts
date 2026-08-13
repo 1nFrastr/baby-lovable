@@ -81,7 +81,7 @@ async function loadDurable(
 /**
  * Persist with optimistic concurrency.
  * - expectedRevision === null → create-only (fail if durable row exists)
- * - otherwise → update only when on-disk revision matches
+ * - otherwise → update only when the durable revision matches
  */
 async function saveDurable(
   snapshot: DaytonaRuntimeSnapshot,

@@ -132,7 +132,7 @@ export function emptyGitRepository(
   };
 }
 
-/** Fill fields added after older on-disk / jsonb rows were written. */
+/** Fill fields added after older persisted rows were written. */
 export function normalizeGitRepository(
   repo: SessionGitRepository,
 ): SessionGitRepository {

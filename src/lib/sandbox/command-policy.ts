@@ -107,6 +107,3 @@ export function validateRunCommand(
     shell: buildAllowedShellCommand(allowed),
   };
 }
-
-/** @deprecated Use pkg-* kinds — kept for transitional call sites. */
-export type LegacyAllowedCommand = AllowedCommand;

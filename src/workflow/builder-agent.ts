@@ -47,7 +47,6 @@ function buildSystemPrompt(): string {
 
 export interface BuilderAgentContext {
   sessionId: string;
-  sandboxMode: "daytona";
   [key: string]: string;
 }
 
@@ -68,7 +67,6 @@ export function createBuilderAgent(
   const toolsContext = createToolsContext(sessionId);
   const runtimeContext: BuilderAgentContext = {
     sessionId,
-    sandboxMode: "daytona",
   };
   const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
 

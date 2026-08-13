@@ -36,7 +36,7 @@ export function browserRunConfigured(): boolean {
 /**
  * Whether to write screenshots / report.json / monitor.html to disk.
  * Local CLI debugging only. Live View PiP uses durable store
- * (session file / Supabase `session_app_test_status`).
+ * (Supabase `session_app_test_status`).
  *
  * Do NOT key off bare `VERCEL=1`: `vercel env pull` sets that in `.env.local`.
  * Override: `BABY_LOVABLE_APP_TEST_ARTIFACTS=0|1`

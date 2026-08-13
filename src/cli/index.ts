@@ -120,7 +120,7 @@ async function printSessions(): Promise<void> {
   logger.info(`${sessions.length} session(s):`);
   for (const s of sessions) {
     logger.raw(
-      `  ${s.id}  ·  ${s.sandboxMode.padEnd(7)}  ·  ${s.updatedAt.slice(0, 19).replace("T", " ")}  ·  ${s.title}\n`,
+      `  ${s.id}  ·  ${s.updatedAt.slice(0, 19).replace("T", " ")}  ·  ${s.title}\n`,
     );
   }
 }
@@ -286,7 +286,6 @@ async function main(): Promise<void> {
   logger.banner([
     `baby-lovable agent · CLI`,
     `session   : ${session.id}`,
-    `sandbox   : ${session.sandboxMode}`,
     `model     : ${process.env.AI_MODEL ?? "minimax/minimax-m3"}`,
     `workspace : daytona:workspace`,
   ]);
