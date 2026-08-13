@@ -50,7 +50,8 @@ export function createPreviewBackend(): PreviewBackend {
 }
 
 export async function getPreviewBackend(
-  _sessionId: string,
+  sessionId: string,
 ): Promise<PreviewBackend> {
+  void sessionId;
   return daytonaBackend;
 }

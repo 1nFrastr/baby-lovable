@@ -226,16 +226,9 @@ export function PreviewPanel({
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
-  const showSourceControl = true;
   const prevAgentRunStatusRef = useRef<
     SessionRuntimeProjection["run"]["status"] | null
   >(null);
-
-  useEffect(() => {
-    if (!showSourceControl && panelTab === "history") {
-      setPanelTab("preview");
-    }
-  }, [showSourceControl, panelTab]);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -368,7 +361,7 @@ export function PreviewPanel({
 
   // Checkpoint finishes after the chat unlocks — refresh History when save settles.
   useEffect(() => {
-    if (!showSourceControl || !sourceControl) {
+    if (!sourceControl) {
       return;
     }
     if (
@@ -380,12 +373,7 @@ export function PreviewPanel({
         setVersionsRefreshKey((key) => key + 1);
       });
     }
-  }, [
-    showSourceControl,
-    sourceControl?.status,
-    sourceControl?.shortSha,
-    sourceControl?.updatedAt,
-  ]);
+  }, [sourceControl]);
 
   const applyPreviewRefresh = useCallback(() => {
     setPreviewRefreshPending(false);
@@ -702,32 +690,30 @@ export function PreviewPanel({
               >
                 Files
               </button>
-              {showSourceControl ? (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={panelTab === "history"}
-                  onClick={() => {
-                    setHistoryMountSessionId(sessionId);
-                    setConsoleExpanded(false);
-                    setPanelTab("history");
-                  }}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                    panelTab === "history"
-                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                      : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                  }`}
-                >
-                  History
-                </button>
-              ) : null}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={panelTab === "history"}
+                onClick={() => {
+                  setHistoryMountSessionId(sessionId);
+                  setConsoleExpanded(false);
+                  setPanelTab("history");
+                }}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  panelTab === "history"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }`}
+              >
+                History
+              </button>
             </div>
             <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
               daytona
             </span>
             <SourceControlStatusChip
               sourceControl={sourceControl}
-              visible={showSourceControl}
+              visible
             />
             {appTestBusy ? (
               <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-300">
@@ -797,7 +783,7 @@ export function PreviewPanel({
               </button>
               <GithubSyncPanel
                 sessionId={sessionId}
-                visible={showSourceControl}
+                visible
                 linkedRepoName={sourceControl?.githubRepoName ?? null}
                 sourceControlStatus={sourceControl?.status ?? null}
               />

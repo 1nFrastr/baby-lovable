@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint --cache --cache-location .eslintcache src scripts templates/nextjs-starter",
+    "lint": "eslint --cache --cache-location .eslintcache src templates/nextjs-starter",
     "test": "vitest run",
     "test:watch": "vitest",
     "agent": "tsx src/cli/index.ts",

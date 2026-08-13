@@ -55,11 +55,6 @@ export function shouldPersistAppTestArtifacts(): boolean {
   );
 }
 
-function envFlagEnabled(name: string): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
-}
-
 /** Opt-in artificial delay before durable status write (ms). Default 0. */
 export function appTestStatusWriteDelayMs(): number {
   const raw = process.env.BABY_LOVABLE_APP_TEST_STATUS_WRITE_DELAY_MS?.trim();
