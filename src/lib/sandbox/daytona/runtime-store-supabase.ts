@@ -102,14 +102,19 @@ export async function writeRuntimeSupabase(
     updated_at: new Date().toISOString(),
   };
 
-  if (expectedRevision === null || expectedRevision === 0) {
+  if (expectedRevision === null) {
     const { data, error } = await supabase
       .from("session_daytona_runtime")
-      .upsert(row, { onConflict: "session_id" })
+      .insert(row)
       .select("*")
       .single();
 
     if (error) {
+      if (error.code === "23505") {
+        throw new Error(
+          `Daytona runtime CAS conflict for ${snapshot.sessionId} (create lost race)`,
+        );
+      }
       throw new Error(`Failed to write daytona runtime: ${error.message}`);
     }
     return rowToSnapshot(data as RuntimeRow);

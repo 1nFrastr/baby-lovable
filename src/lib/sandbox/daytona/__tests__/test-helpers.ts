@@ -33,6 +33,7 @@ export function makeSession(sessionId: string): Session {
 function createMemoryRuntimeAdapter(): RuntimeDurableAdapter {
   const snapshots = new Map<string, DaytonaRuntimeSnapshot>();
   return {
+    requiresUserId: false,
     async read(sessionId) {
       const snapshot = snapshots.get(sessionId);
       return snapshot ? { ...snapshot } : null;

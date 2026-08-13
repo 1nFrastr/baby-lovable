@@ -201,7 +201,7 @@ describe("runtime-store serverless isolate races", () => {
     });
   });
 
-  it("clearRuntimeSnapshot removes durable file for delete path", async () => {
+  it("clearRuntimeSnapshot removes durable state for delete path", async () => {
     await withMemoryRuntime(async ({ sessionId }) => {
       await upsertRuntimeSnapshot(sessionId, {
         desired: "sandbox-ready",

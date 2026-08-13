@@ -24,6 +24,8 @@ const memory = new Map<string, DaytonaRuntimeSnapshot>();
 const DEFAULT_LEASE_TTL_MS = 30_000;
 
 export interface RuntimeDurableAdapter {
+  /** Supabase requires the owning auth user; in-memory unit adapters do not. */
+  requiresUserId?: boolean;
   read(sessionId: string): Promise<DaytonaRuntimeSnapshot | null>;
   write(
     snapshot: DaytonaRuntimeSnapshot,
@@ -34,6 +36,7 @@ export interface RuntimeDurableAdapter {
 }
 
 const supabaseAdapter: RuntimeDurableAdapter = {
+  requiresUserId: true,
   read: readRuntimeSupabase,
   write: writeRuntimeSupabase,
   delete: deleteRuntimeSupabase,
@@ -105,7 +108,10 @@ export async function getRuntimeSnapshot(
     }
   }
 
-  const ownerId = await resolveUserId(sessionId, userId);
+  const ownerId =
+    durableAdapter.requiresUserId === false
+      ? userId
+      : await resolveUserId(sessionId, userId);
   let loaded = await loadDurable(sessionId, ownerId);
 
   if (!loaded) {
@@ -121,7 +127,10 @@ export async function upsertRuntimeSnapshot(
   patch: DaytonaRuntimePatch,
   userId: string | null = null,
 ): Promise<DaytonaRuntimeSnapshot> {
-  const ownerId = await resolveUserId(sessionId, userId);
+  const ownerId =
+    durableAdapter.requiresUserId === false
+      ? userId
+      : await resolveUserId(sessionId, userId);
   // Writers always CAS against durable truth — never against a stale L1 copy.
   const durable = await loadDurable(sessionId, ownerId);
   const current = durable ?? emptyRuntimeSnapshot(sessionId);
@@ -268,7 +277,10 @@ export async function clearRuntimeSnapshot(
   userId: string | null = null,
 ): Promise<void> {
   memory.delete(sessionId);
-  const ownerId = await resolveUserId(sessionId, userId);
+  const ownerId =
+    durableAdapter.requiresUserId === false
+      ? userId
+      : await resolveUserId(sessionId, userId);
 
   try {
     void ownerId;
