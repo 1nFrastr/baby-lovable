@@ -13,11 +13,6 @@ import { getExistingDaytonaSandbox } from "./sandbox";
 import { extractCompileError, readDevLog } from "./app-server-health";
 import { getDaytonaDevPort } from "./config";
 
-/** Snapshot bakes node_modules — Daytona never gates on runtime dep install. */
-export async function hasDaytonaNodeModules(_sessionId: string): Promise<boolean> {
-  return true;
-}
-
 export async function getDaytonaBuildError(
   sessionId: string,
 ): Promise<string | null> {

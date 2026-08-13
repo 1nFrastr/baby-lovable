@@ -9,7 +9,6 @@ import {
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { packageManagerPromptLines } from "@/lib/sandbox/package-manager";
 import { builderTools, createToolsContext } from "@/tools/builder-tools";
-import type { SandboxMode } from "@/lib/sandbox/types";
 
 const BUILDER_BASE_PROMPT = `You are baby-lovable, an expert Next.js app builder.
 
@@ -29,7 +28,7 @@ Rules:
 - When you call \`checkPreview\`: finish the edit burst first, then check. \`installing\` / \`starting\` are normal warm-up — wait and call again until \`status\` is \`ready\` before finishing. Do NOT treat those as errors and do NOT run commands to fix them. If status stays \`stopped\`, wait briefly and retry; do not invent install/dev commands.
 - A non-null \`compileError\` from write/edit, or \`httpStatus\` >= 500 from \`checkPreview\`, means something is broken. Fix the source from \`compileError\` (or TypeScript/React rules), then \`checkPreview\` once to confirm readiness. Do NOT call \`checkPreview\` repeatedly without editing — if still \`starting\`, wait one check; if \`compileError\` is present, fix code first.
 - Do **not** call \`testPreview\` by default. \`checkPreview\` (HTTP readiness) is enough unless the user **explicitly** asks you to test, verify, or smoke-test the UI in the browser (e.g. 「帮我测试一下」「跑一下预览测试」). Never invent a test just because preview is ready.
-- When the user does ask for UI testing on a Daytona session: after \`checkPreview\` is \`ok: true\`, call \`testPreview\` **once** with a **short** \`actions\` list (3–5 steps; never more than ~8). Happy path only — e.g. todo: fill → Add → \`assertVisible\` with matching \`{{unique}}\` text. Do **not** omit \`actions\`. Do **not** script empty-state / delete / filter / edit / multi-item flows unless they asked for those. Prefer selectors from your source (\`input[placeholder=…]\`, \`button:has-text("Add")\`, assert \`text\`). On failure, read \`failedSteps\`, make **one** small fix, retry **at most once**, then finish. Skip on local sandbox or when Browser Run is unconfigured. When writing interactive UI, prefer stable placeholders / \`aria-label\`s so a short script can target them later.
+- When the user does ask for UI testing: after \`checkPreview\` is \`ok: true\`, call \`testPreview\` **once** with a **short** \`actions\` list (3–5 steps; never more than ~8). Happy path only — e.g. todo: fill → Add → \`assertVisible\` with matching \`{{unique}}\` text. Do **not** omit \`actions\`. Do **not** script empty-state / delete / filter / edit / multi-item flows unless they asked for those. Prefer selectors from your source (\`input[placeholder=…]\`, \`button:has-text("Add")\`, assert \`text\`). On failure, read \`failedSteps\`, make **one** small fix, retry **at most once**, then finish. Skip when Browser Run is unconfigured. When writing interactive UI, prefer stable placeholders / \`aria-label\`s so a short script can target them later.
 - Generate production-quality Next.js App Router code with TypeScript and Tailwind CSS when the project needs styling.
 - This workspace uses Tailwind CSS v4 (\`@import "tailwindcss"\`, \`@theme inline\`). For opacity, use preset scales only — e.g. \`bg-foreground/5\`, \`border-foreground/10\`, \`text-foreground/80\`. NEVER use bracket arbitrary opacity such as \`bg-foreground/[0.02]\`, \`bg-foreground/[2%]\`, or similar \`/[0.x]\` / \`/[N%]\` forms; they break CSS compilation in this preview toolchain.
 - Keep chat replies short (a few sentences). Put code and long debugging in tools — never dump large coordinate traces, grid dumps, or step-by-step code walkthroughs in the assistant message (they hit the output token limit mid-sentence).
@@ -41,14 +40,14 @@ Rules:
 - Paths passed to tools are relative to the workspace root.
 - If a command fails, inspect the output, fix the issue, and retry.`;
 
-function buildSystemPrompt(sandboxMode: SandboxMode): string {
-  const pmLines = packageManagerPromptLines(sandboxMode).map((line) => `- ${line}`);
+function buildSystemPrompt(): string {
+  const pmLines = packageManagerPromptLines().map((line) => `- ${line}`);
   return `${BUILDER_BASE_PROMPT}\n${pmLines.join("\n")}`;
 }
 
 export interface BuilderAgentContext {
   sessionId: string;
-  sandboxMode: SandboxMode;
+  sandboxMode: "daytona";
   [key: string]: string;
 }
 
@@ -65,16 +64,18 @@ export interface BuilderAgentBundle {
  */
 export function createBuilderAgent(
   sessionId: string,
-  sandboxMode: SandboxMode,
 ): BuilderAgentBundle {
-  const toolsContext = createToolsContext(sessionId, sandboxMode);
-  const runtimeContext: BuilderAgentContext = { sessionId, sandboxMode };
+  const toolsContext = createToolsContext(sessionId);
+  const runtimeContext: BuilderAgentContext = {
+    sessionId,
+    sandboxMode: "daytona",
+  };
   const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
 
   const agent = new WorkflowAgent({
     model: modelId,
     maxOutputTokens: resolveMaxOutputTokens(modelId),
-    instructions: buildSystemPrompt(sandboxMode),
+    instructions: buildSystemPrompt(),
     tools: builderTools,
     toolsContext,
     runtimeContext,

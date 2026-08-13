@@ -108,24 +108,18 @@ async function assembleRuntimeProjection(
 
   try {
     // Side-effect free: never call peekAllStatus (it may kick background observe).
-    if ((session?.sandboxMode ?? "local") === "daytona") {
-      const { getRuntimeSnapshot } = await import(
-        "@/lib/sandbox/daytona/runtime-store"
-      );
-      const { deriveAllStatus } = await import(
-        "@/lib/sandbox/daytona/runtime-state"
-      );
-      const snapshot = await getRuntimeSnapshot(sessionId);
-      base.preview = previewFromAllStatus(
-        deriveAllStatus(snapshot),
-        snapshot.generation,
-        now,
-      );
-    } else {
-      const { getAllStatus } = await import("@/lib/sandbox/preview");
-      const all = await getAllStatus(sessionId);
-      base.preview = previewFromAllStatus(all, 0, now);
-    }
+    const { getRuntimeSnapshot } = await import(
+      "@/lib/sandbox/daytona/runtime-store"
+    );
+    const { deriveAllStatus } = await import(
+      "@/lib/sandbox/daytona/runtime-state"
+    );
+    const snapshot = await getRuntimeSnapshot(sessionId);
+    base.preview = previewFromAllStatus(
+      deriveAllStatus(snapshot),
+      snapshot.generation,
+      now,
+    );
   } catch (error) {
     console.warn(
       `[runtime-projection] assemble preview failed for ${sessionId}:`,
@@ -204,61 +198,3 @@ export async function publishRuntimeUpdate(
   }
 }
 
-/** Re-read live preview domains and publish (local boot / after restart). */
-export async function syncPreviewRuntimeProjection(
-  sessionId: string,
-  options: { bumpGeneration?: boolean; userId?: string | null } = {},
-): Promise<void> {
-  try {
-    const ownerId = options.userId ?? null;
-    const current =
-      (await readRuntimeProjectionStore(sessionId, ownerId)) ??
-      emptyRuntimeProjection(sessionId);
-    let generation = current.preview.generation;
-
-    const { getSession } = await import("./store");
-    const session = await getSession(sessionId);
-    const now = new Date().toISOString();
-
-    if ((session?.sandboxMode ?? "local") === "daytona") {
-      const { getRuntimeSnapshot } = await import(
-        "@/lib/sandbox/daytona/runtime-store"
-      );
-      const { deriveAllStatus } = await import(
-        "@/lib/sandbox/daytona/runtime-state"
-      );
-      const snapshot = await getRuntimeSnapshot(sessionId);
-      generation = snapshot.generation;
-      await publishRuntimeUpdate(
-        sessionId,
-        {
-          preview: previewFromAllStatus(
-            deriveAllStatus(snapshot),
-            generation,
-            now,
-          ),
-        },
-        ownerId,
-      );
-      return;
-    }
-
-    if (options.bumpGeneration) {
-      generation = current.preview.generation + 1;
-    }
-    const { getAllStatus } = await import("@/lib/sandbox/preview");
-    const all = await getAllStatus(sessionId);
-    await publishRuntimeUpdate(
-      sessionId,
-      {
-        preview: previewFromAllStatus(all, generation, now),
-      },
-      ownerId,
-    );
-  } catch (error) {
-    console.warn(
-      `[runtime-projection] sync preview failed for ${sessionId}:`,
-      error instanceof Error ? error.message : error,
-    );
-  }
-}

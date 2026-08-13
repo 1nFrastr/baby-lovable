@@ -60,14 +60,6 @@ function envFlagEnabled(name: string): boolean {
   return raw === "1" || raw === "true" || raw === "yes";
 }
 
-/**
- * @deprecated Status is always durable-store-only now (local ≡ prod).
- * Kept so old `.env.local` flags do not break; value is ignored.
- */
-export function simulateServerlessMemoryLoss(): boolean {
-  return true;
-}
-
 /** Opt-in artificial delay before durable status write (ms). Default 0. */
 export function appTestStatusWriteDelayMs(): number {
   const raw = process.env.BABY_LOVABLE_APP_TEST_STATUS_WRITE_DELAY_MS?.trim();

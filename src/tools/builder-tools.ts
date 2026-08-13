@@ -1,8 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
 
-import type { SandboxMode } from "@/lib/sandbox/types";
-
 import {
   checkPreviewStep,
   deleteFileStep,
@@ -19,7 +17,7 @@ import {
 
 export const toolContextSchema = z.object({
   sessionId: z.string(),
-  sandboxMode: z.enum(["local", "daytona"]),
+  sandboxMode: z.literal("daytona"),
 });
 
 export type ToolContext = z.infer<typeof toolContextSchema>;
@@ -64,8 +62,8 @@ export const appTestActionSchema = z.object({
     .describe("Continue the script if this step fails."),
 });
 
-export function createToolsContext(sessionId: string, sandboxMode: SandboxMode) {
-  const context: ToolContext = { sessionId, sandboxMode };
+export function createToolsContext(sessionId: string) {
+  const context: ToolContext = { sessionId, sandboxMode: "daytona" };
 
   return {
     readFile: context,

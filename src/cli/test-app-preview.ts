@@ -170,13 +170,6 @@ async function main() {
     console.error(`Session not found: ${sessionId}`);
     process.exit(1);
   }
-  if (session.sandboxMode !== "daytona") {
-    console.error(
-      `Session ${sessionId} is sandboxMode=${session.sandboxMode}. App testing requires daytona.`,
-    );
-    process.exit(1);
-  }
-
   if (bootstrap) {
     console.log("Bootstrapping Daytona preview…");
     startDaytonaPreview(sessionId);

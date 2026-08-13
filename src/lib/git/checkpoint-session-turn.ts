@@ -8,21 +8,15 @@ import type { GitTurnOutcome } from "@/lib/git/types";
 /**
  * Shared Web/CLI entry: enqueue turn checkpoint and kick durable worker.
  * Does not wait for commit/push — chat unlocks immediately.
- * Local sandbox mode is a no-op (workspace stays on disk only).
  */
 export async function checkpointSessionTurn(input: {
   sessionId: string;
-  sandboxMode: "local" | "daytona";
   messages: UIMessage[];
   outcome: GitTurnOutcome;
   runId?: string | null;
   userId?: string | null;
   sessionTitle?: string;
 }): Promise<{ ran: boolean; runId?: string; workflowRunId?: string | null }> {
-  if (input.sandboxMode !== "daytona") {
-    return { ran: false };
-  }
-
   const { getSession } = await import("@/lib/session/store");
   const session = await getSession(input.sessionId);
   if (!session) {

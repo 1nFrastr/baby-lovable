@@ -1,71 +1,50 @@
 # 本地开发指南
 
-支持无 DB、本地沙盒模拟，以及接 Supabase / Daytona 的云端配置。
-
-## 原则
-
-| 原则 | 要点 |
-| --- | --- |
-| **可观测性驱动** | CLI Agent 不依赖 Web UI；本地沙盒不依赖远程 Daytona；文件持久化可不依赖 DB |
-| **开发体验优先** | 本地模拟或 Daytona；本地文件免登录，或接 Supabase Auth |
-| **All-in-one** | 仓库内即可启动与 Debug，方便 Agent / 人工端到端自回归 |
+本地 Host 与线上使用同一条执行链路：Daytona 运行工作区，Freestyle `main` 持久化源码。仓库不提供本机沙箱或本机 Preview 模拟。
 
 ## 快速开始
 
 ```bash
-# 依赖
-pnpm install   # 或 npm install
+pnpm install
+cp .env.example .env.local
 
-# 配置环境变量（按仓库内示例复制并填写）
-# AI_GATEWAY_API_KEY 或 VERCEL_OIDC_TOKEN
-# 可选：Supabase / Daytona / Cloudflare Browser 相关变量
+# 必填：
+# AI_GATEWAY_API_KEY（或 VERCEL_OIDC_TOKEN）
+# DAYTONA_API_KEY
+# FREESTYLE_API_KEY
 
-# Host 应用
 npm run dev
 ```
 
-默认会话数据目录：`.baby-lovable/`（可用 `BABY_LOVABLE_DATA_DIR` 覆盖）。
+Supabase 仍是可选项。未配置 Supabase 时，会话、运行态投影和 Freestyle 仓库绑定记录写入 `.baby-lovable/`；这只是元数据存储差异，Agent 工作区始终在 Daytona。
 
 ## CLI（推荐用于验证）
 
-与 Web 同一套 builder agent、工具和 system prompt：
+CLI 与 Web 使用相同的 Builder Agent、Daytona 调和器和 Freestyle checkpoint：
 
 ```bash
-npm run agent -- -h                          # help
-npm run agent -- -l                          # list sessions
-npm run agent -- -p "创建一个待办事项应用"    # one-shot
-npm run agent -- -s sess_abc123 -p "加渐变色" # resume + one-shot
-npm run agent                                # interactive REPL
+npm run agent -- -h
+npm run agent -- -l
+npm run agent -- -p "创建一个待办事项应用"
+npm run agent -- -s sess_abc123 -p "加渐变色"
+npm run agent
 ```
 
-常用 flag：`-p` 单轮退出、`-s` 复用会话、`--sandbox local|daytona`、`--max-steps`。
+常用 flag：`-p` 单轮退出、`-s` 复用会话、`--max-steps`。沙箱不可选择；传入旧的 `--sandbox` 会直接报错。
 
-## 本地 vs 云端
+## 本地与线上差异
 
-| 能力 | 本地 | 云端 |
+| 能力 | 本地 Host | 线上 Host |
 | --- | --- | --- |
-| 会话存储 | 文件（`.baby-lovable/`） | Supabase Postgres |
-| 鉴权 | 可免登录 | Supabase Auth + RLS |
-| 沙盒 | 本地 workspace + 本机 preview | Daytona Sandbox |
-| 运行态推送 | Host SSE | Supabase Realtime |
+| 会话元数据 | 文件或 Supabase | Supabase |
+| 鉴权 | 文件模式可免登录 | Supabase Auth + RLS |
+| Agent 工作区 | Daytona Sandbox | Daytona Sandbox |
+| 源码真相源 | Freestyle `main` | Freestyle `main` |
+| 运行态推送 | 文件模式 SSE 或 Realtime | Supabase Realtime |
 
-## 清理孤儿 Preview
+## 验证
 
-会话 preview 可能以 detached 进程残留。清理（不停 host `npm run dev`）：
-
-```bash
-npm run cleanup-previews
-npm run cleanup-previews -- --dry-run
-npm run cleanup-previews -- --keep sess_abc123
-```
-
-## 验证产物
-
-不依赖浏览器时，可读：
-
-- `.baby-lovable/sessions/<id>/session.json` — 消息与工具调用
-- `.baby-lovable/sessions/<id>/agent.log` — CLI 追踪
-- `.baby-lovable/sessions/<id>/workspace/` — 生成源码
-- 最后一次 `checkPreview` 是否 `ok: true`
-
-Host 代码变更后建议在仓库根目录跑 `npm run lint` 与 `npm run build`。
+- `session.json` / CLI trace 用于检查工具调用与最终回复。
+- `checkPreview` 的最后结果必须为 `ok: true`。
+- 源码与版本以 Freestyle `main` 为准；Daytona 工作树是运行时投影。
+- Host 代码变更后运行 `npm run lint`、`npm test` 与 `npm run build`。

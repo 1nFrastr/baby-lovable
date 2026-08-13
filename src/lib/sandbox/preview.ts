@@ -8,18 +8,15 @@
  * Write: kickRuntimeDesired (non-blocking prelude) / startPreview / startAppServer /
  *        restartAppServer / stopAppServer / deleteSandbox
  *
- * Mode (local | daytona) is chosen once via createPreviewBackend / getPreviewBackend.
- *
- * Warm model (Daytona):
+ * Warm model:
  *   session create / first connect → sandbox-ready, wait:false
  *   first turn / preview open     → preview-ready, wait:false
  *   AI loop never awaits warm; after() only keeps the isolate alive for reconcile.
  */
 
 import type { DaytonaDesiredState } from "./daytona/runtime-state";
-import { getSession } from "@/lib/session/store";
 import { createPreviewBackend, getPreviewBackend } from "./preview-backend";
-import { isTempFailure as isLocalTempFailure } from "./preview-errors";
+import { isTempFailure as isPreviewTempFailure } from "./preview-errors";
 import type {
   AllStatus,
   AppServerCheck,
@@ -71,16 +68,10 @@ export async function getAllStatus(sessionId: string): Promise<AllStatus> {
 }
 
 /**
- * Fast UI status: durable runtime snapshot only (Daytona).
- * Local falls back to live getAllStatus (cheap).
+ * Fast UI status: durable Daytona runtime snapshot only.
  * When not ready / URL stale, kicks background soft-observe for the next poll.
  */
 export async function peekAllStatus(sessionId: string): Promise<AllStatus> {
-  const session = await getSession(sessionId);
-  if ((session?.sandboxMode ?? "local") !== "daytona") {
-    return getAllStatus(sessionId);
-  }
-
   const { peekRuntimeAllStatus, refreshRuntimeInBackground } = await import(
     "./daytona/runtime-reconciler"
   );
@@ -110,13 +101,8 @@ export async function kickRuntimeDesired(
   sessionId: string,
   desired: RuntimeWarmDesired,
 ): Promise<AllStatus> {
-  const session = await getSession(sessionId);
-  if ((session?.sandboxMode ?? "local") === "daytona") {
-    const { ensureDesiredState } = await import("./daytona/runtime-reconciler");
-    await ensureDesiredState(sessionId, desired, { wait: false });
-  } else if (desired === "preview-ready") {
-    startPreview(sessionId);
-  }
+  const { ensureDesiredState } = await import("./daytona/runtime-reconciler");
+  await ensureDesiredState(sessionId, desired, { wait: false });
   return peekAllStatus(sessionId);
 }
 
@@ -128,13 +114,6 @@ export async function awaitRuntimeDesired(
   sessionId: string,
   desired: RuntimeWarmDesired,
 ): Promise<void> {
-  const session = await getSession(sessionId);
-  if (!session || session.sandboxMode !== "daytona") {
-    if (desired === "preview-ready") {
-      startPreview(sessionId);
-    }
-    return;
-  }
   const { ensureDesiredState } = await import("./daytona/runtime-reconciler");
   await ensureDesiredState(sessionId, desired, { wait: true });
 }
@@ -318,12 +297,8 @@ export async function deleteSandbox(sessionId: string): Promise<void> {
   await (await getPreviewBackend(sessionId)).deleteSandbox(sessionId);
 }
 
-export async function hasNodeModules(sessionId: string): Promise<boolean> {
-  return (await getPreviewBackend(sessionId)).hasNodeModules(sessionId);
-}
-
 export function isTempFailure(check: AppServerCheck): boolean {
-  return isLocalTempFailure(check);
+  return isPreviewTempFailure(check);
 }
 
 export { createPreviewBackend, getPreviewBackend };

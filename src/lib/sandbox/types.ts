@@ -1,20 +1,29 @@
-export type SandboxMode = "local" | "daytona";
+export const SANDBOX_MODE = "daytona" as const;
+export type SandboxMode = typeof SANDBOX_MODE;
 
 /** Parse a sandbox mode string; returns null if invalid. */
 export function parseSandboxMode(value: unknown): SandboxMode | null {
-  if (value === "local" || value === "daytona") {
-    return value;
-  }
-  return null;
+  return value === SANDBOX_MODE ? SANDBOX_MODE : null;
 }
 
 /**
- * Default sandbox for new sessions — from `BABY_LOVABLE_SANDBOX_MODE`.
- * Values: `local` (default) | `daytona`. Not selectable in the web UI.
+ * The only supported sandbox for every environment.
  */
 export function getDefaultSandboxMode(): SandboxMode {
-  const raw = process.env.BABY_LOVABLE_SANDBOX_MODE?.trim().toLowerCase();
-  return parseSandboxMode(raw) ?? "local";
+  return SANDBOX_MODE;
+}
+
+export function assertSandboxMode(
+  value: unknown,
+  sessionId?: string,
+): asserts value is SandboxMode {
+  if (parseSandboxMode(value)) {
+    return;
+  }
+  const suffix = sessionId ? ` for session ${sessionId}` : "";
+  throw new Error(
+    `Unsupported sandbox mode${suffix}: ${String(value)}. Only Daytona + Freestyle sessions are supported.`,
+  );
 }
 
 export interface FileInfo {
@@ -59,13 +68,6 @@ export interface ProjectSandbox {
   readonly rootDir: string;
   fs: SandboxFileSystem;
   process: SandboxProcessRunner;
-  /** Present on Daytona sandboxes only — Freestyle sync uses SDK git, never shell. */
-  git?: import("./daytona/git-runner").DaytonaGitRunner;
-}
-
-export class NotImplementedError extends Error {
-  constructor(feature: string) {
-    super(`${feature} is not implemented yet.`);
-    this.name = "NotImplementedError";
-  }
+  /** Freestyle sync uses Daytona SDK git, never shell git. */
+  git: import("./daytona/git-runner").DaytonaGitRunner;
 }

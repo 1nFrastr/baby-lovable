@@ -178,9 +178,9 @@ Agent / Preview API
 ## 本地开发
 
 - 支持本地文件存储，方便无 DB 启动
-- 支持本地沙盒模拟，不强依赖 Daytona
+- 本地与线上统一使用 Daytona Sandbox + Freestyle `main`
 - 支持 Supabase Auth / Realtime 接入
-- 支持 All-in-one 本地调试与 CLI 端到端验证
+- 支持 CLI 端到端验证，不维护本机沙箱模拟分支
 
 详见：[本地开发指南](./docs/local-development.md)
 

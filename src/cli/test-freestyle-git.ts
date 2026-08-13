@@ -43,12 +43,9 @@ async function main() {
   }
   assertFreestyleForDaytona();
 
-  process.env.BABY_LOVABLE_SANDBOX_MODE = "daytona";
-
   log("START", "create Daytona session …");
   const session = await createSession({
     title: "Freestyle Git smoke",
-    sandboxMode: "daytona",
   });
   log("SESSION", session.id);
 

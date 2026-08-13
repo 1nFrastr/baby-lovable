@@ -13,15 +13,6 @@ import {
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
 
-function assertDaytonaSession(sandboxMode: string | undefined): void {
-  if (sandboxMode !== "daytona") {
-    throw new GithubSyncError(
-      "GitHub Sync is only available for Daytona sessions",
-      400,
-    );
-  }
-}
-
 function githubSyncErrorResponse(error: GithubSyncError) {
   return NextResponse.json(
     { error: error.message },
@@ -55,7 +46,6 @@ export async function GET(
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    assertDaytonaSession(session.sandboxMode);
 
     const url = new URL(request.url);
     const reconcile = url.searchParams.get("reconcile") === "1";
@@ -102,7 +92,6 @@ export async function POST(
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    assertDaytonaSession(session.sandboxMode);
 
     const body = (await request.json().catch(() => null)) as {
       repositoryId?: unknown;
@@ -168,7 +157,6 @@ export async function DELETE(
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    assertDaytonaSession(session.sandboxMode);
 
     const repo = await unlinkGithubRepo(sessionId, auth.userId);
     return NextResponse.json(

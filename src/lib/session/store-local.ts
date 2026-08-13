@@ -3,12 +3,14 @@ import path from "node:path";
 
 import type { UIMessage } from "ai";
 
-import { ensureWorkspace } from "@/lib/sandbox/local/sandbox";
 import {
   getSessionsRoot,
   resolveSessionRoot,
 } from "@/lib/sandbox/paths";
-import { getDefaultSandboxMode } from "@/lib/sandbox/types";
+import {
+  assertSandboxMode,
+  getDefaultSandboxMode,
+} from "@/lib/sandbox/types";
 
 import {
   assertSessionOwner,
@@ -38,10 +40,19 @@ function getSessionFilePath(
 async function readSessionFile(
   sessionId: string,
   userId: string | null = null,
+  skipUnsupported = false,
 ): Promise<Session | null> {
   try {
     const raw = await fs.readFile(getSessionFilePath(sessionId, userId), "utf8");
-    return JSON.parse(raw) as Session;
+    const session = JSON.parse(raw) as Session;
+    if (skipUnsupported && session.sandboxMode !== "daytona") {
+      console.warn(
+        `[sessions] skipping unsupported legacy sandbox session ${sessionId} mode=${String(session.sandboxMode)}`,
+      );
+      return null;
+    }
+    assertSandboxMode(session.sandboxMode, sessionId);
+    return session;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
@@ -53,9 +64,6 @@ async function readSessionFile(
 async function writeSessionFile(session: Session): Promise<void> {
   const sessionRoot = resolveSessionRoot(session.id, session.userId);
   await fs.mkdir(sessionRoot, { recursive: true });
-  if (session.sandboxMode === "local") {
-    await ensureWorkspace(session.id, session.userId);
-  }
   await fs.writeFile(
     getSessionFilePath(session.id, session.userId),
     JSON.stringify(session, null, 2),
@@ -111,13 +119,9 @@ export async function createSessionLocal(
     updatedAt: now,
     messages: [],
     runStatus: "idle",
-    sandboxMode: input.sandboxMode ?? getDefaultSandboxMode(),
+    sandboxMode: getDefaultSandboxMode(),
     deletedAt: null,
   };
-
-  if (session.sandboxMode === "local") {
-    await ensureWorkspace(session.id, session.userId);
-  }
 
   await writeSessionFile(session);
   return session;
@@ -146,7 +150,7 @@ export async function listSessionsLocal(
     const sessions = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
-        .map((entry) => readSessionFile(entry.name, auth.userId)),
+        .map((entry) => readSessionFile(entry.name, auth.userId, true)),
     );
 
     return filterByAuth(

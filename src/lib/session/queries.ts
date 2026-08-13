@@ -8,12 +8,10 @@ import {
 import { useEffect } from "react";
 
 import type { SessionDraft } from "@/lib/session/draft-store";
-import type { SandboxMode } from "@/lib/sandbox/types";
 import type { Session, SessionSummary } from "@/lib/session/types";
 
 export type SessionsFeatures = {
   daytona: boolean;
-  sandboxMode: SandboxMode;
 };
 
 export const sessionKeys = {
@@ -70,14 +68,12 @@ async function fetchSessions(): Promise<SessionsListData> {
 
   const data = (await response.json()) as {
     sessions: SessionSummary[];
-    features?: { daytona?: boolean; sandboxMode?: SandboxMode };
+    features?: { daytona?: boolean };
   };
   return {
     sessions: data.sessions,
     features: {
       daytona: Boolean(data.features?.daytona),
-      sandboxMode:
-        data.features?.sandboxMode === "daytona" ? "daytona" : "local",
     },
   };
 }
@@ -161,8 +157,7 @@ export function useCreateSessionMutation() {
           return {
             sessions: [sessionToSummary(session)],
             features: {
-              daytona: session.sandboxMode === "daytona",
-              sandboxMode: session.sandboxMode,
+              daytona: true,
             },
           };
         }

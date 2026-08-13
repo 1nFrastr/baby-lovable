@@ -171,10 +171,6 @@ async function probeSession(sessionId: string, followMs: number) {
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
   }
-  if (session.sandboxMode !== "daytona") {
-    throw new Error(`Session ${sessionId} is not daytona (mode=${session.sandboxMode})`);
-  }
-
   const snap = await getRuntimeSnapshot(sessionId, session.userId, {
     fresh: true,
   });

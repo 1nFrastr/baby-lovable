@@ -5,13 +5,12 @@ export function isFreestyleConfigured(): boolean {
 }
 
 /**
- * Freestyle is required when Daytona is the sandbox mode.
- * Local sandbox keeps on-disk workspace only (test doubles for Git).
+ * Freestyle is the durable source of truth for every Daytona workspace.
  */
 export function assertFreestyleForDaytona(): void {
   if (!isFreestyleConfigured()) {
     throw new Error(
-      "BABY_LOVABLE_SANDBOX_MODE=daytona requires FREESTYLE_API_KEY. Freestyle Git is the durable source of truth for Daytona sessions.",
+      "FREESTYLE_API_KEY is required. Freestyle Git is the durable source of truth for Daytona sessions.",
     );
   }
 }

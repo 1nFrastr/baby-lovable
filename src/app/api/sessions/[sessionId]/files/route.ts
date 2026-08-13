@@ -43,11 +43,7 @@ export async function GET(
       return NextResponse.json({ error: blocked }, { status: 403 });
     }
 
-    const sandbox = await getProjectSandbox(
-      sessionId,
-      session.sandboxMode,
-      auth.userId,
-    );
+    const sandbox = await getProjectSandbox(sessionId);
     const result = await buildExplorerTree(sandbox.fs);
 
     return NextResponse.json(result, {

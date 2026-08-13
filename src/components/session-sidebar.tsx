@@ -107,15 +107,6 @@ export function SessionSidebar({
                         <span className="ml-2 inline-block h-2 w-2 rounded-full bg-blue-500 align-middle" />
                       ) : null}
                     </p>
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
-                        session.sandboxMode === "daytona"
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                      }`}
-                    >
-                      {session.sandboxMode === "daytona" ? "daytona" : "local"}
-                    </span>
                   </div>
                   <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
                     {session.id}

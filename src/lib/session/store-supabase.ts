@@ -1,6 +1,5 @@
 import type { UIMessage } from "ai";
 
-import { ensureWorkspace } from "@/lib/sandbox/local/sandbox";
 import { getDevUserId } from "@/lib/supabase/config";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -16,8 +15,10 @@ import type {
   UpdateSessionInput,
 } from "./types";
 import { SESSION_SCHEMA_VERSION } from "./types";
-import type { SandboxMode } from "@/lib/sandbox/types";
-import { getDefaultSandboxMode } from "@/lib/sandbox/types";
+import {
+  assertSandboxMode,
+  getDefaultSandboxMode,
+} from "@/lib/sandbox/types";
 
 function createSessionId(): string {
   const timestamp = Date.now().toString(36);
@@ -35,11 +36,12 @@ interface SessionRow {
   messages: UIMessage[];
   last_run_id: string | null;
   run_status: SessionRunStatus;
-  sandbox_mode: SandboxMode;
+  sandbox_mode: unknown;
   deleted_at: string | null;
 }
 
 function rowToSession(row: SessionRow): Session {
+  assertSandboxMode(row.sandbox_mode, row.id);
   const session: Session = {
     schemaVersion: row.schema_version,
     id: row.id,
@@ -119,7 +121,7 @@ export async function createSessionSupabase(
     updatedAt: now,
     messages: [],
     runStatus: "idle",
-    sandboxMode: input.sandboxMode ?? getDefaultSandboxMode(),
+    sandboxMode: getDefaultSandboxMode(),
     deletedAt: null,
   };
 
@@ -130,10 +132,6 @@ export async function createSessionSupabase(
 
   if (error) {
     throw new Error(`Failed to create session: ${error.message}`);
-  }
-
-  if (session.sandboxMode === "local") {
-    await ensureWorkspace(session.id, userId);
   }
 
   return session;
@@ -174,6 +172,7 @@ export async function listSessionsSupabase(
     .from("sessions")
     .select("*")
     .eq("user_id", userId)
+    .eq("sandbox_mode", "daytona")
     .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 
@@ -223,9 +222,6 @@ export async function updateSessionSupabase(
   }
   if (input.runStatus !== undefined) {
     patch.run_status = updated.runStatus;
-  }
-  if (input.sandboxMode !== undefined) {
-    patch.sandbox_mode = updated.sandboxMode;
   }
   if (input.deletedAt !== undefined) {
     patch.deleted_at = updated.deletedAt ?? null;

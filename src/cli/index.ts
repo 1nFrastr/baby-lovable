@@ -1,5 +1,4 @@
 import { createInterface } from "node:readline/promises";
-import path from "node:path";
 
 import { config as loadEnv } from "dotenv";
 
@@ -18,11 +17,9 @@ import {
   listSessions,
   updateSession,
 } from "@/lib/session/store";
-import { getWorkspaceRoot } from "@/lib/sandbox/paths";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import type { Session } from "@/lib/session/types";
-import type { SandboxMode } from "@/lib/sandbox/types";
-import { getDefaultSandboxMode } from "@/lib/sandbox/types";
+import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 
 import { logger } from "./logger";
 import { runAgentTurn } from "./run-agent";
@@ -31,7 +28,6 @@ import { printResumeTestResult, runResumeStreamTest } from "./test-resume";
 interface CliArgs {
   prompt?: string;
   sessionId?: string;
-  sandboxMode: SandboxMode;
   maxSteps: number;
   list: boolean;
   help: boolean;
@@ -40,7 +36,6 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
-    sandboxMode: getDefaultSandboxMode(),
     maxSteps: 30,
     list: false,
     help: false,
@@ -60,8 +55,9 @@ function parseArgs(argv: string[]): CliArgs {
         args.sessionId = argv[++i];
         break;
       case "--sandbox":
-        args.sandboxMode = argv[++i] === "daytona" ? "daytona" : "local";
-        break;
+        throw new Error(
+          `--sandbox has been removed; Daytona + Freestyle is always used (received ${argv[++i] ?? "no mode"}).`,
+        );
       case "--max-steps":
         args.maxSteps = Number(argv[++i]) || 30;
         break;
@@ -99,7 +95,6 @@ function printHelp(): void {
       `Options:\n` +
       `  -p, --prompt <text>    Run a single prompt then exit (one-shot mode)\n` +
       `  -s, --session <id>     Reuse an existing session (keeps history + workspace)\n` +
-      `      --sandbox <mode>   Sandbox mode: local | daytona (default: BABY_LOVABLE_SANDBOX_MODE or local)\n` +
       `      --max-steps <n>    Max agent steps per turn (default: 30)\n` +
       `  -l, --list             List existing sessions and exit\n` +
       `  -h, --help             Show this help\n` +
@@ -135,11 +130,17 @@ function requireGatewayKey(): void {
   }
 }
 
-function requireDaytonaKey(sandboxMode: SandboxMode): void {
-  if (sandboxMode === "daytona" && !isDaytonaConfigured()) {
+function requireRemoteWorkspaceConfig(): void {
+  if (!isDaytonaConfigured()) {
     logger.error(
-      "Missing DAYTONA_API_KEY. Set it in .env.local for --sandbox daytona.",
+      "Missing DAYTONA_API_KEY. Set it in .env.local.",
     );
+    process.exit(1);
+  }
+  try {
+    assertFreestyleForDaytona();
+  } catch (error) {
+    logger.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 }
@@ -155,7 +156,7 @@ async function resolveSession(args: CliArgs): Promise<Session> {
     return existing;
   }
 
-  const session = await createSession({ sandboxMode: args.sandboxMode });
+  const session = await createSession();
   logger.info(`Created session ${session.id}`);
   return session;
 }
@@ -175,7 +176,6 @@ async function runTurn(
 
   const { assistantMessage } = await runAgentTurn({
     sessionId: session.id,
-    sandboxMode: session.sandboxMode,
     messages,
     maxSteps,
   });
@@ -196,19 +196,16 @@ async function runTurn(
 
   session.messages = mergedMessages;
 
-  if (session.sandboxMode === "daytona") {
-    const { checkpointSessionTurn } = await import(
-      "@/lib/git/checkpoint-session-turn"
-    );
-    await checkpointSessionTurn({
-      sessionId: session.id,
-      sandboxMode: session.sandboxMode,
-      messages: mergedMessages,
-      outcome: "completed",
-      userId: session.userId,
-      sessionTitle: session.title,
-    });
-  }
+  const { checkpointSessionTurn } = await import(
+    "@/lib/git/checkpoint-session-turn"
+  );
+  await checkpointSessionTurn({
+    sessionId: session.id,
+    messages: mergedMessages,
+    outcome: "completed",
+    userId: session.userId,
+    sessionTitle: session.title,
+  });
 
   return mergedMessages;
 }
@@ -267,24 +264,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!args.sessionId) {
-    requireDaytonaKey(args.sandboxMode);
-  }
-
+  requireRemoteWorkspaceConfig();
   const session = await resolveSession(args);
-  requireDaytonaKey(session.sandboxMode);
-
-  const workspace =
-    session.sandboxMode === "daytona"
-      ? "daytona:workspace"
-      : path.relative(process.cwd(), getWorkspaceRoot(session.id));
 
   logger.banner([
     `baby-lovable agent · CLI`,
     `session   : ${session.id}`,
     `sandbox   : ${session.sandboxMode}`,
     `model     : ${process.env.AI_MODEL ?? "minimax/minimax-m3"}`,
-    `workspace : ${workspace}`,
+    `workspace : daytona:workspace`,
   ]);
 
   if (args.prompt) {
@@ -304,33 +292,22 @@ async function main(): Promise<void> {
 /**
  * Tear down preview resources so the CLI can exit cleanly.
  *
- * Local mode stops the host `pnpm dev` child (otherwise the event loop hangs).
- * Daytona mode intentionally keeps the remote sandbox + dev server alive so the
- * preview URL remains reachable after one-shot runs.
+ * Keep the remote sandbox + dev server alive so the preview URL remains
+ * reachable after one-shot runs.
  */
 async function shutdownPreview(session: Session): Promise<void> {
-  if (session.sandboxMode === "daytona") {
-    try {
-      const { getDaytonaAppServerStatus } = await import(
-        "@/lib/sandbox/daytona/app-server"
-      );
-      const status = await getDaytonaAppServerStatus(session.id);
-      if (status.status === "ready" && status.url) {
-        logger.info(`Daytona sandbox kept — preview: ${status.url}`);
-      } else {
-        logger.info("Daytona sandbox kept (preview may still be starting)");
-      }
-    } catch {
-      logger.info("Daytona sandbox kept");
-    }
-    return;
-  }
-
   try {
-    const { stopAppServer } = await import("@/lib/sandbox/preview");
-    await stopAppServer(session.id);
+    const { getDaytonaAppServerStatus } = await import(
+      "@/lib/sandbox/daytona/app-server"
+    );
+    const status = await getDaytonaAppServerStatus(session.id);
+    if (status.status === "ready" && status.url) {
+      logger.info(`Daytona sandbox kept — preview: ${status.url}`);
+    } else {
+      logger.info("Daytona sandbox kept (preview may still be starting)");
+    }
   } catch {
-    // Best-effort: never block exit on teardown failures.
+    logger.info("Daytona sandbox kept");
   }
 }
 

@@ -27,7 +27,7 @@ export async function startDevSession(
 ): Promise<{ sessionName: string; port: number; cmdId: string | null }> {
   const sdk = sandbox.sdkSandbox;
   const port = getDaytonaDevPort();
-  const pm = resolvePackageManager("daytona");
+  const pm = resolvePackageManager();
   const sessionName = DEV_SESSION(sessionId);
 
   logDaytonaBootstrap(sessionId, "preview", `dev ${pm.dev(port)} on ${sdk.id}`);

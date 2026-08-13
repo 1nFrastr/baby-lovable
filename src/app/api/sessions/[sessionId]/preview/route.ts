@@ -5,7 +5,6 @@ import {
   awaitRuntimeDesired,
   deleteSandbox,
   getAllStatus,
-  hasNodeModules,
   kickRuntimeDesired,
   peekAllStatus,
   restartAppServer,
@@ -93,9 +92,7 @@ export async function POST(
     // Prelude: preview-ready (non-blocking). after() keeps isolate for reconcile.
     if (body.action === "warm") {
       const all = await kickRuntimeDesired(sessionId, "preview-ready");
-      if (session.sandboxMode === "daytona") {
-        after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
-      }
+      after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
       return NextResponse.json({
         sandbox: all.sandbox,
         appServer: all.appServer,
@@ -103,19 +100,6 @@ export async function POST(
         preview: all.appServer,
         sandboxMode: session.sandboxMode,
       });
-    }
-
-    if (session.sandboxMode === "local") {
-      const hasDeps = await hasNodeModules(sessionId);
-      if (!hasDeps) {
-        return NextResponse.json({
-          sandbox: "running" as const,
-          appServer: { status: "needs_install" as const },
-          previewUrl: { status: "none" as const },
-          preview: { status: "needs_install" as const },
-          sandboxMode: session.sandboxMode,
-        });
-      }
     }
 
     const appServer =

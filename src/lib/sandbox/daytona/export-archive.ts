@@ -3,7 +3,6 @@ import { getFreestyleAdapter } from "@/lib/git/freestyle-client";
 import { isFreestyleConfigured } from "@/lib/git/freestyle-config";
 import { readGitRepository } from "@/lib/git/repository-store";
 import { getSession } from "@/lib/session/store";
-import { NotImplementedError } from "../types";
 
 export type ExportArchiveSource = "freestyle-zip";
 
@@ -72,7 +71,6 @@ async function exportFreestyleArchive(
 
 /**
  * Export the session workspace as a Freestyle source zip.
- * Local: not implemented yet — interface reserved.
  */
 export async function exportWorkspaceArchive(
   sessionId: string,
@@ -81,10 +79,6 @@ export async function exportWorkspaceArchive(
   const session = await getSession(sessionId);
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
-  }
-
-  if (session.sandboxMode === "local") {
-    throw new NotImplementedError("Local workspace archive export");
   }
 
   return exportFreestyleArchive(

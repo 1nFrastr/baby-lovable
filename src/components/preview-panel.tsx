@@ -14,7 +14,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
-import type { SandboxMode } from "@/lib/sandbox/types";
 import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
@@ -43,7 +42,6 @@ interface AppTestLatestStatus {
 
 interface PreviewPanelProps {
   sessionId: string;
-  sandboxMode?: SandboxMode;
   /** From AppShell useSessionRuntime — sole page-level runtime subscription. */
   runtimeProjection?: SessionRuntimeProjection | null;
   runtimeLoading?: boolean;
@@ -181,7 +179,6 @@ function appTestFromProjection(
 
 export function PreviewPanel({
   sessionId,
-  sandboxMode = "local",
   runtimeProjection = null,
   runtimeLoading = false,
   runtimeError = null,
@@ -229,7 +226,7 @@ export function PreviewPanel({
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
-  const showSourceControl = sandboxMode === "daytona";
+  const showSourceControl = true;
   const prevAgentRunStatusRef = useRef<
     SessionRuntimeProjection["run"]["status"] | null
   >(null);
@@ -610,7 +607,6 @@ export function PreviewPanel({
 
   const appTestBusy = appTest.status === "running";
   const showPip =
-    sandboxMode === "daytona" &&
     Boolean(appTest.liveViewUrl) &&
     pipOpen &&
     (appTest.status === "running" || pipHoldActive) &&
@@ -638,10 +634,7 @@ export function PreviewPanel({
         : preview.status === "starting"
           ? {
               title: "正在启动开发服务器",
-              detail:
-                sandboxMode === "daytona"
-                  ? "远程环境已准备好，正在等待应用响应。"
-                  : "项目已准备好，正在等待应用响应。",
+              detail: "远程环境已准备好，正在等待应用响应。",
             }
           : preview.status === "ready" && !iframeLoaded
             ? {
@@ -650,10 +643,7 @@ export function PreviewPanel({
               }
             : {
                 title: "正在准备预览环境",
-                detail:
-                  sandboxMode === "daytona"
-                    ? "正在唤醒远程工作区…"
-                    : "正在初始化项目工作区…",
+                detail: "正在唤醒远程工作区…",
               };
   const toolbarStatus =
     preview.status === "ready" && iframeLoaded
@@ -732,14 +722,8 @@ export function PreviewPanel({
                 </button>
               ) : null}
             </div>
-            <span
-              className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
-                sandboxMode === "daytona"
-                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-              }`}
-            >
-              {sandboxMode}
+            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+              daytona
             </span>
             <SourceControlStatusChip
               sourceControl={sourceControl}
@@ -797,12 +781,8 @@ export function PreviewPanel({
                 onClick={() => {
                   void handleExport();
                 }}
-                disabled={exporting || sandboxMode === "local"}
-                title={
-                  sandboxMode === "local"
-                    ? "Local export is not implemented yet"
-                    : "Download Freestyle source zip (synced revision; no .git history)"
-                }
+                disabled={exporting}
+                title="Download Freestyle source zip (synced revision; no .git history)"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 {exporting ? (
@@ -1085,8 +1065,7 @@ export function PreviewPanel({
             </div>
           ) : null}
 
-          {sandboxMode === "daytona" &&
-          appTest.status === "running" &&
+          {appTest.status === "running" &&
           appTest.liveViewUrl &&
           pipDismissed ? (
             <a
@@ -1102,7 +1081,7 @@ export function PreviewPanel({
         </div>
       </div>
 
-      {sandboxMode === "daytona" && panelTab === "preview" ? (
+      {panelTab === "preview" ? (
         <DevServerLogsPanel
           sessionId={sessionId}
           generation={previewGeneration}

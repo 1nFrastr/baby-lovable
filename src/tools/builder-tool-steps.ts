@@ -1,4 +1,3 @@
-import type { SandboxMode } from "@/lib/sandbox/types";
 import {
   buildAllowedShellCommand,
   validateRunCommand,
@@ -24,24 +23,21 @@ function pathGuard(
 
 export const toolContextSchema = {
   sessionId: "string",
-  sandboxMode: "local | daytona",
+  sandboxMode: "daytona",
 } as const;
 
 export type ToolContext = {
   sessionId: string;
-  sandboxMode: SandboxMode;
+  sandboxMode: "daytona";
 };
 
 async function getSandboxFromContext(context: ToolContext) {
   const { getProjectSandbox } = await import("@/lib/sandbox/factory");
-  return getProjectSandbox(context.sessionId, context.sandboxMode);
+  return getProjectSandbox(context.sessionId);
 }
 
-/** Daytona only — wait for prior Freestyle checkpoint / provision before writes. */
+/** Wait for prior Freestyle checkpoint / provision before writes. */
 async function awaitMutationGate(context: ToolContext) {
-  if (context.sandboxMode !== "daytona") {
-    return;
-  }
   const { awaitPreviousCheckpoint } = await import(
     "@/lib/git/await-checkpoint"
   );
@@ -308,20 +304,16 @@ export async function installPackageStep(
   "use step";
 
   const allowed = input.remove
-    ? buildAllowedShellCommand(
-        { kind: "pkg-remove", packages: input.packages },
-        context.sandboxMode,
-      )
+    ? buildAllowedShellCommand({ kind: "pkg-remove", packages: input.packages })
     : buildAllowedShellCommand(
         {
           kind: "pkg-add",
           packages: input.packages,
           dev: input.dev ?? false,
         },
-        context.sandboxMode,
       );
 
-  const validation = validateRunCommand(allowed, context.sandboxMode);
+  const validation = validateRunCommand(allowed);
   if (!validation.ok) {
     return {
       ok: false,
@@ -342,10 +334,8 @@ export async function installDependenciesStep(
 ) {
   "use step";
 
-  const pm = (await import("@/lib/sandbox/package-manager")).resolvePackageManager(
-    context.sandboxMode,
-  );
-  const validation = validateRunCommand(pm.install, context.sandboxMode);
+  const pm = (await import("@/lib/sandbox/package-manager")).resolvePackageManager();
+  const validation = validateRunCommand(pm.install);
   if (!validation.ok) {
     return {
       ok: false,
@@ -370,7 +360,7 @@ export async function runCommandStep(
 ) {
   "use step";
 
-  const validation = validateRunCommand(input.command, context.sandboxMode);
+  const validation = validateRunCommand(input.command);
   if (!validation.ok) {
     return {
       ok: false,
