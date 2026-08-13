@@ -21,7 +21,6 @@ import {
   isLiveChatTurn,
   type SessionRunStatus,
 } from "@/lib/session/types";
-import type { SandboxMode } from "@/lib/sandbox/types";
 
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
 
@@ -30,12 +29,11 @@ const APP_TEST_USER_PROMPT = "Please run a quick happy-path UI test of the main 
 
 interface ChatProps {
   sessionId: string;
-  /** Completed messages from session.json (persistent layer). */
+  /** Completed messages from the Supabase session row. */
   messages: UIMessage[];
-  /** In-flight assistant from draft.json (cache layer); null when idle. */
+  /** In-flight assistant from the Supabase draft row; null when idle. */
   draft: UIMessage | null;
   runStatus?: SessionRunStatus;
-  sandboxMode?: SandboxMode;
   onSessionRefresh?: () => void;
   /** Live View URL / running state from streamed testPreview tool output. */
   onAppTestStatus?: (
@@ -48,7 +46,6 @@ export function Chat({
   messages,
   draft,
   runStatus = "idle",
-  sandboxMode = "local",
   onSessionRefresh,
   onAppTestStatus,
 }: ChatProps) {
@@ -209,7 +206,6 @@ export function Chat({
 
   // After the first completed turn only; hide while a turn is in flight.
   const showAppTestButton =
-    sandboxMode === "daytona" &&
     !isLiveTurn &&
     displayMessages.some((message) => message.role === "assistant");
 

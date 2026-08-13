@@ -2,7 +2,7 @@ import type { UIMessage } from "ai";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-import type { SessionDraft } from "./draft-store-local";
+import type { SessionDraft } from "./draft-types";
 
 interface DraftRow {
   session_id: string;

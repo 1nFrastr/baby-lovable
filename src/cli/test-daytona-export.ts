@@ -97,11 +97,6 @@ async function resolveSession(opts: CliOpts) {
     if (!existing) {
       throw new Error(`Session not found: ${opts.sessionId}`);
     }
-    if (existing.sandboxMode !== "daytona") {
-      throw new Error(
-        `Session ${opts.sessionId} is sandboxMode=${existing.sandboxMode}, need daytona`,
-      );
-    }
     console.log(`Reusing session=${existing.id}`);
     return existing;
   }
@@ -109,7 +104,6 @@ async function resolveSession(opts: CliOpts) {
   console.log("Creating daytona session …");
   const session = await createSession({
     title: "export-cli-test",
-    sandboxMode: "daytona",
   });
   console.log(`session=${session.id}`);
   return session;

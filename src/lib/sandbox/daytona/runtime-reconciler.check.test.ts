@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { makeSession, withTempDataDir } from "./__tests__/test-helpers";
+import { makeSession, withMemoryRuntime } from "./__tests__/test-helpers";
 
 const {
   ctx,
@@ -33,6 +33,10 @@ vi.mock("@/lib/session/store", () => ({
     id === ctx.sessionId ? makeSession(id) : null,
   ),
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
+}));
+
+vi.mock("@/lib/session/runtime-projection-store", () => ({
+  publishRuntimeUpdate: vi.fn(),
 }));
 
 vi.mock("./vm", () => ({
@@ -92,7 +96,7 @@ describe("checkRuntimePreview", () => {
   });
 
   it("fast path: HTTP-only — no reconnect, no observe, no readDevLog", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       await withFreshIsolate(sessionId, () =>
@@ -123,7 +127,7 @@ describe("checkRuntimePreview", () => {
   });
 
   it("fast path: HTTP 502 is starting, not ready", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       httpStatus.mockResolvedValue(502);
 
@@ -152,7 +156,7 @@ describe("checkRuntimePreview", () => {
   });
 
   it("full path when not ready: observe once; 5xx is starting", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       await withFreshIsolate(sessionId, () =>
@@ -187,7 +191,7 @@ describe("checkRuntimePreview", () => {
   });
 
   it("full path when not ready: observe once, ready on HTTP 200", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       await withFreshIsolate(sessionId, () =>
@@ -225,7 +229,7 @@ describe("checkRuntimePreview", () => {
   });
 
   it("falls back to full observe when embed is not fresh", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       await withFreshIsolate(sessionId, () =>

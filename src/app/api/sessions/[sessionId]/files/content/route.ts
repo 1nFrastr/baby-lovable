@@ -69,11 +69,7 @@ export async function GET(
       );
     }
 
-    const sandbox = await getProjectSandbox(
-      sessionId,
-      session.sandboxMode,
-      auth.userId,
-    );
+    const sandbox = await getProjectSandbox(sessionId);
 
     let details;
     try {

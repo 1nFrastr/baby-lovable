@@ -5,10 +5,7 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import {
-  ensureRuntimeProjection,
-  getRuntimeTransport,
-} from "@/lib/session/runtime-projection-store";
+import { ensureRuntimeProjection } from "@/lib/session/runtime-projection-store";
 import { getSession } from "@/lib/session/store";
 
 async function resolveAuth(request: Request) {
@@ -44,10 +41,7 @@ export async function GET(
       session.userId,
     );
 
-    return NextResponse.json({
-      projection,
-      transport: getRuntimeTransport(),
-    });
+    return NextResponse.json({ projection });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

@@ -13,13 +13,13 @@ This repo has two layers:
 | Layer | Path | Role |
 | --- | --- | --- |
 | **Host app** | `src/` | Next.js UI, API routes, CLI, WorkflowAgent, sandbox/dev-server management |
-| **Generated apps** | `.baby-lovable/sessions/<id>/workspace/` | Per-session Next.js projects scaffolded from `templates/nextjs-starter` |
+| **Generated apps** | Daytona workspace + Freestyle `main` | Per-session Next.js projects scaffolded from `templates/nextjs-starter` |
 
 Stack: Vercel AI SDK v7 + WorkflowAgent + Workflow DevKit — `ai@7`, `@ai-sdk/workflow@1`, `workflow@4`, `@ai-sdk/react@4`, Next.js 16 with `withWorkflow()`.
 
 **Before writing agent/workflow code**, read `.cursor/skills/ai-sdk-v7-workflow-agent/SKILL.md`.
 
-## `.baby-lovable/` — runtime data (gitignored)
+## `.baby-lovable/` — local debug artifacts (gitignored)
 
 Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 
@@ -27,18 +27,13 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 .baby-lovable/
 └── sessions/
     └── sess_<id>/
-        ├── session.json      # title, timestamps, sandboxMode, full UIMessage history
         ├── agent.log         # CLI per-turn trace file (optional; Web uses stdout)
-        └── workspace/        # the generated Next.js app (agent's sandbox)
-            ├── src/app/…
-            ├── package.json
-            └── .next/        # dev build output after preview boot
+        └── app-tests/        # optional screenshots and reports
 ```
 
-- **`session.json`** — durable chat + tool-call history. Inspect it to see exactly what the agent did (tool inputs/outputs, errors, token of conversation).
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
-- **`workspace/`** — the app under construction. Read/edit files here to verify codegen, run commands, or debug compile issues.
-- **Daytona + Freestyle** — for `sandboxMode=daytona`, Freestyle `main` is the durable source of truth; the sandbox working tree is a projection. See `docs/freestyle-git.md`. Local mode keeps on-disk workspace only.
+- **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks).
+- **Daytona + Freestyle** — Freestyle `main` is the durable source of truth; the Daytona working tree is a projection. There is no local sandbox mode. See `docs/freestyle-git.md`.
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
 ## CLI — headless agent runner (preferred for AI verification)
@@ -46,7 +41,8 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 The CLI runs the **same** builder agent, tools, and system prompt as the web app, but streams a structured trace to the terminal. Use it for end-to-end validation without opening the browser.
 
 ```bash
-# Prerequisites: copy .env.example → .env.local, set AI_GATEWAY_API_KEY (or VERCEL_OIDC_TOKEN)
+# Prerequisites: copy .env.example → .env.local; configure Supabase (including
+# BABY_LOVABLE_DEV_USER_ID), AI Gateway, Daytona, and Freestyle credentials
 
 npm run agent -- -h                          # help
 npm run agent -- -l                          # list sessions
@@ -62,16 +58,15 @@ npm run agent -- -s sess_abc123              # interactive REPL on existing sess
 | --- | --- |
 | `-p, --prompt <text>` | Single turn then exit (**one-shot mode**) |
 | `-s, --session <id>` | Reuse existing session (history + workspace) |
-| `--sandbox <mode>` | `local` (default) or `daytona` |
 | `--max-steps <n>` | Max agent steps per turn (default 30) |
 | `-l, --list` | List sessions |
 | `-h, --help` | Show help |
 
 ### Run modes
 
-1. **One-shot** (`-p`) — Best for automated / AI-driven testing. Creates or resumes a session, runs one agent turn, saves state, tears down the background dev server, and exits cleanly.
+1. **One-shot** (`-p`) — Best for automated / AI-driven testing. Creates or resumes a session, runs one agent turn, saves state, and exits while keeping the remote preview available.
 2. **Interactive REPL** (no `-p`) — Multi-turn chat in the terminal. Commands: `/exit`, `/quit`.
-3. **Session resume** (`-s`) — Continue prior work; workspace files and `session.json` messages are preserved.
+3. **Session resume** (`-s`) — Continue prior work; Supabase messages and the Freestyle workspace are preserved.
 
 ### CLI observability
 
@@ -84,8 +79,8 @@ The CLI logger (`src/cli/logger.ts`) prints timestamped, colorized events:
 
 On each turn the runner also:
 
-- Bootstraps preview in the background (`pnpm install` + `pnpm dev` in the session workspace)
-- Saves merged messages back to `session.json`
+- Reconciles the Daytona preview in the background and hydrates source from Freestyle
+- Saves merged messages to Supabase
 
 ## Web UI — optional visual check
 
@@ -124,21 +119,7 @@ Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 3. If `compileError` is non-null, or `checkPreview` reports `httpStatus` >= 500, fix source code and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
 4. Optionally `curl` the preview URL or read workspace source files to assert behavior.
 
-Preview lifecycle is owned by `src/lib/sandbox/local/app-server.ts` / `daytona/app-server.ts` — agents must **not** run `pnpm dev` themselves.
-
-### Orphan preview servers (CPU / heat)
-
-Each session boots its own `pnpm dev` → `next dev` → `next-server` under `.baby-lovable/sessions/<id>/workspace/`. Processes are spawned **detached** so they can survive host restarts; if the host app's in-memory tracker is lost, old previews become **orphans** and keep consuming CPU (multiple instances stack linearly). Some orphans lose their session path in `ps` output (PPID=1); the cleanup script also matches by process **cwd**.
-
-**Clean up orphans** (does not stop the host `npm run dev`):
-
-```bash
-npm run cleanup-previews              # kill all session preview dev servers
-npm run cleanup-previews -- --dry-run # list what would be killed
-npm run cleanup-previews -- --keep sess_abc123  # keep one active session
-```
-
-Run this when the machine heats up, after long agent runs, or before starting fresh testing. CLI one-shot (`-p`) tears down its session preview on exit; Web UI sessions do not auto-stop until cleanup or explicit `DELETE /api/sessions/<id>/preview`.
+Preview lifecycle is owned by `src/lib/sandbox/daytona/app-server.ts`; agents must **not** run `pnpm dev` themselves.
 
 ## AI agent playbook — full-chain test without manual UI
 
@@ -147,11 +128,11 @@ When implementing or validating changes to the builder itself:
 1. **Run via CLI one-shot** so output is fully logged and the process exits:
    `npm run agent -- -p "<representative user prompt>"`
 2. **Read artifacts on disk** (no browser needed):
-   - `.baby-lovable/sessions/<id>/session.json` — tool calls, errors, assistant reply
+   - Supabase `sessions` row — durable messages and run state
    - `.baby-lovable/sessions/<id>/agent.log` — CLI step/tool trace (or grep `[agent-trace]` from Web dev stdout)
-   - `.baby-lovable/sessions/<id>/workspace/src/**` — generated source
-   - `.baby-lovable/sessions/<id>/workspace/.next/dev/logs/next-development.log` — compile details
-3. **Assert preview health** — last `checkPreview` tool output in `session.json` should have `ok: true` (and preferably `httpStatus` < 500); or call `GET /api/sessions/<id>/preview` while the host app is running.
+   - Freestyle `main` / Files API — generated source
+   - Preview logs API or `npm run probe:preview-logs -- --session <id>` — compile details
+3. **Assert preview health** — the last `checkPreview` tool output in the CLI trace should have `ok: true` (and preferably `httpStatus` < 500); or call `GET /api/sessions/<id>/preview` while the host app is running.
 4. **Re-run on same session** (`-s <id> -p "…"`) to test iterative edits and regression fixes.
 5. **List sessions** (`npm run agent -- -l`) to correlate IDs with titles and timestamps.
 
@@ -164,9 +145,8 @@ For host-app code changes (not generated apps), also run `npm run lint` and `npm
 | `src/cli/` | CLI entry (`index.ts`), turn runner (`run-agent.ts`), logger |
 | `src/workflow/builder-agent.ts` | Shared WorkflowAgent + system prompt |
 | `src/workflow/builder-chat.ts` | Durable web workflow (`'use workflow'`) |
-| `src/lib/session/store.ts` | Session CRUD + `session.json` persistence |
-| `src/lib/sandbox/` | Local/Daytona sandbox, paths, dev-server |
-| `scripts/cleanup-preview-servers.ts` | Kill orphaned session preview `next dev` processes |
+| `src/lib/session/store.ts` | Supabase session CRUD facade |
+| `src/lib/sandbox/` | Daytona sandbox, runtime reconciliation, dev-server |
 | `src/tools/` | Builder tools and `'use step'` implementations |
 | `templates/nextjs-starter/` | Workspace scaffold copied per session |
 | `src/app/api/sessions/` | REST: chat stream, preview status |
@@ -177,3 +157,7 @@ See `.env.example`:
 
 - `AI_GATEWAY_API_KEY` — Vercel AI Gateway (or `VERCEL_OIDC_TOKEN`)
 - `AI_MODEL` — default `minimax/minimax-m3`
+- `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend
+- `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs
+- `DAYTONA_API_KEY` — required remote workspace
+- `FREESTYLE_API_KEY` — required durable Git source of truth

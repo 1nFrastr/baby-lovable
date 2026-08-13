@@ -134,20 +134,17 @@ export async function saveSessionMessagesStep(
   });
   await deleteDraft(sessionId, session.userId);
 
-  if (session.sandboxMode === "daytona") {
-    const { checkpointSessionTurn } = await import(
-      "@/lib/git/checkpoint-session-turn"
-    );
-    await checkpointSessionTurn({
-      sessionId,
-      sandboxMode: session.sandboxMode,
-      messages: mergedMessages,
-      outcome: "completed",
-      runId,
-      userId: session.userId,
-      sessionTitle: title,
-    });
-  }
+  const { checkpointSessionTurn } = await import(
+    "@/lib/git/checkpoint-session-turn"
+  );
+  await checkpointSessionTurn({
+    sessionId,
+    messages: mergedMessages,
+    outcome: "completed",
+    runId,
+    userId: session.userId,
+    sessionTitle: title,
+  });
 
   return { messageCount: mergedMessages.length };
 }
@@ -168,20 +165,17 @@ export async function markSessionRunFailedStep(sessionId: string) {
   if (session) {
     await deleteDraft(sessionId, session.userId);
 
-    if (session.sandboxMode === "daytona") {
-      const { checkpointSessionTurn } = await import(
-        "@/lib/git/checkpoint-session-turn"
-      );
-      await checkpointSessionTurn({
-        sessionId,
-        sandboxMode: session.sandboxMode,
-        messages: session.messages,
-        outcome: "failed",
-        runId,
-        userId: session.userId,
-        sessionTitle: session.title,
-      });
-    }
+    const { checkpointSessionTurn } = await import(
+      "@/lib/git/checkpoint-session-turn"
+    );
+    await checkpointSessionTurn({
+      sessionId,
+      messages: session.messages,
+      outcome: "failed",
+      runId,
+      userId: session.userId,
+      sessionTitle: session.title,
+    });
   }
 }
 

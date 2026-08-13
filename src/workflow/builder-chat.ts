@@ -18,8 +18,7 @@ import {
 export async function builderChat(sessionId: string, messages: UIMessage[]) {
   "use workflow";
 
-  const session = await getSessionStep(sessionId);
-  const sandboxMode = session.sandboxMode;
+  await getSessionStep(sessionId);
   // Interrupted turns leave tool parts without results — drop them so the
   // model prompt does not throw AI_MissingToolResultsError.
   const modelMessages = await convertToModelMessages(messages, {
@@ -27,10 +26,7 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   });
 
   const previousModelCount = modelMessages.length;
-  const { agent, toolsContext, runtimeContext } = createBuilderAgent(
-    sessionId,
-    sandboxMode,
-  );
+  const { agent, toolsContext, runtimeContext } = createBuilderAgent(sessionId);
 
   const maxSteps = 30;
   const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";

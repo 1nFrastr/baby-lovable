@@ -7,16 +7,8 @@ const { getPreviewBackend } = vi.hoisted(() => ({
   getPreviewBackend: vi.fn(),
 }));
 
-vi.mock("@/lib/session/store", () => ({
-  getSession: vi.fn(async () => ({
-    id: "sess_test",
-    sandboxMode: "local",
-  })),
-}));
-
 vi.mock("./preview-backend", () => ({
   getPreviewBackend,
-  createPreviewBackend: vi.fn(),
 }));
 
 import {
@@ -35,7 +27,6 @@ function mockBackend(partial: Partial<PreviewBackend>): PreviewBackend {
     restartAppServer: vi.fn(),
     stopAppServer: vi.fn(),
     deleteSandbox: vi.fn(),
-    hasNodeModules: vi.fn(),
     ...partial,
   };
 }

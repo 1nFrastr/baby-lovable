@@ -1,6 +1,5 @@
 /**
- * Supabase env vars synced by the Vercel Marketplace integration.
- * @see https://supabase.com/docs/guides/integrations/vercel-marketplace
+ * Supabase direct-connection environment variables.
  *
  * NEXT_PUBLIC_* must use static `process.env.NEXT_PUBLIC_…` access so Next.js
  * can inline them into client bundles. Dynamic `process.env[name]` only works
@@ -14,7 +13,7 @@ function firstNonEmpty(...values: (string | undefined)[]): string | undefined {
   return undefined;
 }
 
-/** Public Supabase project URL (Vercel syncs `NEXT_PUBLIC_SUPABASE_URL`). */
+/** Public Supabase project URL. */
 export function getSupabaseUrl(): string | undefined {
   return firstNonEmpty(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -23,8 +22,8 @@ export function getSupabaseUrl(): string | undefined {
 }
 
 /**
- * Publishable (anon) key — Vercel Marketplace uses the new naming convention;
- * fall back to legacy `*_ANON_KEY` for projects created before the rename.
+ * Publishable (anon) key using the current naming convention, with legacy
+ * `*_ANON_KEY` fallbacks for projects created before the rename.
  */
 export function getSupabasePublishableKey(): string | undefined {
   return firstNonEmpty(
@@ -56,30 +55,16 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(getSupabaseUrl() && getSupabasePublishableKey());
 }
 
-function isTruthyEnv(value: string | undefined): boolean {
-  return value === "1" || value === "true";
-}
-
-/**
- * True when sessions use local `.baby-lovable/` files instead of Supabase.
- *
- * Active when Supabase env is absent, or when `BABY_LOVABLE_LOCAL_MODE=1`
- * (set in `.env.local` after `vercel env pull` to skip auth + Postgres for
- * CLI and `npm run dev`). For the web UI client bundle, also set
- * `NEXT_PUBLIC_BABY_LOVABLE_LOCAL_MODE=1`.
- */
-export function isLocalFileStorageMode(): boolean {
-  if (
-    isTruthyEnv(process.env.BABY_LOVABLE_LOCAL_MODE) ||
-    isTruthyEnv(process.env.NEXT_PUBLIC_BABY_LOVABLE_LOCAL_MODE)
-  ) {
-    return true;
-  }
-
-  return !isSupabaseConfigured();
-}
-
 /** True when the secret key is available for admin / workflow operations. */
 export function isSupabaseAdminConfigured(): boolean {
   return Boolean(getSupabaseUrl() && getSupabaseSecretKey());
+}
+
+/** Fail before a session operation can silently diverge from production. */
+export function assertSupabaseMetadataConfigured(): void {
+  if (!isSupabaseConfigured() || !isSupabaseAdminConfigured()) {
+    throw new Error(
+      "Supabase metadata storage is required. Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and SUPABASE_SECRET_KEY.",
+    );
+  }
 }

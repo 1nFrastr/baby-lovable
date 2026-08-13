@@ -11,11 +11,9 @@ import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
-import type { SandboxMode } from "@/lib/sandbox/types";
 
 export interface RunAgentOptions {
   sessionId: string;
-  sandboxMode: SandboxMode;
   /** Full conversation history, including the latest user message. */
   messages: UIMessage[];
   /** Max agent steps before stopping. Defaults to 30 (matches the web app). */
@@ -39,7 +37,6 @@ export interface RunAgentResult {
  */
 export async function runAgentTurn({
   sessionId,
-  sandboxMode,
   messages,
   maxSteps = 30,
 }: RunAgentOptions): Promise<RunAgentResult> {
@@ -53,10 +50,7 @@ export async function runAgentTurn({
 
   const previousModelCount = modelMessages.length;
 
-  const { agent, toolsContext, runtimeContext } = createBuilderAgent(
-    sessionId,
-    sandboxMode,
-  );
+  const { agent, toolsContext, runtimeContext } = createBuilderAgent(sessionId);
 
   const trace = createCliAgentTrace({
     sessionId,

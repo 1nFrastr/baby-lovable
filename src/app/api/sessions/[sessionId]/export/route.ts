@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { CheckpointBarrierError } from "@/lib/git/await-checkpoint";
 import { exportWorkspaceArchive } from "@/lib/sandbox/daytona/export-archive";
-import { NotImplementedError } from "@/lib/sandbox/types";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
@@ -50,9 +49,6 @@ export async function GET(
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    if (error instanceof NotImplementedError) {
-      return NextResponse.json({ error: error.message }, { status: 501 });
     }
     if (error instanceof CheckpointBarrierError) {
       return NextResponse.json({ error: error.message }, { status: 409 });

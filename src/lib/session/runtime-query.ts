@@ -4,12 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { isLocalFileStorageMode } from "@/lib/supabase/config";
 
-import type {
-  RuntimeTransport,
-  SessionRuntimeProjection,
-} from "./runtime-projection";
+import type { SessionRuntimeProjection } from "./runtime-projection";
 
 export const runtimeKeys = {
   detail: (sessionId: string) => ["session-runtime", sessionId] as const,
@@ -17,7 +13,6 @@ export const runtimeKeys = {
 
 export interface SessionRuntimeData {
   projection: SessionRuntimeProjection;
-  transport: RuntimeTransport;
 }
 
 async function fetchRuntime(sessionId: string): Promise<SessionRuntimeData> {
@@ -40,10 +35,7 @@ function applyProjectionIfNewer(
     runtimeKeys.detail(sessionId),
     (current) => {
       if (!current || next.version > current.projection.version) {
-        return {
-          projection: next,
-          transport: current?.transport ?? (isLocalFileStorageMode() ? "sse" : "realtime"),
-        };
+        return { projection: next };
       }
       return current;
     },
@@ -62,17 +54,12 @@ export function useSessionRuntimeQuery(sessionId: string | null) {
 }
 
 /**
- * Single page-level subscription for session runtime (run / preview / appTest).
- * Call once per session view (e.g. AppShell). Transport follows persist backend:
- * file store → SSE; Supabase → Realtime.
+ * Single page-level Supabase Realtime subscription for session runtime.
+ * Call once per session view (e.g. AppShell).
  */
 export function useSessionRuntime(sessionId: string | null) {
   const queryClient = useQueryClient();
   const query = useSessionRuntimeQuery(sessionId);
-
-  const transport =
-    query.data?.transport ??
-    (isLocalFileStorageMode() ? "sse" : ("realtime" as RuntimeTransport));
 
   useEffect(() => {
     if (!sessionId) {
@@ -80,8 +67,6 @@ export function useSessionRuntime(sessionId: string | null) {
     }
 
     let cancelled = false;
-    let cleanup: (() => void) | undefined;
-
     const invalidate = () => {
       void queryClient.invalidateQueries({
         queryKey: runtimeKeys.detail(sessionId),
@@ -101,72 +86,44 @@ export function useSessionRuntime(sessionId: string | null) {
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
 
-    if (transport === "sse") {
-      const source = new EventSource(`/api/sessions/${sessionId}/events`);
-      source.onmessage = (event) => {
-        if (cancelled) {
-          return;
-        }
-        try {
-          const projection = JSON.parse(
-            event.data,
-          ) as SessionRuntimeProjection;
-          applyProjectionIfNewer(queryClient, sessionId, projection);
-        } catch {
-          // ignore malformed
-        }
-      };
-      source.onerror = () => {
-        // Browser will retry EventSource; also refresh snapshot.
-        invalidate();
-      };
-      cleanup = () => {
-        source.close();
-      };
-    } else {
-      const supabase = createSupabaseBrowserClient();
-      const channel = supabase
-        .channel(`runtime:${sessionId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "session_runtime_projection",
-            filter: `session_id=eq.${sessionId}`,
-          },
-          (payload) => {
-            if (cancelled) {
-              return;
-            }
-            const row = payload.new as {
-              projection?: SessionRuntimeProjection;
-            } | null;
-            if (row?.projection) {
-              applyProjectionIfNewer(queryClient, sessionId, row.projection);
-            } else {
-              invalidate();
-            }
-          },
-        )
-        .subscribe((status) => {
-          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+    const supabase = createSupabaseBrowserClient();
+    const channel = supabase
+      .channel(`runtime:${sessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "session_runtime_projection",
+          filter: `session_id=eq.${sessionId}`,
+        },
+        (payload) => {
+          if (cancelled) {
+            return;
+          }
+          const row = payload.new as {
+            projection?: SessionRuntimeProjection;
+          } | null;
+          if (row?.projection) {
+            applyProjectionIfNewer(queryClient, sessionId, row.projection);
+          } else {
             invalidate();
           }
-        });
-
-      cleanup = () => {
-        void supabase.removeChannel(channel);
-      };
-    }
+        },
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          invalidate();
+        }
+      });
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("online", onOnline);
-      cleanup?.();
+      void supabase.removeChannel(channel);
     };
-  }, [queryClient, sessionId, transport]);
+  }, [queryClient, sessionId]);
 
   return query;
 }

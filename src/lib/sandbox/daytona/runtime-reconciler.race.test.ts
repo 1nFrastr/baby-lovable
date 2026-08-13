@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { makeSession, withTempDataDir, enterIsolate } from "./__tests__/test-helpers";
+import { makeSession, withMemoryRuntime, enterIsolate } from "./__tests__/test-helpers";
 
 const {
   ctx,
@@ -39,6 +39,10 @@ vi.mock("@/lib/session/store", () => ({
     id === ctx.sessionId ? makeSession(id) : null,
   ),
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
+}));
+
+vi.mock("@/lib/session/runtime-projection-store", () => ({
+  publishRuntimeUpdate: vi.fn(),
 }));
 
 vi.mock("./vm", () => ({
@@ -119,7 +123,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("readRuntime never creates a sandbox (UI poll isolate)", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       observeRuntime.mockResolvedValue(observed({ phase: "missing" }));
 
@@ -131,7 +135,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("readRuntime preserves ready state after an inconclusive miss", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {
@@ -159,7 +163,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("readRuntime applies a conclusive unhealthy observation", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {
@@ -190,7 +194,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("two isolates racing ensure(preview-ready): only lease holder creates", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let sandboxId: string | null = null;
@@ -268,7 +272,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("FS attach returns once sandbox exists (no seed)", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let sandboxId: string | null = null;
@@ -316,7 +320,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("FS attach (sandbox-ready) returns before preview start finishes", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let sandboxId: string | null = null;
@@ -397,7 +401,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("UI stop generation beats in-flight start desired", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let previewReady = false;
@@ -454,7 +458,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("reconcile loop honors desired flip to stopped before finishing start", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let sandboxId: string | null = null;
@@ -509,7 +513,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("restart bumps generation and clears preview cache flag path", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       observeRuntime.mockResolvedValue(
@@ -574,7 +578,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("keeps preview-ready durable state across a transient observe miss", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       await withFreshIsolate(sessionId, async () => {
@@ -629,7 +633,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("honors a desired stop written during a transient observe", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       await withFreshIsolate(sessionId, async () => {
         const { upsertRuntimeSnapshot } = await import("./runtime-store");
@@ -685,7 +689,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("fire-and-forget startPreview writes desired without blocking", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       observeRuntime.mockResolvedValue(observed({ phase: "missing" }));
 
@@ -717,7 +721,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("wait=false kick=false only persists desired (no create)", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       observeRuntime.mockResolvedValue(observed({ phase: "missing" }));
 
@@ -737,7 +741,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("parallel create from two owners: only one sandboxId persists", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
 
       let createCount = 0;
@@ -798,7 +802,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("readRuntime clears stale sandboxId when console-deleted (confirmedAbsent)", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {
@@ -830,7 +834,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("ensureDesired recreates sandbox after confirmedAbsent (console delete)", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {
@@ -895,7 +899,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("recovers log identity when a stale preview probe recovers before restart", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {
@@ -934,7 +938,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("ensureDesired restarts pnpm only when durable ready but probe is 502", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {
@@ -1004,7 +1008,7 @@ describe("runtime-reconciler isolate / UI races", () => {
   });
 
   it("ensureDesired trusts durable preview-ready when probe is healthy", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
       await upsertRuntimeSnapshot(sessionId, {

@@ -45,7 +45,6 @@ export async function GET(
     return NextResponse.json({
       ...latest,
       browserRunConfigured: browserRunConfigured(),
-      sandboxMode: session.sandboxMode,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
@@ -69,16 +68,6 @@ export async function POST(
     const session = await getSession(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
-    }
-
-    if (session.sandboxMode !== "daytona") {
-      return NextResponse.json(
-        {
-          error:
-            "App testing requires sandboxMode=daytona (Cloudflare cannot reach localhost).",
-        },
-        { status: 400 },
-      );
     }
 
     if (!browserRunConfigured()) {

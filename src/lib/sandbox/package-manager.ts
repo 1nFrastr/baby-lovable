@@ -1,5 +1,3 @@
-import type { SandboxMode } from "./types";
-
 export type PackageManager = "pnpm" | "npm";
 
 export interface PackageManagerCommands {
@@ -23,17 +21,15 @@ function pnpmCommands(): PackageManagerCommands {
   };
 }
 
-/** Resolve install/dev shell commands for the active sandbox mode. */
-export function resolvePackageManager(sandboxMode: SandboxMode): PackageManagerCommands {
-  void sandboxMode;
+/** Resolve install/dev shell commands for the Daytona workspace. */
+export function resolvePackageManager(): PackageManagerCommands {
   return pnpmCommands();
 }
 
 export function packageManagerPromptLines(
-  sandboxMode: SandboxMode,
   devPort = 3000,
 ): string[] {
-  const pm = resolvePackageManager(sandboxMode);
+  const pm = resolvePackageManager();
   return [
     `Use the installPackage and installDependencies tools for package management (platform runs ${pm.pm} internally).`,
     `After editing dependencies, call installPackage or installDependencies — never run arbitrary shell commands.`,

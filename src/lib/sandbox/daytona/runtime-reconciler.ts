@@ -346,7 +346,7 @@ async function actionCreateSandbox(
     }
 
     // Freestyle hydrate before workspace-ready — SDK git only, no shell.
-    // Skip when Freestyle is not configured (unit tests / local misconfig).
+    // Isolated runtime tests may omit Freestyle; production entry points require it.
     // Session create API still requires FREESTYLE_API_KEY for Daytona.
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
     if (isFreestyleConfigured()) {

@@ -31,12 +31,6 @@ export async function GET(
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    if (session.sandboxMode !== "daytona") {
-      throw new GithubSyncError(
-        "GitHub Sync is only available for Daytona sessions",
-      );
-    }
-
     const repositories = await listAvailableGithubRepositories(
       auth.userId,
       auth.githubIdentity ?? null,

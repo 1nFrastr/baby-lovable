@@ -103,7 +103,6 @@ export function AppShell() {
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
 
   const sessions = sessionsQuery.data?.sessions ?? [];
-  const sandboxMode = sessionsQuery.data?.features.sandboxMode ?? "local";
   const activeSession = sessionQuery.data?.session ?? null;
   const activeDraft = sessionQuery.data?.draft ?? null;
   const activeSummary = sessions.find((session) => session.id === activeSessionId);
@@ -123,8 +122,8 @@ export function AppShell() {
     prevRuntimeRunStatus.current = undefined;
   }, [activeSessionId]);
 
-  // Runtime SSE can flip run→done before onChatEnd's detail invalidate lands.
-  // Refetch session.json as soon as the projection leaves "running".
+  // Runtime Realtime can flip run→done before onChatEnd's detail invalidate lands.
+  // Refetch the durable session as soon as the projection leaves "running".
   useEffect(() => {
     const status = runtimeQuery.data?.projection.run?.status;
     const prev = prevRuntimeRunStatus.current;
@@ -326,9 +325,7 @@ export function AppShell() {
                 创建第一个项目会话
               </p>
               <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
-                {sandboxMode === "daytona"
-                  ? "Daytona 模式会在远程沙箱内部文件系统中从 Next.js starter 模板初始化项目。"
-                  : "BabyLovable 会在本地 `.baby-lovable/sessions/` 目录中从 Next.js starter 模板初始化项目，并持久化你的修改。"}
+                Daytona 会从 Next.js starter 初始化远程工作区，并将源码持久化到 Freestyle。
               </p>
               <button
                 type="button"
@@ -360,7 +357,6 @@ export function AppShell() {
                   messages={activeSession.messages}
                   draft={activeDraft?.message ?? null}
                   runStatus={liveRunStatus}
-                  sandboxMode={activeSession.sandboxMode}
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                   }}
@@ -370,7 +366,6 @@ export function AppShell() {
               <PreviewPanel
                 key={activeSessionId}
                 sessionId={activeSessionId}
-                sandboxMode={activeSession.sandboxMode}
                 runtimeProjection={runtimeQuery.data?.projection ?? null}
                 runtimeLoading={
                   runtimeQuery.isPending ||

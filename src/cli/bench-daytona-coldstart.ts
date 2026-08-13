@@ -17,7 +17,6 @@ async function main() {
   const t0 = Date.now();
   const session = await createSession({
     title: "coldstart-bench",
-    sandboxMode: "daytona",
   });
   console.warn(`[bench] session=${session.id} created ms=${Date.now() - t0}`);
 

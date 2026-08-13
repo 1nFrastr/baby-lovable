@@ -152,7 +152,7 @@ Agent / Preview API
   → upsertRuntimeSnapshot(CAS)
   → publishRuntimeUpdate
   → SessionRuntimeProjection
-  → Supabase Realtime / SSE
+  → Supabase Realtime
   → Web UI
 ```
 
@@ -177,16 +177,17 @@ Agent / Preview API
 
 ## 本地开发
 
-- 支持本地文件存储，方便无 DB 启动
-- 支持本地沙盒模拟，不强依赖 Daytona
-- 支持 Supabase Auth / Realtime 接入
-- 支持 All-in-one 本地调试与 CLI 端到端验证
+- 本地与线上统一使用 Supabase 元数据存储与 Realtime
+- 本地与线上统一使用 Daytona Sandbox + Freestyle `main`
+- 本地开发必须配置 Supabase Auth、数据库和 CLI 用户
+- 支持 CLI 端到端验证，不维护本机沙箱模拟分支
 
 详见：[本地开发指南](./docs/local-development.md)
 
 ## 文档
 
 - [声明式资源调和设计](./docs/declarative-reconciliation.md)
+- [Freestyle Git 持久化设计](./docs/freestyle-git.md)
 - [实时状态同步设计](./docs/realtime-projection.md)
 - [Workflow Agent 设计](./docs/workflow-agent.md)
 - [本地开发指南](./docs/local-development.md)
@@ -194,6 +195,5 @@ Agent / Preview API
 ## Roadmap
 
 - [ ] Agent Runtime 治理：长上下文治理、工具结果压缩等
-- [ ] 代码产物持久化：云端版本控制，接入 Freestyle Git 和 GitHub 双向同步
 - [ ] 产品体验优化：UI / UX 优化
 - [ ] 第三方连接器：Supabase BaaS、Vercel Deploy、图片素材生成 MCP 工具等

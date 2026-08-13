@@ -52,13 +52,6 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    if (session.sandboxMode !== "daytona") {
-      return NextResponse.json(
-        { versions: [] as VersionHistoryItem[], available: false },
-        { headers: { "Cache-Control": "no-store" } },
-      );
-    }
-
     const tasks = await listGitSyncTasks(sessionId, auth.userId);
     const versions = [...tasks]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))

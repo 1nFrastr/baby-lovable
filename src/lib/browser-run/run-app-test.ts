@@ -117,22 +117,6 @@ export async function runAppTest(
     userId,
   );
 
-  if (session.sandboxMode !== "daytona") {
-    return finish(
-      failReport({
-        sessionId: options.sessionId,
-        runId,
-        started,
-        steps,
-        consoleErrors,
-        pageErrors,
-        screenshots,
-        error:
-          "App testing via Cloudflare Browser Run requires sandboxMode=daytona (localhost is not reachable from Cloudflare).",
-      }),
-    );
-  }
-
   let config;
   try {
     config = requireBrowserRunConfig();

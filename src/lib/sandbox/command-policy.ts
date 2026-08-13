@@ -1,4 +1,3 @@
-import type { SandboxMode } from "./types";
 import { resolvePackageManager } from "./package-manager";
 
 export type AllowedCommand =
@@ -76,9 +75,8 @@ export function parseAllowedCommand(command: string): AllowedCommand | null {
 
 export function buildAllowedShellCommand(
   command: AllowedCommand,
-  sandboxMode: SandboxMode = "local",
 ): string {
-  const pm = resolvePackageManager(sandboxMode);
+  const pm = resolvePackageManager();
 
   switch (command.kind) {
     case "pkg-install":
@@ -95,7 +93,6 @@ export const DISALLOWED_COMMAND_HINT =
 
 export function validateRunCommand(
   command: string,
-  sandboxMode: SandboxMode = "local",
 ):
   | { ok: true; allowed: AllowedCommand; shell: string }
   | { ok: false; error: string } {
@@ -107,9 +104,6 @@ export function validateRunCommand(
   return {
     ok: true,
     allowed,
-    shell: buildAllowedShellCommand(allowed, sandboxMode),
+    shell: buildAllowedShellCommand(allowed),
   };
 }
-
-/** @deprecated Use pkg-* kinds — kept for transitional call sites. */
-export type LegacyAllowedCommand = AllowedCommand;

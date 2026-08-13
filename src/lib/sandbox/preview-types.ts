@@ -1,6 +1,6 @@
 /**
  * Three layers (bottom → top):
- *   1. sandbox   — VM / local workspace
+ *   1. sandbox   — Daytona VM workspace
  *   2. appServer — pnpm install + pnpm dev
  *   3. previewUrl — URL the browser can open
  *

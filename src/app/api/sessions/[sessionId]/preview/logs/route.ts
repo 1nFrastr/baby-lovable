@@ -104,13 +104,6 @@ export async function GET(
     if (!session) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
-    if (session.sandboxMode !== "daytona") {
-      return Response.json(
-        { error: "Preview logs are only available for Daytona sessions" },
-        { status: 400 },
-      );
-    }
-
     const snapshot = await getRuntimeSnapshot(sessionId, auth.userId, {
       fresh: true,
     });

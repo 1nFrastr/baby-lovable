@@ -1,6 +1,3 @@
-import { isLocalFileStorageMode } from "@/lib/supabase/config";
-
-import { notifyRuntimeEvents } from "./runtime-events-hub";
 import {
   appTestFromLatest,
   emptyRuntimeProjection,
@@ -9,23 +6,14 @@ import {
   previewFromAllStatus,
   shouldBumpRuntimeVersion,
   type RuntimeProjectionPatch,
-  type RuntimeTransport,
   type SessionRuntimeProjection,
 } from "./runtime-projection";
-import {
-  readRuntimeProjectionLocal,
-  writeRuntimeProjectionLocal,
-} from "./runtime-projection-store-local";
 import {
   readRuntimeProjectionSupabase,
   writeRuntimeProjectionSupabase,
 } from "./runtime-projection-store-supabase";
 
-export type { SessionRuntimeProjection, RuntimeTransport };
-
-export function getRuntimeTransport(): RuntimeTransport {
-  return isLocalFileStorageMode() ? "sse" : "realtime";
-}
+export type { SessionRuntimeProjection };
 
 async function resolveUserId(
   sessionId: string,
@@ -43,21 +31,16 @@ export async function readRuntimeProjectionStore(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionRuntimeProjection | null> {
-  if (!isLocalFileStorageMode()) {
-    return readRuntimeProjectionSupabase(sessionId);
-  }
-  return readRuntimeProjectionLocal(sessionId, userId);
+  void userId;
+  return readRuntimeProjectionSupabase(sessionId);
 }
 
 export async function writeRuntimeProjectionStore(
   projection: SessionRuntimeProjection,
   userId: string | null = null,
 ): Promise<void> {
-  if (!isLocalFileStorageMode()) {
-    const ownerId = await resolveUserId(projection.sessionId, userId);
-    return writeRuntimeProjectionSupabase(projection, ownerId);
-  }
-  return writeRuntimeProjectionLocal(projection, userId);
+  const ownerId = await resolveUserId(projection.sessionId, userId);
+  return writeRuntimeProjectionSupabase(projection, ownerId);
 }
 
 /**
@@ -82,10 +65,6 @@ export async function ensureRuntimeProjection(
   };
   await writeRuntimeProjectionStore(initial, ownerId);
 
-  if (isLocalFileStorageMode()) {
-    notifyRuntimeEvents(initial);
-  }
-
   return initial;
 }
 
@@ -108,24 +87,18 @@ async function assembleRuntimeProjection(
 
   try {
     // Side-effect free: never call peekAllStatus (it may kick background observe).
-    if ((session?.sandboxMode ?? "local") === "daytona") {
-      const { getRuntimeSnapshot } = await import(
-        "@/lib/sandbox/daytona/runtime-store"
-      );
-      const { deriveAllStatus } = await import(
-        "@/lib/sandbox/daytona/runtime-state"
-      );
-      const snapshot = await getRuntimeSnapshot(sessionId);
-      base.preview = previewFromAllStatus(
-        deriveAllStatus(snapshot),
-        snapshot.generation,
-        now,
-      );
-    } else {
-      const { getAllStatus } = await import("@/lib/sandbox/preview");
-      const all = await getAllStatus(sessionId);
-      base.preview = previewFromAllStatus(all, 0, now);
-    }
+    const { getRuntimeSnapshot } = await import(
+      "@/lib/sandbox/daytona/runtime-store"
+    );
+    const { deriveAllStatus } = await import(
+      "@/lib/sandbox/daytona/runtime-state"
+    );
+    const snapshot = await getRuntimeSnapshot(sessionId);
+    base.preview = previewFromAllStatus(
+      deriveAllStatus(snapshot),
+      snapshot.generation,
+      now,
+    );
   } catch (error) {
     console.warn(
       `[runtime-projection] assemble preview failed for ${sessionId}:`,
@@ -163,7 +136,7 @@ async function assembleRuntimeProjection(
 
 /**
  * Merge domain patch into durable projection. Bumps version only when
- * UI-visible fields change, then notifies file-store SSE listeners.
+ * UI-visible fields change.
  *
  * Does not call ensure/assemble (avoids peekAllStatus side effects on writers).
  */
@@ -190,10 +163,6 @@ export async function publishRuntimeUpdate(
 
     await writeRuntimeProjectionStore(next, ownerId);
 
-    if (isLocalFileStorageMode()) {
-      notifyRuntimeEvents(next);
-    }
-
     return next;
   } catch (error) {
     console.warn(
@@ -201,64 +170,5 @@ export async function publishRuntimeUpdate(
       error instanceof Error ? error.message : error,
     );
     return null;
-  }
-}
-
-/** Re-read live preview domains and publish (local boot / after restart). */
-export async function syncPreviewRuntimeProjection(
-  sessionId: string,
-  options: { bumpGeneration?: boolean; userId?: string | null } = {},
-): Promise<void> {
-  try {
-    const ownerId = options.userId ?? null;
-    const current =
-      (await readRuntimeProjectionStore(sessionId, ownerId)) ??
-      emptyRuntimeProjection(sessionId);
-    let generation = current.preview.generation;
-
-    const { getSession } = await import("./store");
-    const session = await getSession(sessionId);
-    const now = new Date().toISOString();
-
-    if ((session?.sandboxMode ?? "local") === "daytona") {
-      const { getRuntimeSnapshot } = await import(
-        "@/lib/sandbox/daytona/runtime-store"
-      );
-      const { deriveAllStatus } = await import(
-        "@/lib/sandbox/daytona/runtime-state"
-      );
-      const snapshot = await getRuntimeSnapshot(sessionId);
-      generation = snapshot.generation;
-      await publishRuntimeUpdate(
-        sessionId,
-        {
-          preview: previewFromAllStatus(
-            deriveAllStatus(snapshot),
-            generation,
-            now,
-          ),
-        },
-        ownerId,
-      );
-      return;
-    }
-
-    if (options.bumpGeneration) {
-      generation = current.preview.generation + 1;
-    }
-    const { getAllStatus } = await import("@/lib/sandbox/preview");
-    const all = await getAllStatus(sessionId);
-    await publishRuntimeUpdate(
-      sessionId,
-      {
-        preview: previewFromAllStatus(all, generation, now),
-      },
-      ownerId,
-    );
-  } catch (error) {
-    console.warn(
-      `[runtime-projection] sync preview failed for ${sessionId}:`,
-      error instanceof Error ? error.message : error,
-    );
   }
 }

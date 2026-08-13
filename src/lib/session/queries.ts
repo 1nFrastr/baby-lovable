@@ -8,13 +8,7 @@ import {
 import { useEffect } from "react";
 
 import type { SessionDraft } from "@/lib/session/draft-store";
-import type { SandboxMode } from "@/lib/sandbox/types";
 import type { Session, SessionSummary } from "@/lib/session/types";
-
-export type SessionsFeatures = {
-  daytona: boolean;
-  sandboxMode: SandboxMode;
-};
 
 export const sessionKeys = {
   all: ["sessions"] as const,
@@ -30,7 +24,6 @@ export interface SessionDetailData {
 
 export interface SessionsListData {
   sessions: SessionSummary[];
-  features: SessionsFeatures;
 }
 
 function sessionToSummary(session: Session): SessionSummary {
@@ -42,7 +35,6 @@ function sessionToSummary(session: Session): SessionSummary {
     updatedAt: session.updatedAt,
     lastRunId: session.lastRunId,
     runStatus: session.runStatus,
-    sandboxMode: session.sandboxMode,
     messageCount: session.messages.length,
   };
 }
@@ -68,18 +60,7 @@ async function fetchSessions(): Promise<SessionsListData> {
     throw new Error("Failed to load sessions");
   }
 
-  const data = (await response.json()) as {
-    sessions: SessionSummary[];
-    features?: { daytona?: boolean; sandboxMode?: SandboxMode };
-  };
-  return {
-    sessions: data.sessions,
-    features: {
-      daytona: Boolean(data.features?.daytona),
-      sandboxMode:
-        data.features?.sandboxMode === "daytona" ? "daytona" : "local",
-    },
-  };
+  return (await response.json()) as SessionsListData;
 }
 
 async function fetchSessionDetail(
@@ -160,10 +141,6 @@ export function useCreateSessionMutation() {
         if (!current) {
           return {
             sessions: [sessionToSummary(session)],
-            features: {
-              daytona: session.sandboxMode === "daytona",
-              sandboxMode: session.sandboxMode,
-            },
           };
         }
         return {

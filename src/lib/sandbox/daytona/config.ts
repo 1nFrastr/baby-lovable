@@ -1,4 +1,4 @@
-/** Local sandbox filesystem — fast POSIX, safe for pnpm / .next / git. */
+/** Daytona workspace filesystem — fast POSIX, safe for pnpm / .next / git. */
 export const DAYTONA_WORKSPACE_ROOT =
   process.env.DAYTONA_WORKSPACE_ROOT ?? "/home/daytona/workspace";
 

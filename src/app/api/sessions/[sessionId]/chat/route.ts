@@ -76,10 +76,8 @@ export async function POST(
     await deleteDraft(sessionId, auth.userId);
 
     // Prelude: upgrade to preview-ready without blocking the AI loop.
-    if (session.sandboxMode === "daytona") {
-      await kickRuntimeDesired(sessionId, "preview-ready");
-      after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
-    }
+    await kickRuntimeDesired(sessionId, "preview-ready");
+    after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
 
     const run = await start(builderChat, [sessionId, messages]);
     await updateSession(
@@ -97,7 +95,7 @@ export async function POST(
       auth.userId,
     );
 
-    // Detached — survives client disconnect; overwrites draft.json as chunks arrive.
+    // Detached — survives client disconnect; updates the Supabase draft as chunks arrive.
     void materializeDraftFromRun(sessionId, run.runId, auth.userId).catch(
       (error) => {
         console.error(

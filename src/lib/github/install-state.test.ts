@@ -56,7 +56,7 @@ describe("github installation state", () => {
     });
   });
 
-  it("supports local mode and rejects tampering", () => {
+  it("supports a nullable trusted-server user and rejects tampering", () => {
     process.env.GITHUB_APP_PRIVATE_KEY = TEST_PRIVATE_KEY;
     const encoded = buildGithubAppInstallState({
       sessionId: "sess_local",

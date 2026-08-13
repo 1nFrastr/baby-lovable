@@ -1,11 +1,15 @@
 /**
  * Serverless isolate simulation for runtime-store.
  *
- * Two "isolates" share durable `daytona-runtime.json` but each call to
+ * Two "isolates" share an in-memory durable test adapter but each call to
  * enterIsolate() clears process L1 — matching cold Vercel/Workflow workers.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/session/runtime-projection-store", () => ({
+  publishRuntimeUpdate: vi.fn(),
+}));
 
 import {
   acquireRuntimeLease,
@@ -16,11 +20,11 @@ import {
   upsertRuntimeSnapshot,
   withFreshIsolate,
 } from "./runtime-store";
-import { enterIsolate, withTempDataDir } from "./__tests__/test-helpers";
+import { enterIsolate, withMemoryRuntime } from "./__tests__/test-helpers";
 
 describe("runtime-store serverless isolate races", () => {
   it("stale L1 cannot clobber a newer durable write from another isolate", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       // Isolate A seeds durable state
       await upsertRuntimeSnapshot(sessionId, {
         desired: "sandbox-ready",
@@ -59,7 +63,7 @@ describe("runtime-store serverless isolate races", () => {
   });
 
   it("parallel create from two cold isolates: only one create wins", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       enterIsolate(sessionId);
       const results = await Promise.allSettled([
         withFreshIsolate(sessionId, () =>
@@ -91,7 +95,7 @@ describe("runtime-store serverless isolate races", () => {
   });
 
   it("lease: second isolate cannot acquire while first holds it", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       const a = await withFreshIsolate(sessionId, () =>
         acquireRuntimeLease(sessionId, "isolate-A", 5_000),
       );
@@ -114,7 +118,7 @@ describe("runtime-store serverless isolate races", () => {
   });
 
   it("lease: expired lease can be stolen by another isolate", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       await withFreshIsolate(sessionId, () =>
         acquireRuntimeLease(sessionId, "isolate-A", 40),
       );
@@ -129,7 +133,7 @@ describe("runtime-store serverless isolate races", () => {
   });
 
   it("lease renew fails for non-owner isolate", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       await withFreshIsolate(sessionId, () =>
         acquireRuntimeLease(sessionId, "isolate-A", 5_000),
       );
@@ -142,7 +146,7 @@ describe("runtime-store serverless isolate races", () => {
   });
 
   it("webui poll isolate sees writer isolate progress via durable store", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       // Agent / startPreview isolate
       await withFreshIsolate(sessionId, async () => {
         await upsertRuntimeSnapshot(sessionId, {
@@ -174,7 +178,7 @@ describe("runtime-store serverless isolate races", () => {
   });
 
   it("stop desired from UI isolate overrides in-flight start desired", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       await withFreshIsolate(sessionId, () =>
         upsertRuntimeSnapshot(sessionId, {
           desired: "preview-ready",
@@ -201,8 +205,8 @@ describe("runtime-store serverless isolate races", () => {
     });
   });
 
-  it("clearRuntimeSnapshot removes durable file for delete path", async () => {
-    await withTempDataDir(async ({ sessionId }) => {
+  it("clearRuntimeSnapshot removes durable state for delete path", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
       await upsertRuntimeSnapshot(sessionId, {
         desired: "sandbox-ready",
         sandboxId: "sb_1",

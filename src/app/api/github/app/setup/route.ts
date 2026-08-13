@@ -11,7 +11,6 @@ import {
   writeGithubAppInstallationBinding,
 } from "@/lib/github/installation-binding-store";
 import { getSessionAuthContext } from "@/lib/session/auth-context";
-import { isLocalFileStorageMode } from "@/lib/supabase/config";
 
 function redirectWithError(
   origin: string,
@@ -71,26 +70,22 @@ export async function GET(request: Request) {
   }
 
   const auth = await getSessionAuthContext(request);
-  if (!isLocalFileStorageMode()) {
-    if (!auth.userId) {
-      return redirectWithError(origin, returnTo, "请先使用 GitHub 登录");
-    }
-    if (state.userId !== auth.userId) {
-      return redirectWithError(
-        origin,
-        returnTo,
-        "installation_user_mismatch_please_retry",
-      );
-    }
-    if (!auth.githubIdentity) {
-      return redirectWithError(
-        origin,
-        returnTo,
-        "当前账号不是 GitHub 登录，无法校验安装归属",
-      );
-    }
-  } else if (state.userId !== null) {
-    return redirectWithError(origin, returnTo, "invalid_local_installation_state");
+  if (!auth.userId) {
+    return redirectWithError(origin, returnTo, "请先使用 GitHub 登录");
+  }
+  if (state.userId !== auth.userId) {
+    return redirectWithError(
+      origin,
+      returnTo,
+      "installation_user_mismatch_please_retry",
+    );
+  }
+  if (!auth.githubIdentity) {
+    return redirectWithError(
+      origin,
+      returnTo,
+      "当前账号不是 GitHub 登录，无法校验安装归属",
+    );
   }
 
   try {

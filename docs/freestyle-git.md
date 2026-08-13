@@ -1,6 +1,6 @@
 # Freestyle Git 真相源
 
-Daytona 会话以 Freestyle 私有仓库的 `main` 为代码持久化真相源。Local 模式仍使用本机 workspace，不调用 Freestyle。
+所有会话都以 Freestyle 私有仓库的 `main` 为代码持久化真相源，Daytona 工作树是运行时投影。
 
 ## 行为摘要
 
@@ -42,7 +42,7 @@ Agent / checkpoint **仍只写 Freestyle**。GitHub 侧由 Freestyle GitHub Sync
 - 平台不创建 GitHub 仓库，也不接受手填 `owner/repo`；下拉只显示空仓库，POST 接收 `repositoryId` 后会再次校验仓库没有 commit
 - App JWT 只用于读取 installation；短期 installation token 只用于列出/校验仓库，均不落库。平台不获取或存储 GitHub user access token
 - 分支分叉时 Freestyle **不 force-push**；需在 GitHub 或 Freestyle 侧手动合拢后再同步
-- Local sandbox 不提供此 API / UI；本地文件模式仅按单用户开发环境处理 installation 归属
+- installation 归属始终绑定当前 Supabase 用户
 
 ## Preview Console 日志一致性
 
@@ -53,8 +53,7 @@ Agent / checkpoint **仍只写 Freestyle**。GitHub 侧由 Freestyle GitHub Sync
 
 ## 存储
 
-- Local：`.baby-lovable/sessions/<id>/git-repository.json` + `git-sync-tasks/`；installation 元数据 `.baby-lovable/users/<userId>/github-app-installation.json`
-- Supabase：`session_git_repositories`、`session_git_sync_tasks`、`user_github_app_installations`（无 token）
+- Supabase：`session_git_repositories`、`session_git_sync_tasks`、`user_github_app_installations`（无 token）；本地 Host 使用相同存储
 - Session GitHub 字段在 `repository` jsonb：`githubRepoName`、`githubSyncStatus`、`githubSyncError`
 
 ## 环境变量
@@ -69,4 +68,4 @@ GITHUB_APP_INSTALL_URL=https://github.com/apps/<slug>/installations/new
 # GITHUB_APP_SLUG=
 ```
 
-Daytona 模式缺少 `FREESTYLE_API_KEY` 时创建 session 直接失败，不会静默退回 sandbox-only。
+缺少 `FREESTYLE_API_KEY` 时创建 session 直接失败，不会静默退回 sandbox-only。

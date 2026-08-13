@@ -1,10 +1,3 @@
-import { isLocalFileStorageMode } from "@/lib/supabase/config";
-
-import {
-  listGitSyncTasksLocal,
-  readGitSyncTaskLocal,
-  writeGitSyncTaskLocal,
-} from "./sync-task-store-local";
 import {
   listGitSyncTasksSupabase,
   readGitSyncTaskSupabase,
@@ -15,6 +8,30 @@ import {
   type GitTurnOutcome,
   type SessionGitSyncTask,
 } from "./types";
+
+export interface GitSyncTaskStoreAdapter {
+  /** Supabase requires the owning auth user; in-memory unit adapters do not. */
+  requiresUserId?: boolean;
+  read(sessionId: string, runId: string): Promise<SessionGitSyncTask | null>;
+  write(task: SessionGitSyncTask, userId: string | null): Promise<void>;
+  list(sessionId: string): Promise<SessionGitSyncTask[]>;
+}
+
+const supabaseAdapter: GitSyncTaskStoreAdapter = {
+  requiresUserId: true,
+  read: readGitSyncTaskSupabase,
+  write: writeGitSyncTaskSupabase,
+  list: listGitSyncTasksSupabase,
+};
+
+let storeAdapter: GitSyncTaskStoreAdapter = supabaseAdapter;
+
+/** Unit tests inject an in-memory adapter; production always uses Supabase. */
+export function setGitSyncTaskStoreAdapterForTests(
+  adapter: GitSyncTaskStoreAdapter | null,
+): void {
+  storeAdapter = adapter ?? supabaseAdapter;
+}
 
 async function resolveUserId(
   sessionId: string,
@@ -33,9 +50,8 @@ export async function readGitSyncTask(
   runId: string,
   userId: string | null = null,
 ): Promise<SessionGitSyncTask | null> {
-  const task = !isLocalFileStorageMode()
-    ? await readGitSyncTaskSupabase(sessionId, runId)
-    : await readGitSyncTaskLocal(sessionId, runId, userId);
+  void userId;
+  const task = await storeAdapter.read(sessionId, runId);
   return task ? normalizeGitSyncTask(task) : null;
 }
 
@@ -43,21 +59,19 @@ export async function writeGitSyncTask(
   task: SessionGitSyncTask,
   userId: string | null = null,
 ): Promise<void> {
-  const ownerId = await resolveUserId(task.sessionId, userId);
-  if (!isLocalFileStorageMode()) {
-    await writeGitSyncTaskSupabase(task, ownerId);
-  } else {
-    await writeGitSyncTaskLocal(task, ownerId);
-  }
+  const ownerId =
+    storeAdapter.requiresUserId === false
+      ? userId
+      : await resolveUserId(task.sessionId, userId);
+  await storeAdapter.write(task, ownerId);
 }
 
 export async function listGitSyncTasks(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionGitSyncTask[]> {
-  const tasks = !isLocalFileStorageMode()
-    ? await listGitSyncTasksSupabase(sessionId)
-    : await listGitSyncTasksLocal(sessionId, userId);
+  void userId;
+  const tasks = await storeAdapter.list(sessionId);
   return tasks.map(normalizeGitSyncTask);
 }
 

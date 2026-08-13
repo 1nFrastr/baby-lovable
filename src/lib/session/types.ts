@@ -2,13 +2,10 @@ import type { UIMessage } from "ai";
 
 import type { SandboxMode } from "@/lib/sandbox/types";
 
-/** Current on-disk / future Supabase row schema version. */
+/** Current Supabase session row schema version. */
 export const SESSION_SCHEMA_VERSION = 2;
 
-/**
- * Supabase `auth.users.id` — `null` means anonymous local-dev mode until auth
- * is wired up.
- */
+/** Supabase `auth.users.id`; trusted server workflows may pass `null`. */
 export type UserId = string | null;
 
 /**
@@ -25,10 +22,10 @@ export type SessionRunStatus =
   | "cancelled";
 
 export interface Session {
-  /** Schema version — bump when the on-disk shape changes. */
+  /** Schema version — bump when the persisted row shape changes. */
   schemaVersion: number;
   id: string;
-  /** Owner — `null` for anonymous single-user local mode. */
+  /** Owner; `null` is reserved for trusted server workflow contexts. */
   userId: UserId;
   title: string;
   createdAt: string;
@@ -51,13 +48,11 @@ export interface SessionSummary {
   updatedAt: string;
   lastRunId?: string;
   runStatus: SessionRunStatus;
-  sandboxMode: SandboxMode;
   messageCount: number;
 }
 
 export interface CreateSessionInput {
   title?: string;
-  sandboxMode?: SandboxMode;
   /** Set from auth context; defaults to `null`. */
   userId?: UserId;
 }
@@ -67,7 +62,6 @@ export interface UpdateSessionInput {
   messages?: UIMessage[];
   lastRunId?: string | null;
   runStatus?: SessionRunStatus;
-  sandboxMode?: SandboxMode;
   deletedAt?: string | null;
 }
 
