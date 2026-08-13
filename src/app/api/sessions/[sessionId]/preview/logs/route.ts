@@ -4,6 +4,7 @@ import {
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
+import { DEV_SESSION } from "@/lib/sandbox/daytona/app-server-boot";
 import { streamDevCommandLogs } from "@/lib/sandbox/daytona/dev-log-stream";
 import { resolveDevCmdId } from "@/lib/sandbox/daytona/resolve-dev-cmd-id";
 import {
@@ -28,6 +29,7 @@ type SsePayload =
       type: "snapshot";
       stdout: string;
       stderr: string;
+      truncated?: boolean;
     }
   | {
       type: "chunk";
@@ -40,6 +42,24 @@ type SsePayload =
 
 function encodeSse(payload: SsePayload): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+const SNAPSHOT_STREAM_LIMIT = 100_000;
+
+function boundSnapshot(payload: Extract<SsePayload, { type: "snapshot" }>) {
+  const trim = (value: string) =>
+    value.length > SNAPSHOT_STREAM_LIMIT
+      ? value.slice(-SNAPSHOT_STREAM_LIMIT)
+      : value;
+  const stdout = trim(payload.stdout);
+  const stderr = trim(payload.stderr);
+  return {
+    ...payload,
+    stdout,
+    stderr,
+    truncated:
+      stdout.length !== payload.stdout.length || stderr.length !== payload.stderr.length,
+  };
 }
 
 function waitingResponse(reason: string): Response {
@@ -94,7 +114,12 @@ export async function GET(
     const snapshot = await getRuntimeSnapshot(sessionId, auth.userId, {
       fresh: true,
     });
-    const sessionName = snapshot.devSessionName;
+    // The preview URL can recover before a stale-ready reconciliation stores
+    // the process identity. Session names are deterministic, so recover the
+    // live command instead of leaving Console waiting forever.
+    const sessionName =
+      snapshot.devSessionName ??
+      (snapshot.observed === "preview-ready" ? DEV_SESSION(sessionId) : null);
     const generation = snapshot.generation;
 
     if (!sessionName) {
@@ -118,12 +143,16 @@ export async function GET(
     }
 
     // Backfill so refresh / other isolates can attach without re-listing.
-    if (!snapshot.devCmdId) {
+    if (
+      snapshot.devSessionName !== sessionName ||
+      snapshot.devCmdId !== cmdId
+    ) {
       try {
         await upsertRuntimeSnapshot(
           sessionId,
           {
             expectedRevision: snapshot.revision,
+            devSessionName: sessionName,
             devCmdId: cmdId,
           },
           auth.userId,
@@ -209,7 +238,7 @@ export async function GET(
               sessionName,
               cmdId,
               (event) => {
-                send(event);
+                send(event.type === "snapshot" ? boundSnapshot(event) : event);
                 if (
                   event.type === "waiting" ||
                   event.type === "stale" ||

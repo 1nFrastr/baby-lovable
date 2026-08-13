@@ -52,6 +52,7 @@ vi.mock("./vm", () => ({
 }));
 
 vi.mock("./app-server-boot", () => ({
+  DEV_SESSION: (sessionId: string) => `preview-${sessionId}`,
   formatStartError: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   startDevSession,
@@ -893,6 +894,45 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
   });
 
+  it("recovers log identity when a stale preview probe recovers before restart", async () => {
+    await withTempDataDir(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await upsertRuntimeSnapshot(sessionId, {
+        desired: "preview-ready",
+        observed: "preview-ready",
+        sandboxId: "sb_live",
+        previewUrl: "https://embed.example/transient",
+        previewPort: 3000,
+        devSessionName: "preview-old",
+        generation: 1,
+      });
+
+      httpStatus.mockResolvedValueOnce(503);
+      observeRuntime.mockResolvedValue(
+        observed({
+          phase: "preview-ready",
+          sandboxId: "sb_live",
+          previewUrl: "https://embed.example/transient",
+          previewPort: 3000,
+          httpStatus: 200,
+        }),
+      );
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "transient-preview-recover",
+        }),
+      );
+
+      expect(startDevSession).not.toHaveBeenCalled();
+      expect(result.observed).toBe("preview-ready");
+      expect(result.devSessionName).toBe(`preview-${sessionId}`);
+      expect(result.generation).toBeGreaterThan(1);
+    });
+  });
+
   it("ensureDesired restarts pnpm only when durable ready but probe is 502", async () => {
     await withTempDataDir(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
@@ -959,6 +999,7 @@ describe("runtime-reconciler isolate / UI races", () => {
       expect(startDevSession).toHaveBeenCalled();
       expect(result.sandboxId).toBe("sb_live");
       expect(result.observed).toBe("preview-ready");
+      expect(result.generation).toBeGreaterThan(1);
     });
   });
 
@@ -988,6 +1029,7 @@ describe("runtime-reconciler isolate / UI races", () => {
       expect(createSandbox).not.toHaveBeenCalled();
       expect(startDevSession).not.toHaveBeenCalled();
       expect(result.observed).toBe("preview-ready");
+      expect(result.devSessionName).toBe(`preview-${sessionId}`);
     });
   });
 });

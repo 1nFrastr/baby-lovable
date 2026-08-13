@@ -3,12 +3,21 @@
 import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
+import { parseAnsiText } from "./dev-server-log-ansi";
+import {
+  appendDevLogChunk,
+  applyDevLogSnapshot,
+  clearDevLogBuffer,
+  emptyDevLogBuffer,
+  setDevLogIdentity,
+} from "./dev-server-log-buffer";
 
 type ConnectionState =
   | "idle"
@@ -16,6 +25,8 @@ type ConnectionState =
   | "live"
   | "waiting"
   | "reconnecting"
+  | "offline"
+  | "ended"
   | "stale";
 
 type LogSseEvent =
@@ -25,7 +36,12 @@ type LogSseEvent =
       cmdId: string;
       sessionName: string;
     }
-  | { type: "snapshot"; stdout: string; stderr: string }
+  | {
+      type: "snapshot";
+      stdout: string;
+      stderr: string;
+      truncated?: boolean;
+    }
   | { type: "chunk"; stream: "stdout" | "stderr"; text: string }
   | { type: "waiting"; reason: string }
   | { type: "stale"; reason: string }
@@ -48,18 +64,22 @@ const MAX_HEIGHT = 480;
 function statusLabel(state: ConnectionState): string {
   switch (state) {
     case "live":
-      return "live";
+      return "实时";
     case "waiting":
-      return "waiting";
+      return "等待";
     case "reconnecting":
-      return "reconnecting";
+      return "重新连接";
+    case "offline":
+      return "网络断开";
+    case "ended":
+      return "进程已结束";
     case "stale":
-      return "stale";
+      return "不可用";
     case "connecting":
-      return "connecting";
+      return "连接中";
     case "idle":
     default:
-      return "idle";
+      return "未连接";
   }
 }
 
@@ -70,7 +90,9 @@ function statusDotClass(state: ConnectionState): string {
     case "waiting":
     case "reconnecting":
     case "connecting":
+    case "offline":
       return "bg-amber-400";
+    case "ended":
     case "stale":
       return "bg-red-500";
     default:
@@ -84,6 +106,26 @@ function canRetryStatus(status: AppServerStatus["status"]): boolean {
   );
 }
 
+function readableReason(reason: string): string {
+  if (/Dev session not started/i.test(reason)) {
+    return "开发服务尚未启动";
+  }
+  if (/Sandbox unavailable/i.test(reason)) {
+    return "Sandbox 尚不可用，正在等待预览启动";
+  }
+  if (/command id not ready/i.test(reason)) {
+    return "日志进程尚未就绪";
+  }
+  const exit = reason.match(/exited with code\s+(-?\d+)/i);
+  if (exit) {
+    return `开发进程已结束（退出码 ${exit[1]}）`;
+  }
+  if (/Failed to read command logs/i.test(reason)) {
+    return "暂时无法读取日志，正在重新连接";
+  }
+  return reason;
+}
+
 export function DevServerLogsPanel({
   sessionId,
   generation,
@@ -92,16 +134,18 @@ export function DevServerLogsPanel({
   expanded,
   onExpandedChange,
 }: DevServerLogsPanelProps) {
-  const [logs, setLogs] = useState("");
+  const [buffer, setBuffer] = useState(emptyDevLogBuffer);
   const [streamState, setStreamState] = useState<
     Exclude<ConnectionState, "idle">
   >("connecting");
   const [follow, setFollow] = useState(true);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   const scrollRef = useRef<HTMLPreElement | null>(null);
   const seenGenerationRef = useRef(generation);
+  const retryExhaustedRef = useRef(false);
   /** Retry eligibility — must not restart the SSE effect when status flickers. */
   const appServerStatusRef = useRef(appServerStatus);
 
@@ -111,6 +155,7 @@ export function DevServerLogsPanel({
 
   const connection: ConnectionState =
     active && expanded ? streamState : "idle";
+  const renderedLogs = useMemo(() => parseAnsiText(buffer.text), [buffer.text]);
 
   useEffect(() => {
     if (!active || !expanded) {
@@ -124,12 +169,13 @@ export function DevServerLogsPanel({
     /** Set before intentional close so EventSource onerror does not double-retry. */
     let ignoreNextError = false;
     let sawLive = false;
+    retryExhaustedRef.current = false;
 
     if (seenGenerationRef.current !== generation) {
       seenGenerationRef.current = generation;
       queueMicrotask(() => {
         if (!cancelled) {
-          setLogs("");
+          setBuffer(emptyDevLogBuffer());
           setStatusDetail(null);
           setStreamState("reconnecting");
         }
@@ -153,23 +199,42 @@ export function DevServerLogsPanel({
       }
     };
 
-    const scheduleRetry = (reason: string) => {
+    const scheduleRetry = (
+      reason: string,
+      visibleState?: "waiting" | "reconnecting" | "ended",
+    ) => {
+      const detail = readableReason(reason);
       clearRetry();
       if (cancelled) {
         return;
       }
 
+      if (!navigator.onLine) {
+        setStreamState("offline");
+        setStatusDetail("网络已断开，等待恢复");
+        return;
+      }
+
       if (!canRetryStatus(appServerStatusRef.current)) {
         setStreamState("stale");
-        setStatusDetail(reason);
+        setStatusDetail(detail);
+        return;
+      }
+      if (retryAttempt >= 8) {
+        retryExhaustedRef.current = true;
+        setStreamState("stale");
+        setStatusDetail("长时间无法连接日志；可收起后重新打开重试");
         return;
       }
 
       // Soft ceiling — keep trying while preview is warm; lengthen backoff.
-      const delay = Math.min(15_000, 800 * 2 ** Math.min(retryAttempt, 4));
+      const base = Math.min(15_000, 800 * 2 ** Math.min(retryAttempt, 4));
+      const delay = Math.round(base * (0.8 + Math.random() * 0.4));
       retryAttempt += 1;
-      setStreamState(sawLive ? "reconnecting" : "waiting");
-      setStatusDetail(reason);
+      setStreamState(
+        visibleState ?? (sawLive ? "reconnecting" : "waiting"),
+      );
+      setStatusDetail(detail);
       retryTimer = setTimeout(() => {
         connect();
       }, delay);
@@ -177,6 +242,11 @@ export function DevServerLogsPanel({
 
     const connect = () => {
       if (cancelled) {
+        return;
+      }
+      if (!navigator.onLine) {
+        setStreamState("offline");
+        setStatusDetail("网络已断开，等待恢复");
         return;
       }
 
@@ -204,20 +274,38 @@ export function DevServerLogsPanel({
         switch (payload.type) {
           case "meta":
             sawLive = true;
+            retryExhaustedRef.current = false;
+            seenGenerationRef.current = payload.generation;
+            setBuffer((current) =>
+              setDevLogIdentity(current, {
+                generation: payload.generation,
+                cmdId: payload.cmdId,
+                sessionName: payload.sessionName,
+              }),
+            );
             setStreamState("live");
             setStatusDetail(null);
             retryAttempt = 0;
             break;
           case "snapshot":
             sawLive = true;
-            setLogs(`${payload.stdout ?? ""}${payload.stderr ?? ""}`);
+            setBuffer((current) =>
+              applyDevLogSnapshot(
+                current,
+                payload.stdout ?? "",
+                payload.stderr ?? "",
+                payload.truncated,
+              ),
+            );
             setStreamState("live");
             setStatusDetail(null);
             retryAttempt = 0;
             break;
           case "chunk":
             sawLive = true;
-            setLogs((prev) => prev + payload.text);
+            setBuffer((current) =>
+              appendDevLogChunk(current, payload.stream, payload.text),
+            );
             setStreamState("live");
             break;
           case "waiting":
@@ -226,7 +314,12 @@ export function DevServerLogsPanel({
             break;
           case "stale":
             closeSource({ ignoreError: true });
-            scheduleRetry(payload.reason);
+            scheduleRetry(
+              payload.reason,
+              /exited|ended|not found/i.test(payload.reason)
+                ? "ended"
+                : undefined,
+            );
             break;
           case "error":
             closeSource({ ignoreError: true });
@@ -249,28 +342,62 @@ export function DevServerLogsPanel({
         closeSource({ ignoreError: true });
         scheduleRetry(
           sawLive
-            ? "Log stream disconnected — reconnecting"
-            : "Connection failed — retrying",
+            ? "日志连接已中断，正在重新连接"
+            : "连接失败，正在重试",
         );
       };
     };
 
+    const onOffline = () => {
+      closeSource({ ignoreError: true });
+      clearRetry();
+      setStreamState("offline");
+      setStatusDetail("网络已断开，等待恢复");
+    };
+    const onOnline = () => {
+      if (cancelled) {
+        return;
+      }
+      retryAttempt = 0;
+      retryExhaustedRef.current = false;
+      setStatusDetail("网络已恢复，正在重新连接");
+      connect();
+    };
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
     connect();
 
     return () => {
       cancelled = true;
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
       clearRetry();
       closeSource({ ignoreError: true });
     };
     // Intentionally omit appServerStatus — status flicker must not tear down a live SSE.
-  }, [active, expanded, sessionId, generation]);
+  }, [active, expanded, sessionId, generation, retryKey]);
+
+  useEffect(() => {
+    if (
+      active &&
+      expanded &&
+      navigator.onLine &&
+      !retryExhaustedRef.current &&
+      canRetryStatus(appServerStatus) &&
+      (streamState === "stale" ||
+        streamState === "ended" ||
+        streamState === "offline")
+    ) {
+      setRetryKey((value) => value + 1);
+    }
+  }, [active, expanded, appServerStatus, streamState]);
 
   useEffect(() => {
     if (!follow || !scrollRef.current) {
       return;
     }
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [logs, follow, expanded]);
+  }, [buffer.text, follow, expanded]);
 
   const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -346,16 +473,16 @@ export function DevServerLogsPanel({
                 onChange={(e) => setFollow(e.target.checked)}
                 className="h-3 w-3 rounded border-zinc-300"
               />
-              Follow
+              自动滚动
             </label>
             <button
               type="button"
-              onClick={() => setLogs("")}
+              onClick={() => setBuffer((current) => clearDevLogBuffer(current))}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              title="Clear local view"
+              title="清空当前进程的本地显示"
             >
               <Trash2 className="h-3 w-3" strokeWidth={2} />
-              Clear
+              清空
             </button>
           </>
         ) : null}
@@ -367,11 +494,21 @@ export function DevServerLogsPanel({
           style={{ height }}
           className="overflow-auto border-t border-zinc-200 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-200 dark:border-zinc-800"
         >
-          {logs || (
+          {buffer.text ? (
+            renderedLogs.map((segment, index) => (
+              <span key={index} style={segment.style}>
+                {segment.text}
+              </span>
+            ))
+          ) : (
             <span className="text-zinc-500">
               {connection === "waiting" || connection === "connecting"
-                ? "Waiting for dev server logs…"
-                : "No output yet."}
+                ? "等待开发服务器日志…"
+                : connection === "offline"
+                  ? "网络已断开，恢复后会自动继续。"
+                  : connection === "ended"
+                    ? "当前开发进程已结束，等待服务恢复。"
+                    : "暂无输出。"}
             </span>
           )}
         </pre>

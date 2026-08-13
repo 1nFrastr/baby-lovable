@@ -44,6 +44,13 @@ Agent / checkpoint **仍只写 Freestyle**。GitHub 侧由 Freestyle GitHub Sync
 - 分支分叉时 Freestyle **不 force-push**；需在 GitHub 或 Freestyle 侧手动合拢后再同步
 - Local sandbox 不提供此 API / UI；无稳定登录 `userId` 时需先登录（授权挂在用户上）
 
+## Preview Console 日志一致性
+
+- Daytona Console 以 `generation + devSessionName + devCmdId` 标识当前日志源；服务重启或外部替换命令后必须切换身份并清除旧进程日志
+- 持久化 `devCmdId` 使用前会校验仍属于当前 Daytona session；失效时回退到最新活动命令并写回
+- 断网时保留已有日志并暂停连接，恢复联网后先取当前命令快照再继续 follow
+- stdout/stderr 明确标识；浏览器只保留最近的有界日志，截断会提示；Clear 保留当前命令水位，重连不会恢复已清除的旧内容
+
 ## 存储
 
 - Local：`.baby-lovable/sessions/<id>/git-repository.json` + `git-sync-tasks/`；用户授权 `.baby-lovable/users/<userId>/github-app.json`

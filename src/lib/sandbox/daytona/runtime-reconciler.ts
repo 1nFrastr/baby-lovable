@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 
 import { getSession } from "@/lib/session/store";
 import {
+  DEV_SESSION,
   formatStartError,
   startDevSession,
   stopDevSession,
@@ -259,6 +260,7 @@ async function demoteStalePreviewReady(
   sessionId: string,
   http: number,
 ): Promise<DaytonaRuntimeSnapshot> {
+  const current = await getRuntimeSnapshot(sessionId, null, { fresh: true });
   logDaytonaBootstrap(
     sessionId,
     "preview",
@@ -269,6 +271,9 @@ async function demoteStalePreviewReady(
     // Allow actionStartDev (reconcile skips when devSessionName is set).
     devSessionName: null,
     devCmdId: null,
+    // The next pnpm dev command is a new log identity. Publish it immediately
+    // so open consoles stop accepting chunks from the stale command.
+    generation: current.generation + 1,
     lastError: `Preview probe HTTP ${http} — restarting pnpm dev`,
   });
 }
@@ -813,6 +818,15 @@ async function reconcileLoop(
       }
     }
 
+    // HTTP can recover after a stale-ready demotion before startDev runs.
+    // Restore the deterministic process identity before declaring convergence.
+    if (snapshot.observed === "preview-ready" && !snapshot.devSessionName) {
+      snapshot = await upsertWithRetry(sessionId, {
+        devSessionName: DEV_SESSION(sessionId),
+        lastError: null,
+      });
+    }
+
     // Prefer caller's wait target (sandbox-ready) over durable preview-ready.
     if (isDesiredSatisfied({ ...snapshot, desired: returnWhen })) {
       return snapshot;
@@ -922,6 +936,12 @@ export async function ensureDesiredState(
           `http=${probe}`,
         );
         if (probe < 400) {
+          if (!snapshot.devSessionName) {
+            snapshot = await upsertWithRetry(sessionId, {
+              devSessionName: DEV_SESSION(sessionId),
+              lastError: null,
+            });
+          }
           return snapshot;
         }
         snapshot = await demoteStalePreviewReady(sessionId, probe);

@@ -22,6 +22,43 @@ export type DevLogStreamEvent =
   | { type: "error"; message: string };
 
 /**
+ * Daytona follow may replay the complete command history from byte zero.
+ * Consume that replay incrementally, including when it arrives in many chunks.
+ */
+function createSnapshotReplayFilter(snapshot: string) {
+  let offset = 0;
+  let filtering = snapshot.length > 0;
+
+  return (chunk: string): string => {
+    // Daytona's callback transport can leak STX frame separators between
+    // chunks. They are not command output and would break replay matching.
+    const cleanChunk = chunk.replaceAll("\u0002", "");
+    if (!filtering || !cleanChunk) {
+      return cleanChunk;
+    }
+
+    let consumed = 0;
+    while (
+      consumed < cleanChunk.length &&
+      offset < snapshot.length &&
+      cleanChunk[consumed] === snapshot[offset]
+    ) {
+      consumed += 1;
+      offset += 1;
+    }
+
+    if (consumed === 0) {
+      filtering = false;
+      return cleanChunk;
+    }
+    if (offset >= snapshot.length || consumed < cleanChunk.length) {
+      filtering = false;
+    }
+    return cleanChunk.slice(consumed);
+  };
+}
+
+/**
  * Snapshot + follow Daytona session command logs until abort or stream end.
  * On abort, callbacks stop; the SDK WebSocket is best-effort (no public close API).
  */
@@ -75,6 +112,9 @@ export async function streamDevCommandLogs(
     return;
   }
 
+  const filterStdoutReplay = createSnapshotReplayFilter(snapshot.stdout ?? "");
+  const filterStderrReplay = createSnapshotReplayFilter(snapshot.stderr ?? "");
+
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     const finish = (err?: unknown) => {
@@ -106,13 +146,19 @@ export async function streamDevCommandLogs(
           if (signal.aborted || !chunk) {
             return;
           }
-          onEvent({ type: "chunk", stream: "stdout", text: chunk });
+          const text = filterStdoutReplay(chunk);
+          if (text) {
+            onEvent({ type: "chunk", stream: "stdout", text });
+          }
         },
         (chunk) => {
           if (signal.aborted || !chunk) {
             return;
           }
-          onEvent({ type: "chunk", stream: "stderr", text: chunk });
+          const text = filterStderrReplay(chunk);
+          if (text) {
+            onEvent({ type: "chunk", stream: "stderr", text });
+          }
         },
       )
       .then(() => finish())

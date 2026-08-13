@@ -86,6 +86,37 @@ describe("streamDevCommandLogs", () => {
     ]);
   });
 
+  it("removes a fragmented full-history replay from follow callbacks", async () => {
+    const sandbox = mockSandbox({
+      snapshot: { stdout: "boot\nready\n", stderr: "warn\n" },
+      followChunks: [
+        { stream: "stdout", text: "boot\n" },
+        { stream: "stderr", text: "warn" },
+        { stream: "stdout", text: "ready\nnew\n" },
+        { stream: "stderr", text: "\u0002\nlater\n" },
+      ],
+    });
+    const events: Array<{ type: string }> = [];
+
+    await streamDevCommandLogs(
+      sandbox as never,
+      "preview-sess",
+      "cmd-1",
+      (event) => events.push(event),
+      new AbortController().signal,
+    );
+
+    expect(events).toEqual([
+      {
+        type: "snapshot",
+        stdout: "boot\nready\n",
+        stderr: "warn\n",
+      },
+      { type: "chunk", stream: "stdout", text: "new\n" },
+      { type: "chunk", stream: "stderr", text: "later\n" },
+    ]);
+  });
+
   it("emits stale when command already exited", async () => {
     const sandbox = mockSandbox({
       snapshot: { stdout: "done\n", stderr: "" },
