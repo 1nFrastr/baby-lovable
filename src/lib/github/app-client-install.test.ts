@@ -165,7 +165,7 @@ describe("installation-scoped GitHub APIs", () => {
     expect(repos.at(-1)?.fullName).toBe("octocat/repo-001");
   });
 
-  it("restricts repository lookup and verifies the selection is empty", async () => {
+  it("restricts repository lookup to the selected repository", async () => {
     process.env.GITHUB_APP_ID = "12345";
     process.env.GITHUB_APP_PRIVATE_KEY = TEST_PRIVATE_KEY;
     vi.stubGlobal(
@@ -189,28 +189,20 @@ describe("installation-scoped GitHub APIs", () => {
               private: true,
               html_url: "https://github.com/octocat/existing",
               created_at: "2026-08-13T08:00:00Z",
-              size: 0,
+              size: 4,
               owner: { login: "octocat" },
             }),
             { status: 200 },
-          );
-        }
-        if (url.endsWith("/repos/octocat/existing/commits?per_page=1")) {
-          return new Response(
-            JSON.stringify({ message: "Git Repository is empty." }),
-            { status: 409 },
           );
         }
         throw new Error(`unexpected ${url}`);
       }),
     );
 
-    await expect(
-      getGithubInstallationRepository(99, 321, { requireEmpty: true }),
-    ).resolves.toMatchObject({
+    await expect(getGithubInstallationRepository(99, 321)).resolves.toMatchObject({
       id: 321,
       fullName: "octocat/existing",
-      size: 0,
+      size: 4,
     });
   });
 });

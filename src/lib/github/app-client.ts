@@ -273,7 +273,6 @@ export async function listGithubInstallationRepositories(
 export async function getGithubInstallationRepository(
   installationId: number,
   repositoryId: number,
-  options: { requireEmpty?: boolean } = {},
 ): Promise<GithubInstallationRepository> {
   const token = await getInstallationAccessToken(installationId, {
     repositoryIds: [repositoryId],
@@ -291,31 +290,7 @@ export async function getGithubInstallationRepository(
   if (repo.id !== repositoryId) {
     throw new GithubAppError("GitHub repository does not match selection", 403);
   }
-  const mapped = mapRepository(repo);
-  if (!options.requireEmpty) {
-    return mapped;
-  }
-  if (mapped.size > 0) {
-    throw new GithubAppError("只能连接没有任何 commit 的空仓库", 409);
-  }
-
-  const commitsPath = `/repos/${encodeURIComponent(mapped.ownerLogin)}/${encodeURIComponent(mapped.name)}/commits?per_page=1`;
-  try {
-    const commits = await githubApi<Array<{ sha: string }>>(commitsPath, token);
-    if (commits.length === 0) {
-      return mapped;
-    }
-  } catch (error) {
-    if (
-      error instanceof GithubAppError &&
-      error.status === 409 &&
-      /empty/i.test(error.message)
-    ) {
-      return mapped;
-    }
-    throw error;
-  }
-  throw new GithubAppError("只能连接没有任何 commit 的空仓库", 409);
+  return mapRepository(repo);
 }
 
 /** True when GitHub signals that an App installation is gone or inaccessible. */

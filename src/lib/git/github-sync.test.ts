@@ -73,13 +73,20 @@ describe("normalizeGithubRepoName", () => {
 describe("normalizeGitRepository github fields", () => {
   it("fills defaults for legacy jsonb rows", () => {
     const legacy = emptyGitRepository("sess_1");
-    const { githubRepoName, githubSyncStatus, githubSyncError, ...rest } =
-      legacy;
+    const {
+      githubRepoName,
+      lastGithubRepositoryId,
+      githubSyncStatus,
+      githubSyncError,
+      ...rest
+    } = legacy;
     void githubRepoName;
+    void lastGithubRepositoryId;
     void githubSyncStatus;
     void githubSyncError;
     const normalized = normalizeGitRepository(rest as typeof legacy);
     expect(normalized.githubRepoName).toBeNull();
+    expect(normalized.lastGithubRepositoryId).toBeNull();
     expect(normalized.githubSyncStatus).toBe("idle");
     expect(normalized.githubSyncError).toBeNull();
   });
@@ -158,7 +165,7 @@ describe("installation repository selection and Freestyle link", () => {
     delete process.env.FREESTYLE_API_KEY;
   });
 
-  it("lists only empty repositories from the verified installation", async () => {
+  it("lists only empty repositories before the first successful link", async () => {
     githubMocks.listRepositories.mockResolvedValue([
       {
         id: 321,
@@ -180,7 +187,35 @@ describe("installation repository selection and Freestyle link", () => {
     expect(githubMocks.listRepositories).toHaveBeenCalledWith(99);
   });
 
-  it("links only the repository selected by id, then unlinks", async () => {
+  it("includes only empty repositories and the last linked repository", async () => {
+    githubMocks.listRepositories.mockResolvedValue([
+      {
+        id: 321,
+        fullName: "octocat/empty",
+        size: 0,
+      },
+      {
+        id: 322,
+        fullName: "octocat/last-linked",
+        size: 4,
+      },
+      {
+        id: 323,
+        fullName: "octocat/unrelated",
+        size: 8,
+      },
+    ]);
+    const repositories = await listAvailableGithubRepositories(
+      "user_1",
+      identity,
+      322,
+    );
+    expect(repositories.map((repository) => repository.id)).toEqual([
+      321, 322,
+    ]);
+  });
+
+  it("links the selected repository and allows relinking after unlink", async () => {
     const sessionId = "sess_gh_1";
     const provisioned = await readySession(sessionId);
     const linked = await linkSelectedGithubRepository(
@@ -189,10 +224,9 @@ describe("installation repository selection and Freestyle link", () => {
       "user_1",
       identity,
     );
-    expect(githubMocks.getRepository).toHaveBeenCalledWith(99, 321, {
-      requireEmpty: true,
-    });
+    expect(githubMocks.getRepository).toHaveBeenCalledWith(99, 321);
     expect(linked.githubRepoName).toBe("octocat/existing");
+    expect(linked.lastGithubRepositoryId).toBe(321);
     expect(adapter.githubSync.get(provisioned.repoId!)).toBe(
       "octocat/existing",
     );
@@ -205,7 +239,29 @@ describe("installation repository selection and Freestyle link", () => {
 
     const unlinked = await unlinkGithubRepo(sessionId, "user_1");
     expect(unlinked.githubSyncStatus).toBe("idle");
+    expect(unlinked.lastGithubRepositoryId).toBe(321);
     expect(adapter.githubSync.has(provisioned.repoId!)).toBe(false);
+
+    githubMocks.getRepository.mockResolvedValueOnce({
+      id: 321,
+      fullName: "octocat/existing",
+      name: "existing",
+      ownerLogin: "octocat",
+      private: true,
+      htmlUrl: "https://github.com/octocat/existing",
+      createdAt: "2026-08-13T08:00:00Z",
+      size: 4,
+    });
+    const relinked = await linkSelectedGithubRepository(
+      sessionId,
+      321,
+      "user_1",
+      identity,
+    );
+    expect(relinked.githubSyncStatus).toBe("linked");
+    expect(adapter.githubSync.get(provisioned.repoId!)).toBe(
+      "octocat/existing",
+    );
   });
 
   it("rejects a repository outside the installation scope", async () => {
@@ -220,16 +276,27 @@ describe("installation repository selection and Freestyle link", () => {
     expect(adapter.enableGithubSyncCalls).toBe(0);
   });
 
-  it("rejects a repository that gained a commit before linking", async () => {
+  it("delegates repository conflicts to Freestyle", async () => {
     const sessionId = "sess_gh_nonempty";
     await readySession(sessionId);
-    githubMocks.getRepository.mockRejectedValue(
-      new GithubAppError("只能连接没有任何 commit 的空仓库", 409),
-    );
+    githubMocks.getRepository.mockResolvedValue({
+      id: 321,
+      fullName: "octocat/existing",
+      name: "existing",
+      ownerLogin: "octocat",
+      private: true,
+      htmlUrl: "https://github.com/octocat/existing",
+      createdAt: "2026-08-13T08:00:00Z",
+      size: 4,
+    });
+    adapter.enableGithubSyncError = "remote history conflicts with Freestyle";
     await expect(
       linkSelectedGithubRepository(sessionId, 321, "user_1", identity),
-    ).rejects.toMatchObject({ status: 409 });
-    expect(adapter.enableGithubSyncCalls).toBe(0);
+    ).rejects.toMatchObject({
+      status: 502,
+      message: "remote history conflicts with Freestyle",
+    });
+    expect(adapter.enableGithubSyncCalls).toBe(1);
   });
 
   it("rejects an installation bound to another GitHub identity", async () => {

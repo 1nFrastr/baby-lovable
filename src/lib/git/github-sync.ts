@@ -306,6 +306,7 @@ export async function getGithubSyncStatus(
 export async function listAvailableGithubRepositories(
   userId: string | null,
   githubIdentity: GithubAuthIdentity | null,
+  lastGithubRepositoryId: number | null = null,
 ): Promise<GithubInstallationRepository[]> {
   const { installationId } = await verifyGithubInstallation(
     userId,
@@ -314,7 +315,10 @@ export async function listAvailableGithubRepositories(
   try {
     const repositories =
       await listGithubInstallationRepositories(installationId);
-    return repositories.filter((repository) => repository.size === 0);
+    return repositories.filter(
+      (repository) =>
+        repository.size === 0 || repository.id === lastGithubRepositoryId,
+    );
   } catch (error) {
     if (isGithubAppInstallMissingError(error)) {
       await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
@@ -334,6 +338,7 @@ export async function listAvailableGithubRepositories(
 
 async function enableGithubRepoSync(
   sessionId: string,
+  githubRepositoryId: number,
   githubRepoNameRaw: string,
   userId: string | null,
 ): Promise<SessionGitRepository> {
@@ -361,6 +366,7 @@ async function enableGithubRepoSync(
     sessionId,
     () => ({
       githubRepoName,
+      lastGithubRepositoryId: githubRepositoryId,
       githubSyncStatus: "linked" as const,
       githubSyncError: null,
     }),
@@ -388,12 +394,8 @@ export async function linkSelectedGithubRepository(
     selected = await getGithubInstallationRepository(
       installationId,
       repositoryId,
-      { requireEmpty: true },
     );
   } catch (error) {
-    if (error instanceof GithubAppError && error.status === 409) {
-      throw new GithubSyncError(error.message, 409);
-    }
     if (
       error instanceof GithubAppError &&
       (error.status === 403 ||
@@ -417,7 +419,12 @@ export async function linkSelectedGithubRepository(
   ) {
     throw new GithubSyncError("当前仅支持个人账号名下的 GitHub 仓库", 403);
   }
-  return enableGithubRepoSync(sessionId, selected.fullName, userId);
+  return enableGithubRepoSync(
+    sessionId,
+    selected.id,
+    selected.fullName,
+    userId,
+  );
 }
 
 export async function unlinkGithubRepo(

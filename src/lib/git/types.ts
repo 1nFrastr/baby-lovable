@@ -41,6 +41,8 @@ export interface SessionGitRepository {
   syncError: string | null;
   /** Linked GitHub repo as `owner/repo` when Freestyle GitHub Sync is enabled. */
   githubRepoName: string | null;
+  /** Last repository successfully linked through Freestyle, retained after unlink. */
+  lastGithubRepositoryId: number | null;
   githubSyncStatus: GithubSyncStatus;
   githubSyncError: string | null;
   /** True when sandbox was lost and remote has no recoverable history. */
@@ -121,6 +123,7 @@ export function emptyGitRepository(
     syncStatus: "idle",
     syncError: null,
     githubRepoName: null,
+    lastGithubRepositoryId: null,
     githubSyncStatus: "idle",
     githubSyncError: null,
     unrecoverable: false,
@@ -139,6 +142,7 @@ export function normalizeGitRepository(
   return {
     ...repo,
     githubRepoName: repo.githubRepoName ?? null,
+    lastGithubRepositoryId: repo.lastGithubRepositoryId ?? null,
     githubSyncStatus: repo.githubSyncStatus ?? "idle",
     githubSyncError: repo.githubSyncError ?? null,
     provisionWorkflowRunId: repo.provisionWorkflowRunId ?? null,

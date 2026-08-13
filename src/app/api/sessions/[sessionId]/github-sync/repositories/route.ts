@@ -4,6 +4,7 @@ import {
   GithubSyncError,
   listAvailableGithubRepositories,
 } from "@/lib/git/github-sync";
+import { readGitRepository } from "@/lib/git/repository-store";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
@@ -31,12 +32,22 @@ export async function GET(
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+    const repository = await readGitRepository(sessionId, auth.userId);
+    const lastGithubRepositoryId =
+      repository?.lastGithubRepositoryId ?? null;
     const repositories = await listAvailableGithubRepositories(
       auth.userId,
       auth.githubIdentity ?? null,
+      lastGithubRepositoryId,
     );
     return NextResponse.json(
-      { repositories },
+      {
+        repositories: repositories.map((githubRepository) => ({
+          ...githubRepository,
+          isLastLinked:
+            githubRepository.id === lastGithubRepositoryId,
+        })),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

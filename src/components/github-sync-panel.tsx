@@ -38,6 +38,7 @@ interface GithubRepositoryOption {
   htmlUrl: string;
   createdAt: string;
   size: number;
+  isLastLinked: boolean;
 }
 
 interface GithubSyncPanelProps {
@@ -568,7 +569,7 @@ export function GithubSyncPanel({
               ) : (
                 <>
                   <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
-                    选择空仓库
+                    选择仓库
                     <select
                       value={selectedRepositoryId}
                       onChange={(event) =>
@@ -585,11 +586,12 @@ export function GithubSyncPanel({
                         repositories.map((repo) => (
                           <option key={repo.id} value={repo.id}>
                             {repo.fullName}
+                            {repo.isLastLinked ? " · 上次关联" : ""}
                             {repo.private ? " · private" : ""}
                           </option>
                         ))
                       ) : (
-                        <option value="">没有可连接的空仓库</option>
+                        <option value="">没有可连接的仓库</option>
                       )}
                     </select>
                   </label>
@@ -597,7 +599,7 @@ export function GithubSyncPanel({
                   repositories !== null &&
                   repositories.length === 0 ? (
                     <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-                      请创建仓库时不要添加 README、.gitignore 或 License，然后刷新列表。
+                      请在 GitHub App 设置中授权仓库，然后刷新列表。
                     </p>
                   ) : null}
                   <div className="flex items-center gap-3">
@@ -619,7 +621,7 @@ export function GithubSyncPanel({
                       className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 dark:text-zinc-400"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      新建空仓库
+                      新建仓库
                     </a>
                   </div>
                   <button
