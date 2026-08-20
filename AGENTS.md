@@ -156,7 +156,7 @@ For host-app code changes (not generated apps), also run `npm run lint` and `npm
 See `.env.example`:
 
 - `AI_GATEWAY_API_KEY` — Vercel AI Gateway (or `VERCEL_OIDC_TOKEN`)
-- `AI_MODEL` — default `minimax/minimax-m3`
+- `AI_MODEL` — default `deepseek/deepseek-v4-flash`
 - `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend
 - `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs
 - `DAYTONA_API_KEY` — required remote workspace

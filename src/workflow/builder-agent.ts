@@ -68,7 +68,7 @@ export function createBuilderAgent(
   const runtimeContext: BuilderAgentContext = {
     sessionId,
   };
-  const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
+  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
 
   const agent = new WorkflowAgent({
     model: modelId,

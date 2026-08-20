@@ -287,7 +287,7 @@ async function main(): Promise<void> {
   logger.banner([
     `baby-lovable agent · CLI`,
     `session   : ${session.id}`,
-    `model     : ${process.env.AI_MODEL ?? "minimax/minimax-m3"}`,
+    `model     : ${process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash"}`,
     `workspace : daytona:workspace`,
   ]);
 

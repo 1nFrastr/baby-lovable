@@ -63,7 +63,7 @@ export async function runAgentTurn({
   });
   const startedAt = Date.now();
   const writable = trace.createWritable();
-  const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
+  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
   const maxOutputTokens = resolveMaxOutputTokens(modelId);
 
   const result = await runAgentStreamWithAutoContinue({

@@ -4,6 +4,7 @@ export const OUTPUT_TOKEN_MAX = 32_000;
 /** Known provider output limits; clamped to OUTPUT_TOKEN_MAX (or env override). */
 const MODEL_OUTPUT_LIMITS: Record<string, number> = {
   "minimax/minimax-m3": 131_072,
+  "deepseek/deepseek-v4-flash": 1_048_576,
 };
 
 /**

@@ -41,7 +41,7 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(sessionId);
 
   const maxSteps = 30;
-  const modelId = process.env.AI_MODEL ?? "minimax/minimax-m3";
+  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
   const maxOutputTokens = resolveMaxOutputTokens(modelId);
   const trace = createAgentTrace({
     sessionId,
