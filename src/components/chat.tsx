@@ -207,7 +207,7 @@ export function Chat({
       : "ready";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
           Project Chat

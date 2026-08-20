@@ -1,9 +1,14 @@
 "use client";
 
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
 
 import type { SessionSummary } from "@/lib/session/types";
 import { isActiveRunStatus } from "@/lib/session/types";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface SessionSidebarProps {
   sessions: SessionSummary[];
@@ -14,6 +19,8 @@ interface SessionSidebarProps {
   onCreate: () => void;
   isCreating?: boolean;
   isSwitching?: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 function formatRelativeTime(value: string): string {
@@ -34,41 +41,108 @@ export function SessionSidebar({
   onCreate,
   isCreating = false,
   isSwitching = false,
+  collapsed = false,
+  onToggleCollapsed,
 }: SessionSidebarProps) {
   const highlightedId = pendingSessionId ?? activeSessionId;
   const navigationBusy = isCreating || isSwitching;
 
+  if (collapsed) {
+    return (
+      <aside
+        className="flex h-full w-full flex-col items-center border-r border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-800 dark:bg-zinc-950"
+        aria-label="会话栏"
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              aria-label="展开会话栏"
+              aria-expanded={false}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            >
+              <PanelLeft className="h-4 w-4" strokeWidth={2} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">展开会话栏</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={navigationBusy}
+              aria-busy={isCreating}
+              aria-label="新建会话"
+              className="mt-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            >
+              {isCreating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+              ) : (
+                <Plus className="h-4 w-4" strokeWidth={2} />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">新建会话</TooltipContent>
+        </Tooltip>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+    <aside
+      className="flex h-full w-full flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950"
+      aria-label="会话栏"
+    >
+      <div className="border-b border-zinc-200 px-3 py-3 dark:border-zinc-800">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               Sessions
             </p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               Next.js builder projects
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onCreate}
-            disabled={navigationBusy}
-            aria-busy={isCreating}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-          >
-            {isCreating ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-                Creating…
-              </>
-            ) : (
-              <>
-                <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-                New
-              </>
-            )}
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={navigationBusy}
+              aria-busy={isCreating}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+                  Creating…
+                </>
+              ) : (
+                <>
+                  <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                  New
+                </>
+              )}
+            </button>
+            {onToggleCollapsed ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleCollapsed}
+                    aria-label="收起会话栏"
+                    aria-expanded={true}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  >
+                    <PanelLeftClose className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">收起会话栏</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
         </div>
       </div>
 

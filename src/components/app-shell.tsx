@@ -19,14 +19,22 @@ import {
   useSyncSessionSummary,
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
+import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
 import { toSessionRunStatus } from "@/lib/session/runtime-projection";
 import { useSessionRuntime } from "@/lib/session/runtime-query";
+import { cn } from "@/lib/utils";
+import {
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+} from "@/lib/workspace-layout";
 
 import { AuthUserBar } from "./auth-user-bar";
 import { Chat } from "./chat";
 import { MvpNoticeCarousel } from "./mvp-notice-carousel";
 import { PreviewPanel } from "./preview-panel";
+import { ResizeHandle } from "./resize-handle";
 import { SessionSidebar } from "./session-sidebar";
+import { WorkspaceMainSplit } from "./workspace-main-split";
 
 const GITHUB_REPO_URL = "https://github.com/1nFrastr/baby-lovable";
 
@@ -46,34 +54,54 @@ function GitHubIcon({ className }: { className?: string }) {
 
 function SessionWorkspaceLoading({
   label = "正在载入会话…",
+  chatRatio,
+  isDragging,
+  onResize,
+  onDragStart,
+  onDragEnd,
+  onNudge,
 }: {
   label?: string;
+  chatRatio: number;
+  isDragging: boolean;
+  onResize: (clientX: number) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onNudge: (direction: -1 | 1) => void;
 }) {
   return (
-    <div
-      className="flex h-full min-h-0"
-      role="status"
-      aria-label={label}
-    >
-      <div className="flex min-w-0 flex-1 items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
-          <span>{label}</span>
-        </div>
-      </div>
-      <section className="flex min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
-        <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            Preview
-          </p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            正在连接预览环境
-          </p>
-        </div>
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-zinc-100 dark:bg-zinc-950">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
-        </div>
-      </section>
+    <div role="status" aria-label={label} className="h-full min-h-0">
+      <WorkspaceMainSplit
+        chatRatio={chatRatio}
+        isDragging={isDragging}
+        onResize={onResize}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onNudge={onNudge}
+        left={
+          <div className="flex h-full min-w-0 items-center justify-center">
+            <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+              <span>{label}</span>
+            </div>
+          </div>
+        }
+        right={
+          <section className="flex h-full min-w-0 flex-col border-l border-zinc-200 dark:border-zinc-800">
+            <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                Preview
+              </p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                正在连接预览环境
+              </p>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-zinc-100 dark:bg-zinc-950">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+            </div>
+          </section>
+        }
+      />
     </div>
   );
 }
@@ -101,6 +129,22 @@ export function AppShell() {
   );
   /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
+  const {
+    containerRef,
+    mainRef,
+    isDragging,
+    sidebarCollapsed,
+    sidebarWidth,
+    expandedSidebarWidth,
+    chatRatio,
+    beginDrag,
+    endDrag,
+    resizeSidebar,
+    resizeChat,
+    toggleCollapsed,
+    nudgeSidebar,
+    nudgeChat,
+  } = useWorkspaceLayout();
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const activeSession = sessionQuery.data?.session ?? null;
@@ -286,20 +330,46 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <SessionSidebar
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          pendingSessionId={pendingSessionId}
-          onSelect={handleSelectSession}
-          onCreate={() => {
-            void handleCreateSession();
-          }}
-          isCreating={isCreating}
-          isSwitching={isSwitchingSession || isNavPending}
+      <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">
+        <div
+          className={cn(
+            "relative h-full shrink-0 overflow-hidden",
+            !isDragging && "transition-[width] duration-200 ease-out",
+          )}
+          style={{ width: sidebarWidth }}
+        >
+          <SessionSidebar
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            pendingSessionId={pendingSessionId}
+            onSelect={handleSelectSession}
+            onCreate={() => {
+              void handleCreateSession();
+            }}
+            isCreating={isCreating}
+            isSwitching={isSwitchingSession || isNavPending}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleCollapsed}
+          />
+        </div>
+        <ResizeHandle
+          label="调整会话栏宽度"
+          valueNow={expandedSidebarWidth}
+          valueMin={SIDEBAR_MIN_WIDTH}
+          valueMax={SIDEBAR_MAX_WIDTH}
+          valueText={
+            sidebarCollapsed
+              ? "会话栏已收起"
+              : `会话栏 ${expandedSidebarWidth} 像素`
+          }
+          onDrag={resizeSidebar}
+          onDragStart={beginDrag}
+          onDragEnd={endDrag}
+          onNudge={(direction) => nudgeSidebar(direction * 16)}
+          onDoubleClick={toggleCollapsed}
         />
 
-        <main className="min-w-0 flex-1">
+        <main ref={mainRef} className="min-w-0 flex-1 overflow-hidden">
           {isBootstrapping ? (
             <div className="flex h-full items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
               Loading sessions…
@@ -318,7 +388,15 @@ export function AppShell() {
               </button>
             </div>
           ) : showWorkspaceLoading || (activeSessionId != null && !activeSession) ? (
-            <SessionWorkspaceLoading label={workspaceLoadingLabel} />
+            <SessionWorkspaceLoading
+              label={workspaceLoadingLabel}
+              chatRatio={chatRatio}
+              isDragging={isDragging}
+              onResize={resizeChat}
+              onDragStart={beginDrag}
+              onDragEnd={endDrag}
+              onNudge={(direction) => nudgeChat(direction * 0.02)}
+            />
           ) : !activeSessionId || !activeSession ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-lg text-zinc-700 dark:text-zinc-200">
@@ -349,8 +427,14 @@ export function AppShell() {
               </button>
             </div>
           ) : (
-            <div className="flex h-full min-h-0">
-              <div className="min-w-0 flex-1">
+            <WorkspaceMainSplit
+              chatRatio={chatRatio}
+              isDragging={isDragging}
+              onResize={resizeChat}
+              onDragStart={beginDrag}
+              onDragEnd={endDrag}
+              onNudge={(direction) => nudgeChat(direction * 0.02)}
+              left={
                 <Chat
                   key={activeSessionId}
                   sessionId={activeSessionId}
@@ -362,26 +446,28 @@ export function AppShell() {
                   }}
                   onAppTestStatus={handleAppTestStatus}
                 />
-              </div>
-              <PreviewPanel
-                key={activeSessionId}
-                sessionId={activeSessionId}
-                runtimeProjection={runtimeQuery.data?.projection ?? null}
-                runtimeLoading={
-                  runtimeQuery.isPending ||
-                  (runtimeQuery.isFetching && !runtimeQuery.data)
-                }
-                runtimeError={
-                  runtimeQuery.isError && !runtimeQuery.data
-                    ? runtimeQuery.error instanceof Error
-                      ? runtimeQuery.error.message
-                      : "Failed to load session runtime"
-                    : null
-                }
-                chatAppTest={chatAppTest}
-                chatAppTestReady={chatAppTestReady}
-              />
-            </div>
+              }
+              right={
+                <PreviewPanel
+                  key={activeSessionId}
+                  sessionId={activeSessionId}
+                  runtimeProjection={runtimeQuery.data?.projection ?? null}
+                  runtimeLoading={
+                    runtimeQuery.isPending ||
+                    (runtimeQuery.isFetching && !runtimeQuery.data)
+                  }
+                  runtimeError={
+                    runtimeQuery.isError && !runtimeQuery.data
+                      ? runtimeQuery.error instanceof Error
+                        ? runtimeQuery.error.message
+                        : "Failed to load session runtime"
+                      : null
+                  }
+                  chatAppTest={chatAppTest}
+                  chatAppTestReady={chatAppTestReady}
+                />
+              }
+            />
           )}
         </main>
       </div>
