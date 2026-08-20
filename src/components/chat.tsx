@@ -44,6 +44,9 @@ import {
 const APP_TEST_USER_PROMPT =
   "Please run a quick happy-path UI test of the main flow.";
 
+/** Cap streamed UI updates so long reasoning/markdown does not trip React #185. */
+const CHAT_STREAM_THROTTLE_MS = 50;
+
 interface ChatProps {
   sessionId: string;
   /** Completed messages from the Supabase session row. */
@@ -88,6 +91,7 @@ export function Chat({
     id: sessionId,
     transport,
     messages,
+    throttle: CHAT_STREAM_THROTTLE_MS,
     onError: () => {
       onSessionRefresh?.();
     },

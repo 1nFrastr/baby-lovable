@@ -171,7 +171,7 @@ export type ReasoningContentProps = HTMLAttributes<HTMLDivElement> & {
 
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => {
-    const { isStreaming, isOpen } = useReasoning();
+    const { isOpen } = useReasoning();
 
     if (!isOpen) {
       return null;
@@ -185,9 +185,7 @@ export const ReasoningContent = memo(
         )}
         {...props}
       >
-        <Streamdown isAnimating={isStreaming} mode="static">
-          {children}
-        </Streamdown>
+        <Streamdown mode="static">{children}</Streamdown>
       </div>
     );
   },

@@ -318,10 +318,10 @@ export const MessageBranchPage = ({
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 export const MessageResponse = memo(
-  ({ className, isAnimating, animated, ...props }: MessageResponseProps) => (
+  ({ className, isAnimating, animated = false, ...props }: MessageResponseProps) => (
     <Streamdown
       {...props}
-      animated={animated ?? (isAnimating ? { duration: 0 } : false)}
+      animated={animated}
       className={cn(
         "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
