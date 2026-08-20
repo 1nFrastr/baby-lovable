@@ -20,7 +20,7 @@ import {
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
-import { toSessionRunStatus } from "@/lib/session/runtime-projection";
+import { toSessionRunStatus, isFinishedRuntimeRunStatus } from "@/lib/session/runtime-projection";
 import { useSessionRuntime } from "@/lib/session/runtime-query";
 import { cn } from "@/lib/utils";
 import {
@@ -173,11 +173,7 @@ export function AppShell() {
     const prev = prevRuntimeRunStatus.current;
     prevRuntimeRunStatus.current = status;
 
-    if (
-      activeSessionId &&
-      prev === "running" &&
-      (status === "done" || status === "error" || status === "idle")
-    ) {
+    if (activeSessionId && prev === "running" && status && isFinishedRuntimeRunStatus(status)) {
       invalidateSessionDetail(activeSessionId);
     }
   }, [

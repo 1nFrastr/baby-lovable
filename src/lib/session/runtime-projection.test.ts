@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   emptyRuntimeProjection,
+  isFinishedRuntimeRunStatus,
+  mapSessionRunStatus,
   mergeRuntimeProjection,
   shouldBumpRuntimeVersion,
+  toSessionRunStatus,
 } from "./runtime-projection";
 
 describe("runtime projection merge / bump", () => {
@@ -73,5 +76,14 @@ describe("runtime projection merge / bump", () => {
 
     expect(shouldBumpRuntimeVersion(before, after)).toBe(true);
     expect(after.sourceControl.status).toBe("syncing");
+  });
+});
+
+describe("session run status mapping", () => {
+  it("maps cancelled to a distinct runtime status so the composer can unlock", () => {
+    expect(mapSessionRunStatus("cancelled")).toBe("cancelled");
+    expect(toSessionRunStatus("cancelled")).toBe("cancelled");
+    expect(isFinishedRuntimeRunStatus("cancelled")).toBe(true);
+    expect(isFinishedRuntimeRunStatus("running")).toBe(false);
   });
 });

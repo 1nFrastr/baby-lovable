@@ -14,7 +14,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
-import type { SessionRuntimeProjection } from "@/lib/session/runtime-projection";
+import {
+  isFinishedRuntimeRunStatus,
+  type SessionRuntimeProjection,
+} from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
 
 import { DevServerLogsPanel } from "./dev-server-logs-panel";
@@ -342,10 +345,7 @@ export function PreviewPanel({
     prevAgentRunStatusRef.current = runStatus;
 
     const turnFinished =
-      previous === "running" &&
-      (runStatus === "done" ||
-        runStatus === "error" ||
-        runStatus === "idle");
+      previous === "running" && isFinishedRuntimeRunStatus(runStatus);
     if (!turnFinished) {
       return;
     }

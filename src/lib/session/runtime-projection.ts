@@ -5,7 +5,19 @@ import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 import type { SessionRunStatus } from "./types";
 
 /** UI-facing run status (simplified from SessionRunStatus). */
-export type RuntimeRunStatus = "idle" | "running" | "done" | "error";
+export type RuntimeRunStatus =
+  | "idle"
+  | "running"
+  | "done"
+  | "error"
+  | "cancelled";
+
+/** True when the projection left an in-flight agent turn. */
+export function isFinishedRuntimeRunStatus(
+  status: RuntimeRunStatus,
+): boolean {
+  return status !== "running";
+}
 
 export type RuntimeAppServerStatus =
   | "stopped"
@@ -62,6 +74,7 @@ export function mapSessionRunStatus(
     case "failed":
       return "error";
     case "cancelled":
+      return "cancelled";
     case "idle":
     default:
       return "idle";
@@ -79,6 +92,8 @@ export function toSessionRunStatus(
       return "completed";
     case "error":
       return "failed";
+    case "cancelled":
+      return "cancelled";
     case "idle":
     default:
       return "idle";

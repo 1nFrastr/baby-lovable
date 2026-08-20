@@ -87,6 +87,7 @@ export function Chat({
     sendMessage,
     status,
     error,
+    stop,
   } = useChat({
     id: sessionId,
     transport,
@@ -102,6 +103,9 @@ export function Chat({
   // (post-turn drain) — that same rule leaves the composer open for the whole
   // weak-network gap before runStatus flips. Lock optimistically on send.
   const [awaitingRunStart, setAwaitingRunStart] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const [interruptReleased, setInterruptReleased] = useState(false);
   const leftReadyDuringAwaitRef = useRef(false);
   const lastSyncedPersistedRef = useRef("");
 
@@ -128,7 +132,19 @@ export function Chat({
     }
   }, [awaitingRunStart, runStatus, status]);
 
-  const isLiveTurn = awaitingRunStart || isLiveChatTurn(status, runStatus);
+  useEffect(() => {
+    if (stopping && !isActiveRunStatus(runStatus) && !awaitingRunStart) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- unlock after cancel lands
+      setStopping(false);
+    }
+    if (interruptReleased && !isActiveRunStatus(runStatus)) {
+      setInterruptReleased(false);
+    }
+  }, [awaitingRunStart, interruptReleased, runStatus, stopping]);
+
+  const isLiveTurn =
+    !interruptReleased &&
+    (stopping || awaitingRunStart || isLiveChatTurn(status, runStatus));
 
   const displayMessages = useMemo(
     () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
@@ -174,6 +190,8 @@ export function Chat({
       }
 
       setAwaitingRunStart(true);
+      setStopError(null);
+      setInterruptReleased(false);
       void sendMessage({ text: trimmed });
       onSessionRefresh?.();
     },
@@ -185,9 +203,45 @@ export function Chat({
       return;
     }
     setAwaitingRunStart(true);
+    setStopError(null);
+    setInterruptReleased(false);
     void sendMessage({ text: APP_TEST_USER_PROMPT });
     onSessionRefresh?.();
   }, [isLiveTurn, onSessionRefresh, sendMessage]);
+
+  const handleStop = useCallback(() => {
+    if (stopping) {
+      return;
+    }
+
+    setStopError(null);
+    setStopping(true);
+    setAwaitingRunStart(false);
+    stop();
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/sessions/${sessionId}/chat/cancel`,
+          { method: "POST" },
+        );
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(data?.error ?? `Stop failed (${response.status})`);
+        }
+        setInterruptReleased(true);
+        setStopping(false);
+        onSessionRefresh?.();
+      } catch (cause) {
+        setStopping(false);
+        setStopError(
+          cause instanceof Error ? cause.message : "Stop failed",
+        );
+      }
+    })();
+  }, [onSessionRefresh, sessionId, stop, stopping]);
 
   const showStreamingIndicator =
     isLiveTurn &&
@@ -201,11 +255,9 @@ export function Chat({
   const isStreaming =
     isLiveTurn && (status === "streaming" || status === "submitted");
   const submitStatus = isLiveTurn
-    ? status === "streaming"
-      ? "streaming"
-      : status === "error"
-        ? "error"
-        : "submitted"
+    ? status === "error"
+      ? "error"
+      : "streaming"
     : status === "error"
       ? "error"
       : "ready";
@@ -218,8 +270,9 @@ export function Chat({
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Session {sessionId}
-          {isLiveTurn ? " · running…" : ""}
+          {stopping ? " · stopping…" : isLiveTurn ? " · running…" : ""}
           {error ? ` · ${error.message}` : ""}
+          {stopError ? ` · ${stopError}` : ""}
         </p>
       </div>
 
@@ -271,7 +324,11 @@ export function Chat({
                 </PromptInputButton>
               ) : null}
             </PromptInputTools>
-            <PromptInputSubmit disabled={isLiveTurn} status={submitStatus} />
+            <PromptInputSubmit
+              disabled={stopping}
+              onStop={handleStop}
+              status={submitStatus}
+            />
           </PromptInputFooter>
         </PromptInput>
       </div>

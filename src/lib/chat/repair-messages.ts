@@ -11,10 +11,15 @@ function textOf(message: UIMessage): string {
     .trim();
 }
 
-function isToolPartIncomplete(part: UIMessage["parts"][number]): boolean {
+export function isToolPartIncomplete(
+  part: UIMessage["parts"][number],
+): boolean {
   return (
     isToolUIPart(part) &&
-    (part.state === "input-streaming" || part.state === "input-available")
+    (part.state === "input-streaming" ||
+      part.state === "input-available" ||
+      part.state === "approval-requested" ||
+      part.state === "approval-responded")
   );
 }
 
