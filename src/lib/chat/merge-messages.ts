@@ -1,5 +1,7 @@
 import type { UIMessage } from "ai";
 
+import { repairUiMessages } from "./repair-messages";
+
 function lastMessage(messages: UIMessage[]): UIMessage | undefined {
   return messages[messages.length - 1];
 }
@@ -44,7 +46,7 @@ export function mergeClientMessagesWithPersisted(
   client: UIMessage[],
 ): UIMessage[] {
   if (client.length === 0) {
-    return dedupeConsecutiveAssistants(persisted);
+    return repairUiMessages(dedupeConsecutiveAssistants(persisted));
   }
 
   const byId = new Map(persisted.map((message) => [message.id, message]));
@@ -74,7 +76,7 @@ export function mergeClientMessagesWithPersisted(
     seen.add(message.id);
   }
 
-  return dedupeConsecutiveAssistants(ordered);
+  return repairUiMessages(dedupeConsecutiveAssistants(ordered));
 }
 
 /**
@@ -116,7 +118,7 @@ export function mergeDisplayMessages(
     isLiveTurn || persistedMessagesLagChat(persisted, chatMessages);
 
   if (!treatAsLive) {
-    return dedupeConsecutiveAssistants(persisted);
+    return repairUiMessages(dedupeConsecutiveAssistants(persisted));
   }
 
   const byId = new Map(persisted.map((message) => [message.id, message]));

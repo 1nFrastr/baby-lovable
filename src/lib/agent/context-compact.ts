@@ -1,6 +1,6 @@
 import { pruneMessages, type ModelMessage } from "ai";
 
-import { sanitizeModelMessages } from "./sanitize-messages";
+import { sanitizeModelMessages, toToolResultOutput } from "./sanitize-messages";
 
 /** Soft budget before we drop older tool rounds entirely (chars/4 ≈ tokens). */
 export const CONTEXT_COMPACT_TOKENS = Math.max(
@@ -61,24 +61,33 @@ function compactToolInput(toolName: string, input: unknown): unknown {
 
 /** Tiny stub for old tool results — keeps call/result pairing, drops payload. */
 function stubToolOutput(toolName: string, output: unknown): unknown {
+  let ok: boolean | undefined;
   if (output != null && typeof output === "object" && !Array.isArray(output)) {
     const rec = output as Record<string, unknown>;
-    if (rec.type === "json" || rec.type === "text") {
-      return {
-        type: "text",
-        value: `[dropped ${toolName} output — re-read workspace if needed]`,
-      };
-    }
     if (typeof rec.ok === "boolean") {
-      return { ok: rec.ok, compacted: true, tool: toolName };
+      ok = rec.ok;
+    } else if (
+      rec.type === "json" &&
+      rec.value != null &&
+      typeof rec.value === "object" &&
+      !Array.isArray(rec.value) &&
+      typeof (rec.value as { ok?: unknown }).ok === "boolean"
+    ) {
+      ok = (rec.value as { ok: boolean }).ok;
     }
   }
-  return { compacted: true, tool: toolName };
+  if (ok != null) {
+    return toToolResultOutput({ ok, compacted: true, tool: toolName });
+  }
+  return {
+    type: "text" as const,
+    value: `[dropped ${toolName} output — re-read workspace if needed]`,
+  };
 }
 
 function compactToolOutput(toolName: string, output: unknown): unknown {
   if (output == null) {
-    return output;
+    return toToolResultOutput(null);
   }
 
   // AI SDK ToolResultOutput wrappers
@@ -103,21 +112,23 @@ function compactToolOutput(toolName: string, output: unknown): unknown {
   }
 
   if (typeof output === "string") {
-    return output.length > 400 ? truncateText(output, 400) : output;
+    return toToolResultOutput(
+      output.length > 400 ? truncateText(output, 400) : output,
+    );
   }
 
   if (!LARGE_RESULT_TOOLS.has(toolName)) {
     const serialized = JSON.stringify(output);
     if (serialized.length <= 800) {
-      return output;
+      return toToolResultOutput(output);
     }
-    return {
+    return toToolResultOutput({
       ok: typeof (output as { ok?: unknown }).ok === "boolean"
         ? (output as { ok: boolean }).ok
         : true,
       compacted: true,
       note: `${toolName} result compacted (${serialized.length} chars)`,
-    };
+    });
   }
 
   if (typeof output === "object" && !Array.isArray(output)) {
@@ -142,17 +153,17 @@ function compactToolOutput(toolName: string, output: unknown): unknown {
       rec.matches = rec.matches.slice(0, 20);
       rec.truncated = true;
     }
-    return rec;
+    return toToolResultOutput(rec);
   }
 
   const serialized = JSON.stringify(output);
   if (serialized.length > 800) {
-    return {
+    return toToolResultOutput({
       compacted: true,
       note: `${toolName} result compacted (${serialized.length} chars)`,
-    };
+    });
   }
-  return output;
+  return toToolResultOutput(output);
 }
 
 /**

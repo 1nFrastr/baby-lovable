@@ -5,6 +5,7 @@ import { getWritable } from "workflow";
 import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { repairUiMessages } from "@/lib/chat/repair-messages";
 import { createBuilderAgent } from "./builder-agent";
 
 import {
@@ -19,9 +20,20 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   "use workflow";
 
   await getSessionStep(sessionId);
-  // Interrupted turns leave tool parts without results — drop them so the
-  // model prompt does not throw AI_MissingToolResultsError.
-  const modelMessages = await convertToModelMessages(messages, {
+  // Failed turns can leave consecutive user rows or an interrupted assistant
+  // with no tool results. Repair order first, then drop incomplete tool calls
+  // so the prompt does not throw AI_InvalidPromptError / AI_MissingToolResultsError.
+  const repairedMessages = repairUiMessages(messages);
+  if (repairedMessages.length !== messages.length) {
+    console.log(
+      formatTraceStdout(
+        sessionId,
+        "WARN",
+        `repaired message sequence ${messages.length} → ${repairedMessages.length} (consecutive/empty rows from a failed turn)`,
+      ),
+    );
+  }
+  const modelMessages = await convertToModelMessages(repairedMessages, {
     ignoreIncompleteToolCalls: true,
   });
 
@@ -82,7 +94,7 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
     if (result) {
       await saveSessionMessagesStep(
         sessionId,
-        messages,
+        repairedMessages,
         result.messages,
         previousModelCount,
       );
@@ -100,7 +112,7 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
 
   await saveSessionMessagesStep(
     sessionId,
-    messages,
+    repairedMessages,
     result.messages,
     previousModelCount,
   );

@@ -9,6 +9,7 @@ loadEnv({ path: ".env", quiet: true });
 
 import { generateId, type UIMessage } from "ai";
 
+import { repairUiMessages } from "@/lib/chat/repair-messages";
 import {
   replaceMessages,
   createSession,
@@ -188,7 +189,7 @@ async function runTurn(
     parts: [{ type: "text", text }],
   };
 
-  const messages = [...session.messages, userMessage];
+  const messages = repairUiMessages([...session.messages, userMessage]);
 
   const { assistantMessage } = await runAgentTurn({
     sessionId: session.id,

@@ -184,6 +184,72 @@ describe("sanitizeModelMessages", () => {
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.role).toBe("user");
   });
+
+  it("merges consecutive user messages left by a failed turn", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "build a todo app" },
+      { role: "user", content: "make it colorful" },
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toEqual({
+      role: "user",
+      content: "build a todo app\n\nmake it colorful",
+    });
+  });
+
+  it("drops an empty interrupted assistant then merges surrounding users", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "add a sidebar" },
+      { role: "assistant", content: [] },
+      { role: "user", content: "try again" },
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toEqual({
+      role: "user",
+      content: "add a sidebar\n\ntry again",
+    });
+  });
+
+  it("wraps invalid tool-result payloads so they match the schema", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_ok",
+            toolName: "checkPreview",
+            input: {},
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_ok",
+            toolName: "checkPreview",
+            output: { ok: true, compacted: true } as never,
+          },
+        ],
+      } as ModelMessage,
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    const tool = result.messages[1];
+    expect(tool?.role).toBe("tool");
+    if (tool?.role === "tool" && Array.isArray(tool.content)) {
+      expect(tool.content[0]).toMatchObject({
+        type: "tool-result",
+        output: { type: "json", value: { ok: true, compacted: true } },
+      });
+    }
+  });
 });
 
 describe("compactModelMessages", () => {
@@ -258,6 +324,16 @@ describe("compactModelMessages", () => {
         const input = part.input as { content?: string };
         expect(input.content).toMatch(/\[compacted:/);
         expect(input.content?.length ?? 0).toBeLessThan(big.length);
+      }
+    }
+
+    const firstResult = result.messages[2];
+    expect(firstResult?.role).toBe("tool");
+    if (firstResult?.role === "tool" && Array.isArray(firstResult.content)) {
+      const part = firstResult.content[0];
+      expect(part?.type).toBe("tool-result");
+      if (part?.type === "tool-result") {
+        expect(part.output).toMatchObject({ type: "json" });
       }
     }
   });

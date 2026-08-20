@@ -9,6 +9,7 @@ import {
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { repairUiMessages } from "@/lib/chat/repair-messages";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
 
@@ -40,9 +41,12 @@ export async function runAgentTurn({
   messages,
   maxSteps = 30,
 }: RunAgentOptions): Promise<RunAgentResult> {
-  const modelMessages = await convertToModelMessages(messages, {
-    ignoreIncompleteToolCalls: true,
-  });
+  const modelMessages = await convertToModelMessages(
+    repairUiMessages(messages),
+    {
+      ignoreIncompleteToolCalls: true,
+    },
+  );
 
   // Non-blocking prelude: preview-ready via reconciler (same as web chat).
   const { kickRuntimeDesired } = await import("@/lib/sandbox/preview");
