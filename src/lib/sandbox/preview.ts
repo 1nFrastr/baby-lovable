@@ -9,8 +9,8 @@
  *        restartAppServer / stopAppServer / deleteSandbox
  *
  * Warm model:
- *   session create / first connect → sandbox-ready, wait:false
- *   first turn / preview open     → preview-ready, wait:false
+ *   session create → after(): Freestyle kick + sandbox-ready (HTTP returns on row insert)
+ *   first turn / preview open → preview-ready, wait:false (+ after wait:true)
  *   AI loop never awaits warm; after() only keeps the isolate alive for reconcile.
  */
 
