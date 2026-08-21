@@ -650,112 +650,104 @@ export function PreviewPanel({
   const canNavigateForward =
     iframeLoaded && Boolean(iframeLocation?.canGoForward);
 
+  const toolbarIconButtonClass =
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-wait disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  const showToolbarStatus =
+    panelTab === "preview" &&
+    Boolean(exportError || displayError || !(preview.status === "ready" && iframeLoaded));
+
   return (
-    <section className="flex h-full min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
-      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
+    <section className="@container flex h-full min-w-0 flex-1 flex-col border-l border-zinc-200 dark:border-zinc-800">
+      <div className="flex items-center gap-1.5 border-b border-zinc-200 px-2 py-1.5 @[320px]:gap-2 @[320px]:px-3 @[320px]:py-2 dark:border-zinc-800">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
             <div
-              className="flex items-center rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
+              className="flex shrink-0 items-center rounded-md border border-zinc-200 p-0.5 dark:border-zinc-700"
               role="tablist"
               aria-label="Preview panel"
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={panelTab === "preview"}
-                onClick={() => setPanelTab("preview")}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                  panelTab === "preview"
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                }`}
-              >
-                Preview
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={panelTab === "files"}
-                onClick={() => {
-                  setFilesMountSessionId(sessionId);
-                  setConsoleExpanded(false);
-                  setPanelTab("files");
-                }}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                  panelTab === "files"
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                }`}
-              >
-                Files
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={panelTab === "history"}
-                onClick={() => {
-                  setHistoryMountSessionId(sessionId);
-                  setConsoleExpanded(false);
-                  setPanelTab("history");
-                }}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                  panelTab === "history"
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                }`}
-              >
-                History
-              </button>
+              {(
+                [
+                  { id: "preview", label: "Preview" },
+                  { id: "files", label: "Files" },
+                  { id: "history", label: "History" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={panelTab === tab.id}
+                  onClick={() => {
+                    if (tab.id === "files") {
+                      setFilesMountSessionId(sessionId);
+                      setConsoleExpanded(false);
+                    } else if (tab.id === "history") {
+                      setHistoryMountSessionId(sessionId);
+                      setConsoleExpanded(false);
+                    }
+                    setPanelTab(tab.id);
+                  }}
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition @[360px]:px-2 @[360px]:py-1 @[360px]:text-xs ${
+                    panelTab === tab.id
+                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                      : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
             <SourceControlStatusChip
               sourceControl={sourceControl}
               visible
             />
             {appTestBusy ? (
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                Testing
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                title="App test running"
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                  aria-hidden
+                />
+                <span className="hidden @[360px]:inline">Testing</span>
               </span>
             ) : null}
           </div>
-          <p
-            className={`text-xs dark:text-zinc-400 ${
-              displayError || exportError
-                ? "whitespace-normal text-red-600 dark:text-red-400"
-                : "truncate text-zinc-500"
-            }`}
-            title={
-              panelTab === "preview" &&
-              preview.status === "ready" &&
-              iframeLoaded
-                ? (iframeLocation?.href ?? readyPreviewUrl)
-                : undefined
-            }
-          >
-            {panelTab === "files" || panelTab === "history"
-              ? "\u00a0"
-              : (exportError ?? toolbarStatus)}
-          </p>
+          {showToolbarStatus ? (
+            <p
+              className={`mt-0.5 text-[11px] leading-snug dark:text-zinc-400 ${
+                displayError || exportError
+                  ? "whitespace-normal text-red-600 dark:text-red-400"
+                  : "truncate text-zinc-500"
+              }`}
+            >
+              {exportError ?? toolbarStatus}
+            </p>
+          ) : null}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-0.5">
           {panelTab === "files" ? (
             <button
               type="button"
               onClick={() => setFilesRefreshKey((key) => key + 1)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className={toolbarIconButtonClass}
+              title="同步文件列表"
+              aria-label="同步文件列表"
             >
               <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
-              Sync
             </button>
           ) : panelTab === "history" ? (
             <button
               type="button"
               onClick={() => setVersionsRefreshKey((key) => key + 1)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className={toolbarIconButtonClass}
+              title="刷新版本历史"
+              aria-label="刷新版本历史"
             >
               <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
-              Refresh
             </button>
           ) : (
             <>
@@ -765,8 +757,13 @@ export function PreviewPanel({
                   void handleExport();
                 }}
                 disabled={exporting}
-                title="Download Freestyle source zip (synced revision; no .git history)"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                title={
+                  exporting
+                    ? "正在导出…"
+                    : "导出源码 zip（已同步版本，不含 .git）"
+                }
+                aria-label={exporting ? "正在导出" : "导出源码"}
+                className={toolbarIconButtonClass}
               >
                 {exporting ? (
                   <RefreshCw
@@ -776,7 +773,6 @@ export function PreviewPanel({
                 ) : (
                   <Download className="h-3.5 w-3.5" strokeWidth={2} />
                 )}
-                {exporting ? "Exporting…" : "Export"}
               </button>
               <GithubSyncPanel
                 sessionId={sessionId}
@@ -790,7 +786,13 @@ export function PreviewPanel({
                   void handleRestart();
                 }}
                 disabled={previewAction !== null}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                title={
+                  previewAction === "restart" ? "正在重启…" : "重启预览服务"
+                }
+                aria-label={
+                  previewAction === "restart" ? "正在重启" : "重启预览"
+                }
+                className={toolbarIconButtonClass}
               >
                 <RotateCcw
                   className={`h-3.5 w-3.5 ${
@@ -798,7 +800,6 @@ export function PreviewPanel({
                   }`}
                   strokeWidth={2}
                 />
-                {previewAction === "restart" ? "Restarting…" : "Restart"}
               </button>
             </>
           )}

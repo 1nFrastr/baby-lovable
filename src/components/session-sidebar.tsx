@@ -102,9 +102,6 @@ export function SessionSidebar({
             <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               Sessions
             </p>
-            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-              Next.js builder projects
-            </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button

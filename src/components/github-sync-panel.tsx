@@ -66,11 +66,6 @@ function GitHubMark({ className }: { className?: string }) {
   );
 }
 
-function shortRepoLabel(fullName: string): string {
-  const repo = fullName.split("/").at(-1) ?? fullName;
-  return repo.length > 18 ? `${repo.slice(0, 16)}…` : repo;
-}
-
 function newGithubRepositoryUrl(sessionId: string): string {
   const shortId = sessionId.replace(/^sess_/, "").slice(0, 10) || "app";
   const params = new URLSearchParams({
@@ -435,26 +430,24 @@ export function GithubSyncPanel({
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
+        aria-label={linked ? `GitHub：${linkedName}` : "连接到 GitHub"}
         onClick={() => setOpen((value) => !value)}
         title={linked ? linkedName! : "连接到 GitHub"}
-        className={`inline-flex max-w-[11rem] items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+        className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
           hasError && !linked
-            ? "border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+            ? "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
             : linked
-              ? "border-emerald-300 text-zinc-800 hover:bg-emerald-50 dark:border-emerald-800 dark:text-zinc-100 dark:hover:bg-emerald-950/40"
-              : "border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              ? "text-zinc-700 hover:bg-emerald-50 dark:text-zinc-200 dark:hover:bg-emerald-950/40"
+              : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
         }`}
       >
         {busy ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : (
-          <GitHubMark className="h-3.5 w-3.5 shrink-0" />
+          <GitHubMark className="h-3.5 w-3.5" />
         )}
-        <span className="truncate">
-          {linked ? shortRepoLabel(linkedName!) : "GitHub"}
-        </span>
         {linked && !busy ? (
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-zinc-900" />
         ) : null}
       </button>
 

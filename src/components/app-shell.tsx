@@ -21,7 +21,7 @@ import {
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
 import { toSessionRunStatus, isFinishedRuntimeRunStatus } from "@/lib/session/runtime-projection";
-import { useSessionRuntime } from "@/lib/session/runtime-query";
+import { useInvalidateSessionRuntime, useSessionRuntime } from "@/lib/session/runtime-query";
 import { cn } from "@/lib/utils";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -118,6 +118,7 @@ export function AppShell() {
   const runtimeQuery = useSessionRuntime(activeSessionId);
   const createSessionMutation = useCreateSessionMutation();
   const invalidateSessionDetail = useInvalidateSessionDetail();
+  const invalidateRuntime = useInvalidateSessionRuntime();
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActivatingSession, setIsActivatingSession] = useState(false);
   /** Optimistic target while router/API lag (weak network). */
@@ -396,10 +397,7 @@ export function AppShell() {
           ) : !activeSessionId || !activeSession ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-lg text-zinc-700 dark:text-zinc-200">
-                创建第一个项目会话
-              </p>
-              <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
-                Daytona 会从 Next.js starter 初始化远程工作区，并将源码持久化到 Freestyle。
+                创建第一个项目
               </p>
               <button
                 type="button"
@@ -439,6 +437,7 @@ export function AppShell() {
                   runStatus={liveRunStatus}
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
+                    invalidateRuntime(activeSessionId);
                   }}
                   onAppTestStatus={handleAppTestStatus}
                 />

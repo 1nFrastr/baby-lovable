@@ -30,13 +30,16 @@ import { ChatMessageParts } from "@/components/chat-message-parts";
 import { Spinner } from "@/components/ui/spinner";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
+  isComposerLocked,
+  shouldReleaseComposerAfterStop,
+} from "@/lib/chat/composer-lock";
+import {
   hasAssistantParts,
   mergeDisplayMessages,
   persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
 import {
   isActiveRunStatus,
-  isLiveChatTurn,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
@@ -104,10 +107,12 @@ export function Chat({
   // weak-network gap before runStatus flips. Lock optimistically on send.
   const [awaitingRunStart, setAwaitingRunStart] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [cancelSucceeded, setCancelSucceeded] = useState(false);
+  const [cancelledHint, setCancelledHint] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
-  const [interruptReleased, setInterruptReleased] = useState(false);
   const leftReadyDuringAwaitRef = useRef(false);
   const lastSyncedPersistedRef = useRef("");
+  const observedActiveRunRef = useRef(false);
 
   useEffect(() => {
     if (!awaitingRunStart) {
@@ -133,18 +138,35 @@ export function Chat({
   }, [awaitingRunStart, runStatus, status]);
 
   useEffect(() => {
-    if (stopping && !isActiveRunStatus(runStatus) && !awaitingRunStart) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- unlock after cancel lands
-      setStopping(false);
+    if (stopping && isActiveRunStatus(runStatus)) {
+      observedActiveRunRef.current = true;
     }
-    if (interruptReleased && !isActiveRunStatus(runStatus)) {
-      setInterruptReleased(false);
-    }
-  }, [awaitingRunStart, interruptReleased, runStatus, stopping]);
+  }, [runStatus, stopping]);
 
-  const isLiveTurn =
-    !interruptReleased &&
-    (stopping || awaitingRunStart || isLiveChatTurn(status, runStatus));
+  useEffect(() => {
+    if (
+      !shouldReleaseComposerAfterStop({
+        cancelSucceeded,
+        runStatus,
+        observedActiveRun: observedActiveRunRef.current,
+      })
+    ) {
+      return;
+    }
+    observedActiveRunRef.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- unlock only after cancel is confirmed
+    setStopping(false);
+    setCancelSucceeded(false);
+    setCancelledHint(true);
+  }, [cancelSucceeded, runStatus]);
+
+  const composerLocked = isComposerLocked({
+    stopping,
+    awaitingRunStart,
+    chatStatus: status,
+    runStatus,
+  });
+  const isLiveTurn = composerLocked;
 
   const displayMessages = useMemo(
     () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
@@ -185,38 +207,41 @@ export function Chat({
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
       const trimmed = message.text.trim();
-      if (!trimmed || isLiveTurn) {
+      if (!trimmed || composerLocked) {
         return;
       }
 
       setAwaitingRunStart(true);
       setStopError(null);
-      setInterruptReleased(false);
+      setCancelSucceeded(false);
+      setCancelledHint(false);
       void sendMessage({ text: trimmed });
       onSessionRefresh?.();
     },
-    [isLiveTurn, onSessionRefresh, sendMessage],
+    [composerLocked, onSessionRefresh, sendMessage],
   );
 
   const handleRunAppTest = useCallback(() => {
-    if (isLiveTurn) {
+    if (composerLocked) {
       return;
     }
     setAwaitingRunStart(true);
     setStopError(null);
-    setInterruptReleased(false);
+    setCancelSucceeded(false);
+    setCancelledHint(false);
     void sendMessage({ text: APP_TEST_USER_PROMPT });
     onSessionRefresh?.();
-  }, [isLiveTurn, onSessionRefresh, sendMessage]);
+  }, [composerLocked, onSessionRefresh, sendMessage]);
 
   const handleStop = useCallback(() => {
-    if (stopping) {
+    if (stopping || !composerLocked) {
       return;
     }
 
     setStopError(null);
+    setCancelSucceeded(false);
+    observedActiveRunRef.current = isActiveRunStatus(runStatus);
     setStopping(true);
-    setAwaitingRunStart(false);
     stop();
 
     void (async () => {
@@ -231,36 +256,50 @@ export function Chat({
           } | null;
           throw new Error(data?.error ?? `Stop failed (${response.status})`);
         }
-        setInterruptReleased(true);
-        setStopping(false);
+        setCancelSucceeded(true);
+        setAwaitingRunStart(false);
         onSessionRefresh?.();
       } catch (cause) {
         setStopping(false);
+        setCancelSucceeded(false);
         setStopError(
           cause instanceof Error ? cause.message : "Stop failed",
         );
       }
     })();
-  }, [onSessionRefresh, sessionId, stop, stopping]);
+  }, [composerLocked, onSessionRefresh, runStatus, sessionId, stop, stopping]);
 
   const showStreamingIndicator =
     isLiveTurn &&
+    !stopping &&
     !hasAssistantParts(displayMessages[displayMessages.length - 1]);
 
   // After the first completed turn only; hide while a turn is in flight.
   const showAppTestButton =
-    !isLiveTurn &&
+    !composerLocked &&
     displayMessages.some((message) => message.role === "assistant");
 
   const isStreaming =
-    isLiveTurn && (status === "streaming" || status === "submitted");
-  const submitStatus = isLiveTurn
+    isLiveTurn &&
+    !stopping &&
+    (status === "streaming" || status === "submitted");
+  const submitStatus = composerLocked
     ? status === "error"
       ? "error"
       : "streaming"
     : status === "error"
       ? "error"
       : "ready";
+  const composerPlaceholder = stopping
+    ? "正在停止，取消成功后即可发送…"
+    : "描述你想构建的应用…";
+  const sessionStatusHint = stopping
+    ? " · 正在停止…"
+    : composerLocked
+      ? " · 正在生成…"
+      : cancelledHint
+        ? " · 已停止"
+        : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -270,7 +309,7 @@ export function Chat({
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Session {sessionId}
-          {stopping ? " · stopping…" : isLiveTurn ? " · running…" : ""}
+          {sessionStatusHint}
           {error ? ` · ${error.message}` : ""}
           {stopError ? ` · ${stopError}` : ""}
         </p>
@@ -280,9 +319,9 @@ export function Chat({
         <ConversationContent className="gap-4 px-6 py-4">
           {displayMessages.length === 0 ? (
             <ConversationEmptyState
-              description="例如：「创建一个待办事项应用,支持添加、完成和删除任务」"
               icon={<MessageSquare className="size-10" />}
-              title="描述你想构建的 Next.js 应用"
+              title="描述你想构建的应用"
+              description=""
             />
           ) : (
             displayMessages.map((message, index) => (
@@ -307,8 +346,23 @@ export function Chat({
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
-              disabled={isLiveTurn}
-              placeholder="描述你的 Next.js 应用需求…"
+              aria-busy={composerLocked || undefined}
+              className={
+                composerLocked
+                  ? "cursor-not-allowed text-muted-foreground"
+                  : undefined
+              }
+              onKeyDown={(event) => {
+                if (
+                  composerLocked &&
+                  event.key === "Enter" &&
+                  !event.shiftKey
+                ) {
+                  event.preventDefault();
+                }
+              }}
+              placeholder={composerPlaceholder}
+              readOnly={composerLocked}
             />
           </PromptInputBody>
           <PromptInputFooter>
@@ -325,9 +379,9 @@ export function Chat({
               ) : null}
             </PromptInputTools>
             <PromptInputSubmit
-              disabled={stopping}
               onStop={handleStop}
               status={submitStatus}
+              stopping={stopping}
             />
           </PromptInputFooter>
         </PromptInput>
