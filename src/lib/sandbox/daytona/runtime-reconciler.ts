@@ -25,6 +25,7 @@ import {
   deriveAppServerStatus,
   hasFreshPreviewEmbed,
   isDesiredSatisfied,
+  resolveTargetDesired,
   type DaytonaDesiredState,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
@@ -249,6 +250,15 @@ export async function markSandboxExternallyDeleted(
     generation: current.generation + 1,
     lastError,
   });
+}
+
+/**
+ * Probe results that mean pnpm/proxy is actually down — restart is warranted.
+ * `httpStatus` maps fetch timeout to 503, and Next also 503s while compiling;
+ * those must not clobber a live preview-ready snapshot.
+ */
+function shouldRestartOnPreviewProbe(http: number): boolean {
+  return http === 400 || http === 502;
 }
 
 /**
@@ -901,14 +911,18 @@ export async function ensureDesiredState(
 
   // What the caller needs vs what we write as durable desired.
   // FS attach requests sandbox-ready; UI warm may already have preview-ready —
-  // never demote desired, but also never make FS wait for full preview boot.
+  // resolveTargetDesired never demotes the warm ladder, but FS still returns
+  // once the VM exists (see reconcileLoop returnWhen).
   const requestedDesired = desired;
-  let targetDesired: DaytonaDesiredState = desired;
+  let targetDesired = resolveTargetDesired(snapshot.desired, requestedDesired, {
+    restart: options?.restart,
+  });
 
   // Already have what the caller asked for (e.g. workspace ready while preview installs).
   // Do not trust durable preview-ready blindly — probe the public URL first so a
-  // dead pnpm/Next (502) or sleepy networking (400 no-IP) re-triggers startDev
-  // without a full restart/recreate.
+  // dead pnpm (502) or sleepy networking (400 no-IP) re-triggers startDev
+  // without a full restart/recreate. Timeout / compile 503 is inconclusive:
+  // demoting those overwrites a live preview with "starting" and kills pnpm.
   if (
     !options?.restart &&
     isDesiredSatisfied({ ...snapshot, desired: requestedDesired }) &&
@@ -935,7 +949,15 @@ export async function ensureDesiredState(
           Date.now() - tProbe,
           `http=${probe}`,
         );
-        if (probe < 400) {
+        if (!shouldRestartOnPreviewProbe(probe)) {
+          if (probe >= 400) {
+            logDaytonaTiming(
+              sessionId,
+              "ensure.previewProbe",
+              0,
+              `keep ready — transient http=${probe}`,
+            );
+          }
           if (!snapshot.devSessionName) {
             snapshot = await upsertWithRetry(sessionId, {
               devSessionName: DEV_SESSION(sessionId),
@@ -955,19 +977,26 @@ export async function ensureDesiredState(
     }
   }
 
-  // Never demote preview-ready → sandbox-ready (FS attach used to clobber warm).
-  if (
-    !options?.restart &&
-    requestedDesired === "sandbox-ready" &&
-    snapshot.desired === "preview-ready"
-  ) {
-    // Keep preview intent; converge under preview-ready instead.
-    targetDesired = "preview-ready";
-  }
-
   let intentGeneration = snapshot.generation + 1;
   const maxDesiredAttempts = 12;
   for (let attempt = 0; attempt < maxDesiredAttempts; attempt++) {
+    // Re-merge on every attempt — a concurrent writer may have raised warm
+    // desired or landed stop/delete since our last read.
+    targetDesired = resolveTargetDesired(snapshot.desired, requestedDesired, {
+      restart: options?.restart,
+      casRetry: attempt > 0,
+    });
+
+    // Durable already holds the merge result — adopt; do not bump generation
+    // just to rewrite the same desired (that used to demote preview→sandbox).
+    if (
+      !options?.restart &&
+      attempt > 0 &&
+      snapshot.desired === targetDesired
+    ) {
+      break;
+    }
+
     try {
       const patch: Parameters<typeof upsertRuntimeSnapshot>[1] = {
         expectedRevision: snapshot.revision,
@@ -987,13 +1016,7 @@ export async function ensureDesiredState(
         throw error;
       }
       snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-      if (
-        snapshot.desired === targetDesired &&
-        snapshot.generation >= intentGeneration
-      ) {
-        break;
-      }
-      // Another intent landed — claim a newer generation and retry.
+      // Another intent landed — claim a newer generation and retry with re-merge.
       intentGeneration = snapshot.generation + 1;
     }
   }

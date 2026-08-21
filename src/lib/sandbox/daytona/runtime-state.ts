@@ -185,6 +185,59 @@ export function hasFreshPreviewEmbed(
   return Boolean(snapshot.previewUrl) && snapshot.previewPort != null;
 }
 
+/**
+ * Warm intents form a lattice: sandbox-ready ⊑ preview-ready.
+ * Higher rank must never be demoted by a weaker concurrent write.
+ */
+function warmDesiredRank(desired: DaytonaDesiredState): number {
+  if (desired === "preview-ready") return 2;
+  if (desired === "sandbox-ready") return 1;
+  return 0;
+}
+
+/**
+ * Merge caller's requested desired with durable desired before writing.
+ *
+ * Rules (bottom-layer; callers may race freely):
+ * - Warm ladder is monotonic: a late sandbox-ready must not clobber preview-ready
+ *   even when it claims a higher generation after CAS retry.
+ * - Explicit teardown (stopped / deleted) always wins when this caller requests it.
+ * - On CAS retry, a warm writer adopts a teardown another isolate just landed
+ *   (otherwise generation bumps would erase UI stop).
+ * - Fresh ensure(warm) after durable stop/delete still re-warms (casRetry=false).
+ * - restart bypasses merge and writes the caller's requested desired.
+ */
+export function resolveTargetDesired(
+  durable: DaytonaDesiredState,
+  requested: DaytonaDesiredState,
+  options?: { restart?: boolean; casRetry?: boolean },
+): DaytonaDesiredState {
+  if (options?.restart) {
+    return requested;
+  }
+
+  if (requested === "stopped" || requested === "deleted") {
+    return requested;
+  }
+
+  if (requested === "sandbox-ready" || requested === "preview-ready") {
+    if (
+      options?.casRetry &&
+      (durable === "stopped" || durable === "deleted")
+    ) {
+      return durable;
+    }
+
+    if (durable === "sandbox-ready" || durable === "preview-ready") {
+      return warmDesiredRank(durable) >= warmDesiredRank(requested)
+        ? durable
+        : requested;
+    }
+  }
+
+  return requested;
+}
+
 /** True when observed reality satisfies the desired target. */
 export function isDesiredSatisfied(snapshot: DaytonaRuntimeSnapshot): boolean {
   // Restart must force another start cycle even if preview already looks ready.

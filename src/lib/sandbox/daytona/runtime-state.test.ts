@@ -7,6 +7,7 @@ import {
   emptyRuntimeSnapshot,
   hasFreshPreviewEmbed,
   isDesiredSatisfied,
+  resolveTargetDesired,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
 
@@ -242,5 +243,44 @@ describe("hasFreshPreviewEmbed", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("resolveTargetDesired", () => {
+  it("keeps warm ladder monotonic (sandbox-ready ⊑ preview-ready)", () => {
+    expect(resolveTargetDesired("preview-ready", "sandbox-ready")).toBe(
+      "preview-ready",
+    );
+    expect(resolveTargetDesired("sandbox-ready", "preview-ready")).toBe(
+      "preview-ready",
+    );
+    expect(resolveTargetDesired("sandbox-ready", "sandbox-ready")).toBe(
+      "sandbox-ready",
+    );
+  });
+
+  it("lets explicit teardown win when requested", () => {
+    expect(resolveTargetDesired("preview-ready", "stopped")).toBe("stopped");
+    expect(resolveTargetDesired("sandbox-ready", "deleted")).toBe("deleted");
+  });
+
+  it("re-warms after stop on a fresh call, but adopts stop on CAS retry", () => {
+    expect(resolveTargetDesired("stopped", "preview-ready")).toBe(
+      "preview-ready",
+    );
+    expect(
+      resolveTargetDesired("stopped", "sandbox-ready", { casRetry: true }),
+    ).toBe("stopped");
+    expect(
+      resolveTargetDesired("deleted", "preview-ready", { casRetry: true }),
+    ).toBe("deleted");
+  });
+
+  it("restart bypasses merge", () => {
+    expect(
+      resolveTargetDesired("preview-ready", "sandbox-ready", {
+        restart: true,
+      }),
+    ).toBe("sandbox-ready");
   });
 });
