@@ -33,10 +33,9 @@ function BuilderToolPart({
 }) {
   const outputLine = formatToolPartOutput(part);
   const errorText = "errorText" in part ? part.errorText : undefined;
-  const isError = part.state === "output-error";
 
   return (
-    <Tool defaultOpen={isError}>
+    <Tool defaultOpen={false}>
       {part.type === "dynamic-tool" ? (
         <ToolHeader
           state={part.state}

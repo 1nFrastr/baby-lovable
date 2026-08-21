@@ -206,6 +206,8 @@ export function PreviewPanel({
   const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null);
   /** Soft prompt after an agent turn — user opts in to remount (avoids interrupting iframe interaction). */
   const [previewRefreshPending, setPreviewRefreshPending] = useState(false);
+  const [previewReloadSpinning, setPreviewReloadSpinning] = useState(false);
+  const previewReloadSpinTimerRef = useRef(0);
   const [previewAction, setPreviewAction] = useState<
     "warm" | "restart" | null
   >(null);
@@ -376,7 +378,9 @@ export function PreviewPanel({
   }, [sourceControl]);
 
   const applyPreviewRefresh = useCallback(() => {
+    window.clearTimeout(previewReloadSpinTimerRef.current);
     setPreviewRefreshPending(false);
+    setPreviewReloadSpinning(true);
     setEmbedRemountNonce((nonce) => nonce + 1);
   }, []);
 
@@ -411,6 +415,29 @@ export function PreviewPanel({
     },
     [applyPreviewRefresh, readyPreviewUrl],
   );
+
+  const handlePreviewReload = useCallback(() => {
+    window.clearTimeout(previewReloadSpinTimerRef.current);
+    setPreviewReloadSpinning(true);
+    navigatePreview("reload");
+    // Soft reload via postMessage usually keeps the same iframe document, so
+    // onLoad may not fire — give a short spin so the click still feels real.
+    previewReloadSpinTimerRef.current = window.setTimeout(() => {
+      setPreviewReloadSpinning(false);
+    }, 700);
+  }, [navigatePreview]);
+
+  useEffect(() => {
+    if (iframeLoaded) {
+      window.clearTimeout(previewReloadSpinTimerRef.current);
+      setPreviewReloadSpinning(false);
+    }
+  }, [iframeLoaded]);
+
+  useEffect(() => {
+    return () => window.clearTimeout(previewReloadSpinTimerRef.current);
+  }, []);
+
   // Open Live View only when the chat stream transitions into a running
   // testPreview after Chat has hydrated history. Refresh / session switch
   // must not pop the PiP for past or in-flight rehydrated runs.
@@ -831,13 +858,19 @@ export function PreviewPanel({
             </button>
             <button
               type="button"
-              onClick={() => navigatePreview("reload")}
-              disabled={!iframeLoaded}
+              onClick={handlePreviewReload}
+              disabled={!iframeLoaded || previewReloadSpinning}
               className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
               title="刷新"
               aria-label="刷新"
+              aria-busy={previewReloadSpinning || undefined}
             >
-              <RotateCw className="h-3.5 w-3.5" strokeWidth={2} />
+              <RotateCw
+                className={`h-3.5 w-3.5 ${
+                  previewReloadSpinning ? "animate-spin" : ""
+                }`}
+                strokeWidth={2}
+              />
             </button>
             <button
               type="button"
