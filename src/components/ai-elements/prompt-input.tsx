@@ -1213,6 +1213,8 @@ export const PromptInputActionMenuItem = ({
 export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
   status?: ChatStatus;
   onStop?: () => void;
+  /** Cancel request in flight — button is not a send control. */
+  stopping?: boolean;
 };
 
 export const PromptInputSubmit = ({
@@ -1221,46 +1223,87 @@ export const PromptInputSubmit = ({
   size = "icon-sm",
   status,
   onStop,
+  stopping = false,
+  disabled,
   onClick,
   children,
   ...props
 }: PromptInputSubmitProps) => {
   const isGenerating = status === "submitted" || status === "streaming";
+  const showStop = Boolean(!stopping && isGenerating && onStop);
+  const isBusy = stopping || showStop;
 
   let Icon = <CornerDownLeftIcon className="size-4" />;
+  let ariaLabel = "Submit";
+  let buttonVariant = variant;
+  let tooltip: string | undefined;
 
-  if (status === "submitted") {
+  if (stopping) {
     Icon = <Spinner />;
+    ariaLabel = "Stopping";
+    buttonVariant = "secondary";
+    tooltip = "正在停止…";
+  } else if (showStop) {
+    Icon = <SquareIcon className="size-3.5 fill-current" />;
+    ariaLabel = "Stop";
+    buttonVariant = "destructive";
+    tooltip = "停止生成";
+  } else if (status === "submitted") {
+    Icon = <Spinner />;
+    ariaLabel = "Submitting";
   } else if (status === "streaming") {
     Icon = <SquareIcon className="size-4" />;
+    ariaLabel = "Stop";
   } else if (status === "error") {
     Icon = <XIcon className="size-4" />;
+    ariaLabel = "Error";
   }
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>) => {
-      if (isGenerating && onStop) {
+      if (stopping) {
         e.preventDefault();
-        onStop();
+        return;
+      }
+      if (showStop) {
+        e.preventDefault();
+        onStop?.();
         return;
       }
       onClick?.(e);
     },
-    [isGenerating, onStop, onClick]
+    [onClick, onStop, showStop, stopping]
   );
 
-  return (
+  const button = (
     <InputGroupButton
-      aria-label={isGenerating ? "Stop" : "Submit"}
-      className={cn(className)}
+      aria-busy={stopping || undefined}
+      aria-label={ariaLabel}
+      className={cn(showStop && "cursor-pointer shadow-sm", className)}
+      disabled={disabled || stopping}
       onClick={handleClick}
       size={size}
-      type={isGenerating && onStop ? "button" : "submit"}
-      variant={variant}
+      title={tooltip}
+      type={isBusy ? "button" : "submit"}
+      variant={buttonVariant}
       {...props}
     >
       {children ?? Icon}
     </InputGroupButton>
+  );
+
+  // Disabled buttons swallow hover, so the native title is the stopping hint.
+  if (!tooltip || stopping) {
+    return button;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {button}
+      </TooltipTrigger>
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
   );
 };
 

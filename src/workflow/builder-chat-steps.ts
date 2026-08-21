@@ -100,10 +100,16 @@ export async function saveSessionMessagesStep(
   const { readDraft, deleteDraft } = await import("@/lib/session/draft-store");
   const { deriveSessionTitle, getSession, replaceMessages, updateSession } =
     await import("@/lib/session/store");
+  const { isActiveRunStatus } = await import("@/lib/session/types");
 
   const session = await getSession(sessionId);
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  // User interrupt already persisted the draft and unlocked the composer.
+  if (!isActiveRunStatus(session.runStatus)) {
+    return { messageCount: session.messages.length, skipped: true };
   }
 
   const runId = session.lastRunId;
@@ -154,29 +160,32 @@ export async function markSessionRunFailedStep(sessionId: string) {
 
   const { deleteDraft } = await import("@/lib/session/draft-store");
   const { getSession, updateSession } = await import("@/lib/session/store");
+  const { isActiveRunStatus } = await import("@/lib/session/types");
 
   const session = await getSession(sessionId);
-  const runId = session?.lastRunId ?? null;
+  if (!session || !isActiveRunStatus(session.runStatus)) {
+    return;
+  }
+
+  const runId = session.lastRunId ?? null;
 
   await updateSession(sessionId, {
     runStatus: "failed",
     lastRunId: null,
   });
-  if (session) {
-    await deleteDraft(sessionId, session.userId);
+  await deleteDraft(sessionId, session.userId);
 
-    const { checkpointSessionTurn } = await import(
-      "@/lib/git/checkpoint-session-turn"
-    );
-    await checkpointSessionTurn({
-      sessionId,
-      messages: session.messages,
-      outcome: "failed",
-      runId,
-      userId: session.userId,
-      sessionTitle: session.title,
-    });
-  }
+  const { checkpointSessionTurn } = await import(
+    "@/lib/git/checkpoint-session-turn"
+  );
+  await checkpointSessionTurn({
+    sessionId,
+    messages: session.messages,
+    outcome: "failed",
+    runId,
+    userId: session.userId,
+    sessionTitle: session.title,
+  });
 }
 
 /** Close the agent writable stream — must run as a step inside workflows. */

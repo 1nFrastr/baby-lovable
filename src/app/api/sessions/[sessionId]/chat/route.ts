@@ -1,8 +1,15 @@
 import { createModelCallToUIChunkTransform } from "@ai-sdk/workflow";
-import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import {
+  createUIMessageStreamResponse,
+  type UIMessage,
+  type UIMessageChunk,
+} from "ai";
 import { after, NextResponse } from "next/server";
 import { start } from "workflow/api";
 
+import { cancelWorkflowRun } from "@/lib/chat/cancel-session-run";
+import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
+import { mergeClientMessagesWithPersisted } from "@/lib/chat/merge-messages";
 import {
   awaitRuntimeDesired,
   kickRuntimeDesired,
@@ -12,8 +19,6 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
-import { mergeClientMessagesWithPersisted } from "@/lib/chat/merge-messages";
 import {
   createEmptyDraft,
   deleteDraft,
@@ -30,6 +35,31 @@ import { builderChat } from "@/workflow/builder-chat";
 /** Preview warm under after() must outlive the chat response headers. */
 export const maxDuration = 300;
 
+function emptyUiMessageStream() {
+  return new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      controller.close();
+    },
+  });
+}
+
+async function discardStartedRun(sessionId: string, runId: string) {
+  try {
+    await cancelWorkflowRun(runId);
+  } catch (error) {
+    console.error(
+      `[chat] cancel unstarted run failed session=${sessionId} run=${runId}:`,
+      error,
+    );
+  }
+  return createUIMessageStreamResponse({
+    stream: emptyUiMessageStream(),
+    headers: {
+      "x-workflow-run-id": runId,
+    },
+  });
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -45,6 +75,7 @@ export async function POST(
     throw error;
   }
 
+  let claimedPending = false;
   try {
     const session = await getSession(sessionId, auth);
 
@@ -74,12 +105,37 @@ export async function POST(
     }
 
     await deleteDraft(sessionId, auth.userId);
+    // Claim the turn so a leftover `cancelled` from the previous stop cannot
+    // discard this new send, while a Stop during kick still wins.
+    await updateSession(sessionId, { runStatus: "pending" }, auth);
+    claimedPending = true;
 
     // Prelude: upgrade to preview-ready without blocking the AI loop.
     await kickRuntimeDesired(sessionId, "preview-ready");
     after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
 
+    const preStart = await getSession(sessionId, auth);
+    if (request.signal.aborted || preStart?.runStatus === "cancelled") {
+      if (preStart?.runStatus !== "cancelled") {
+        await updateSession(sessionId, { runStatus: "cancelled" }, auth);
+      }
+      claimedPending = false;
+      return createUIMessageStreamResponse({
+        stream: emptyUiMessageStream(),
+      });
+    }
+
     const run = await start(builderChat, [sessionId, messages]);
+
+    const latest = await getSession(sessionId, auth);
+    if (request.signal.aborted || latest?.runStatus === "cancelled") {
+      claimedPending = false;
+      if (latest?.runStatus !== "cancelled") {
+        await updateSession(sessionId, { runStatus: "cancelled" }, auth);
+      }
+      return discardStartedRun(sessionId, run.runId);
+    }
+
     await updateSession(
       sessionId,
       {
@@ -88,6 +144,7 @@ export async function POST(
       },
       auth,
     );
+    claimedPending = false;
 
     await writeDraft(
       sessionId,
@@ -112,6 +169,16 @@ export async function POST(
       },
     });
   } catch (error) {
+    if (claimedPending) {
+      try {
+        const latest = await getSession(sessionId, auth);
+        if (latest?.runStatus === "pending" && !latest.lastRunId) {
+          await updateSession(sessionId, { runStatus: "idle" }, auth);
+        }
+      } catch {
+        // Best-effort unlock if the turn claim never reached a workflow run.
+      }
+    }
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

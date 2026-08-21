@@ -5,6 +5,7 @@ import { getWritable } from "workflow";
 import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import { createBuilderAgent } from "./builder-agent";
 
@@ -23,7 +24,9 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   // Failed turns can leave consecutive user rows or an interrupted assistant
   // with no tool results. Repair order first, then drop incomplete tool calls
   // so the prompt does not throw AI_InvalidPromptError / AI_MissingToolResultsError.
-  const repairedMessages = repairUiMessages(messages);
+  const repairedMessages = repairUiMessages(
+    finalizeInterruptedMessages(messages),
+  );
   if (repairedMessages.length !== messages.length) {
     console.log(
       formatTraceStdout(

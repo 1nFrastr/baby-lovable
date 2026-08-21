@@ -30,13 +30,20 @@ import { ChatMessageParts } from "@/components/chat-message-parts";
 import { Spinner } from "@/components/ui/spinner";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
+  finalizeInterruptedMessages,
+  pickCancelledAssistantSnapshot,
+} from "@/lib/chat/interrupt-assistant";
+import {
+  isComposerLocked,
+  shouldReleaseComposerAfterStop,
+} from "@/lib/chat/composer-lock";
+import {
   hasAssistantParts,
   mergeDisplayMessages,
   persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
 import {
   isActiveRunStatus,
-  isLiveChatTurn,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
@@ -87,6 +94,7 @@ export function Chat({
     sendMessage,
     status,
     error,
+    stop,
   } = useChat({
     id: sessionId,
     transport,
@@ -102,8 +110,13 @@ export function Chat({
   // (post-turn drain) — that same rule leaves the composer open for the whole
   // weak-network gap before runStatus flips. Lock optimistically on send.
   const [awaitingRunStart, setAwaitingRunStart] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [cancelSucceeded, setCancelSucceeded] = useState(false);
+  const [cancelledHint, setCancelledHint] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
   const leftReadyDuringAwaitRef = useRef(false);
   const lastSyncedPersistedRef = useRef("");
+  const observedActiveRunRef = useRef(false);
 
   useEffect(() => {
     if (!awaitingRunStart) {
@@ -128,11 +141,47 @@ export function Chat({
     }
   }, [awaitingRunStart, runStatus, status]);
 
-  const isLiveTurn = awaitingRunStart || isLiveChatTurn(status, runStatus);
+  useEffect(() => {
+    if (stopping && isActiveRunStatus(runStatus)) {
+      observedActiveRunRef.current = true;
+    }
+  }, [runStatus, stopping]);
+
+  useEffect(() => {
+    if (
+      !shouldReleaseComposerAfterStop({
+        cancelSucceeded,
+        runStatus,
+        observedActiveRun: observedActiveRunRef.current,
+      })
+    ) {
+      return;
+    }
+    observedActiveRunRef.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- unlock only after cancel is confirmed
+    setStopping(false);
+    setCancelSucceeded(false);
+    setCancelledHint(true);
+  }, [cancelSucceeded, runStatus]);
+
+  const composerLocked = isComposerLocked({
+    stopping,
+    awaitingRunStart,
+    chatStatus: status,
+    runStatus,
+  });
+  const isLiveTurn = composerLocked;
 
   const displayMessages = useMemo(
-    () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
-    [messages, chatMessages, draft, isLiveTurn],
+    () =>
+      mergeDisplayMessages(
+        messages,
+        chatMessages,
+        draft,
+        isLiveTurn,
+        stopping,
+      ),
+    [messages, chatMessages, draft, isLiveTurn, stopping],
   );
 
   useEffect(() => {
@@ -169,46 +218,121 @@ export function Chat({
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
       const trimmed = message.text.trim();
-      if (!trimmed || isLiveTurn) {
+      if (!trimmed || composerLocked) {
         return;
       }
 
       setAwaitingRunStart(true);
+      setStopError(null);
+      setCancelSucceeded(false);
+      setCancelledHint(false);
       void sendMessage({ text: trimmed });
       onSessionRefresh?.();
     },
-    [isLiveTurn, onSessionRefresh, sendMessage],
+    [composerLocked, onSessionRefresh, sendMessage],
   );
 
   const handleRunAppTest = useCallback(() => {
-    if (isLiveTurn) {
+    if (composerLocked) {
       return;
     }
     setAwaitingRunStart(true);
+    setStopError(null);
+    setCancelSucceeded(false);
+    setCancelledHint(false);
     void sendMessage({ text: APP_TEST_USER_PROMPT });
     onSessionRefresh?.();
-  }, [isLiveTurn, onSessionRefresh, sendMessage]);
+  }, [composerLocked, onSessionRefresh, sendMessage]);
+
+  const handleStop = useCallback(() => {
+    if (stopping || !composerLocked) {
+      return;
+    }
+
+    setStopError(null);
+    setCancelSucceeded(false);
+    observedActiveRunRef.current = isActiveRunStatus(runStatus);
+    setStopping(true);
+
+    // Seal incomplete tools in the live thread immediately so "Editing…" cannot
+    // linger while cancel + draft persist catch up.
+    const sealedMessages = finalizeInterruptedMessages(chatMessages);
+    setMessages(sealedMessages);
+    const clientAssistant = pickCancelledAssistantSnapshot([
+      sealedMessages.at(-1),
+    ]);
+
+    stop();
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/sessions/${sessionId}/chat/cancel`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ assistant: clientAssistant }),
+          },
+        );
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(data?.error ?? `Stop failed (${response.status})`);
+        }
+        setCancelSucceeded(true);
+        setAwaitingRunStart(false);
+        onSessionRefresh?.();
+      } catch (cause) {
+        setStopping(false);
+        setCancelSucceeded(false);
+        setStopError(
+          cause instanceof Error ? cause.message : "Stop failed",
+        );
+      }
+    })();
+  }, [
+    chatMessages,
+    composerLocked,
+    onSessionRefresh,
+    runStatus,
+    sessionId,
+    setMessages,
+    stop,
+    stopping,
+  ]);
 
   const showStreamingIndicator =
     isLiveTurn &&
+    !stopping &&
     !hasAssistantParts(displayMessages[displayMessages.length - 1]);
 
   // After the first completed turn only; hide while a turn is in flight.
   const showAppTestButton =
-    !isLiveTurn &&
+    !composerLocked &&
     displayMessages.some((message) => message.role === "assistant");
 
   const isStreaming =
-    isLiveTurn && (status === "streaming" || status === "submitted");
-  const submitStatus = isLiveTurn
-    ? status === "streaming"
-      ? "streaming"
-      : status === "error"
-        ? "error"
-        : "submitted"
+    isLiveTurn &&
+    !stopping &&
+    (status === "streaming" || status === "submitted");
+  const submitStatus = composerLocked
+    ? status === "error"
+      ? "error"
+      : "streaming"
     : status === "error"
       ? "error"
       : "ready";
+  const composerPlaceholder = stopping
+    ? "正在停止，取消成功后即可发送…"
+    : "描述你想构建的应用…";
+  const sessionStatusHint = stopping
+    ? " · 正在停止…"
+    : composerLocked
+      ? " · 正在生成…"
+      : cancelledHint
+        ? " · 已停止"
+        : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -218,8 +342,9 @@ export function Chat({
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Session {sessionId}
-          {isLiveTurn ? " · running…" : ""}
+          {sessionStatusHint}
           {error ? ` · ${error.message}` : ""}
+          {stopError ? ` · ${stopError}` : ""}
         </p>
       </div>
 
@@ -227,9 +352,9 @@ export function Chat({
         <ConversationContent className="gap-4 px-6 py-4">
           {displayMessages.length === 0 ? (
             <ConversationEmptyState
-              description="例如：「创建一个待办事项应用,支持添加、完成和删除任务」"
               icon={<MessageSquare className="size-10" />}
-              title="描述你想构建的 Next.js 应用"
+              title="描述你想构建的应用"
+              description=""
             />
           ) : (
             displayMessages.map((message, index) => (
@@ -254,8 +379,23 @@ export function Chat({
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
-              disabled={isLiveTurn}
-              placeholder="描述你的 Next.js 应用需求…"
+              aria-busy={composerLocked || undefined}
+              className={
+                composerLocked
+                  ? "cursor-not-allowed text-muted-foreground"
+                  : undefined
+              }
+              onKeyDown={(event) => {
+                if (
+                  composerLocked &&
+                  event.key === "Enter" &&
+                  !event.shiftKey
+                ) {
+                  event.preventDefault();
+                }
+              }}
+              placeholder={composerPlaceholder}
+              readOnly={composerLocked}
             />
           </PromptInputBody>
           <PromptInputFooter>
@@ -271,7 +411,11 @@ export function Chat({
                 </PromptInputButton>
               ) : null}
             </PromptInputTools>
-            <PromptInputSubmit disabled={isLiveTurn} status={submitStatus} />
+            <PromptInputSubmit
+              onStop={handleStop}
+              status={submitStatus}
+              stopping={stopping}
+            />
           </PromptInputFooter>
         </PromptInput>
       </div>

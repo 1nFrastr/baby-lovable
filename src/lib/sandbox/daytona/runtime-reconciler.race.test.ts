@@ -740,6 +740,57 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
   });
 
+  it("late weak sandbox-ready cannot demote concurrent preview-ready via CAS", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      observeRuntime.mockResolvedValue(observed({ phase: "missing" }));
+
+      // Session-create after() and UI warm race from the same stopped baseline.
+      // Individual ensure() return values may be stale mid-race; durable must
+      // settle on the stronger warm intent.
+      await Promise.all([
+        withFreshIsolate(sessionId, () =>
+          ensureDesiredState(sessionId, "sandbox-ready", {
+            wait: false,
+            kick: false,
+            owner: "session-create-after",
+          }),
+        ),
+        withFreshIsolate(sessionId, () =>
+          ensureDesiredState(sessionId, "preview-ready", {
+            wait: false,
+            kick: false,
+            owner: "ui-warm",
+          }),
+        ),
+        withFreshIsolate(sessionId, () =>
+          ensureDesiredState(sessionId, "sandbox-ready", {
+            wait: false,
+            kick: false,
+            owner: "late-sandbox-retry",
+          }),
+        ),
+      ]);
+
+      enterIsolate(sessionId);
+      const final = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+      expect(final.desired).toBe("preview-ready");
+
+      // A further weak write after settle must still not demote.
+      const late = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "sandbox-ready", {
+          wait: false,
+          kick: false,
+          owner: "post-settle-sandbox",
+        }),
+      );
+      expect(late.desired).toBe("preview-ready");
+      enterIsolate(sessionId);
+      const again = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+      expect(again.desired).toBe("preview-ready");
+    });
+  });
+
   it("parallel create from two owners: only one sandboxId persists", async () => {
     await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
@@ -898,7 +949,7 @@ describe("runtime-reconciler isolate / UI races", () => {
     });
   });
 
-  it("recovers log identity when a stale preview probe recovers before restart", async () => {
+  it("keeps durable preview-ready when probe times out as 503", async () => {
     await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       const { upsertRuntimeSnapshot } = await import("./runtime-store");
@@ -912,28 +963,21 @@ describe("runtime-reconciler isolate / UI races", () => {
         generation: 1,
       });
 
+      // httpStatus maps AbortSignal.timeout to 503 — same as Next compiling.
       httpStatus.mockResolvedValueOnce(503);
-      observeRuntime.mockResolvedValue(
-        observed({
-          phase: "preview-ready",
-          sandboxId: "sb_live",
-          previewUrl: "https://embed.example/transient",
-          previewPort: 3000,
-          httpStatus: 200,
-        }),
-      );
 
       const result = await withFreshIsolate(sessionId, () =>
         ensureDesiredState(sessionId, "preview-ready", {
           wait: true,
-          owner: "transient-preview-recover",
+          owner: "transient-preview-keep",
         }),
       );
 
       expect(startDevSession).not.toHaveBeenCalled();
+      expect(observeRuntime).not.toHaveBeenCalled();
       expect(result.observed).toBe("preview-ready");
-      expect(result.devSessionName).toBe(`preview-${sessionId}`);
-      expect(result.generation).toBeGreaterThan(1);
+      expect(result.devSessionName).toBe("preview-old");
+      expect(result.generation).toBe(1);
     });
   });
 

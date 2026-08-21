@@ -18,8 +18,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "BabyLovable",
-  description:
-    "WorkflowAgent runtime for generating Next.js apps with durable sessions",
+  description: "Build apps with BabyLovable",
 };
 
 export default function RootLayout({

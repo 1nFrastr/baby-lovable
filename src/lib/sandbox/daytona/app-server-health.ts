@@ -68,6 +68,8 @@ export async function httpStatus(
     });
     return res.status;
   } catch {
+    // Timeout / DNS / connection fail. Callers must treat this like a
+    // transient 503 (Next compiling), not a dead proxy (that's a real 502).
     return 503;
   }
 }

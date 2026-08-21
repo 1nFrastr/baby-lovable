@@ -73,6 +73,16 @@ export async function materializeDraftFromRun(
           return;
         }
         try {
+          const { getSession } = await import("@/lib/session/store");
+          const { isActiveRunStatus } = await import("@/lib/session/types");
+          const session = await getSession(sessionId);
+          if (
+            !session ||
+            !isActiveRunStatus(session.runStatus) ||
+            session.lastRunId !== runId
+          ) {
+            return;
+          }
           await writeDraft(sessionId, toWrite, userId);
         } catch (error) {
           console.error(

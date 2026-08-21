@@ -56,16 +56,13 @@ export const ToolHeader = ({
   const derivedName =
     type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
   const label = title ?? derivedName;
-  const isError = state === "output-error" || state === "output-denied";
   const isRunning = isRunningState(state);
 
   return (
     <CollapsibleTrigger
       className={cn(
         "flex w-full items-center gap-1.5 py-0.5 text-left text-sm transition-colors",
-        isError
-          ? "text-destructive hover:text-destructive"
-          : "text-muted-foreground hover:text-foreground",
+        "text-muted-foreground hover:text-foreground",
         className,
       )}
       {...props}
@@ -159,15 +156,12 @@ export const ToolOutput = ({
   return (
     <div className={cn("mt-1 space-y-1 pl-0.5", className)} {...props}>
       {errorText ? (
-        <p className="text-destructive text-xs">{errorText}</p>
+        <p className="text-muted-foreground/80 text-xs">{errorText}</p>
       ) : null}
       {output ? (
         <div
           className={cn(
-            "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-            errorText
-              ? "bg-destructive/10 text-destructive"
-              : "bg-muted/40 text-muted-foreground",
+            "overflow-x-auto rounded-md bg-muted/40 text-xs text-muted-foreground [&_table]:w-full",
           )}
         >
           {Output}

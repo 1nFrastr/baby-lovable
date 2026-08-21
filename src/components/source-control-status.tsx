@@ -70,12 +70,17 @@ export function SourceControlStatusChip({
 
   return (
     <span
-      className={`inline-flex max-w-[14rem] items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${label.className}`}
+      className={`inline-flex max-w-[10rem] items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${label.className}`}
       title={title}
+      aria-label={title}
       role="status"
       aria-live="polite"
     >
-      <span className="truncate">
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80"
+        aria-hidden
+      />
+      <span className="hidden truncate @[380px]:inline">
         {label.text}
         {sha ? (
           <span className="ml-1 font-mono font-normal opacity-80">{sha}</span>

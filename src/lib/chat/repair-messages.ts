@@ -11,10 +11,15 @@ function textOf(message: UIMessage): string {
     .trim();
 }
 
-function isToolPartIncomplete(part: UIMessage["parts"][number]): boolean {
+export function isToolPartIncomplete(
+  part: UIMessage["parts"][number],
+): boolean {
   return (
     isToolUIPart(part) &&
-    (part.state === "input-streaming" || part.state === "input-available")
+    (part.state === "input-streaming" ||
+      part.state === "input-available" ||
+      part.state === "approval-requested" ||
+      part.state === "approval-responded")
   );
 }
 
@@ -36,7 +41,9 @@ export function isEmptyUiMessage(message: UIMessage): boolean {
 
 /**
  * Failed / aborted turns often persist an assistant that only has
- * in-flight tool calls. Drop it so the next user turn is not blocked.
+ * empty placeholders. Drop it so the next user turn is not blocked.
+ * Callers should run `finalizeInterruptedMessages` first so in-flight
+ * tools become output-error (Interrupted by user) and stay visible.
  */
 function isInterruptedAssistant(message: UIMessage): boolean {
   if (message.role !== "assistant") {

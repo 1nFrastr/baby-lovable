@@ -91,6 +91,10 @@ export function isTerminalRunStatus(status: SessionRunStatus): boolean {
  * next POST sets it back to running. During that gap, chatBusy+terminal would
  * look like post-turn drain and unlock — Chat must optimistic-lock on send
  * until `isActiveRunStatus(runStatus)` (see awaitingRunStart in chat.tsx).
+ *
+ * User Stop is a separate lock: keep the composer closed until cancel is
+ * confirmed (`src/lib/chat/composer-lock.ts`), not merely until this helper
+ * returns false.
  */
 export function isLiveChatTurn(
   chatStatus: string,
