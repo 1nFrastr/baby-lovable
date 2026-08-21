@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { UIMessage } from "ai";
 
 import { cancelSessionRun } from "@/lib/chat/cancel-session-run";
 import {
@@ -22,8 +23,20 @@ export async function POST(
     throw error;
   }
 
+  let clientAssistant: UIMessage | null = null;
   try {
-    const result = await cancelSessionRun(sessionId, auth);
+    const body = (await request.json()) as {
+      assistant?: UIMessage | null;
+    } | null;
+    if (body?.assistant?.role === "assistant") {
+      clientAssistant = body.assistant;
+    }
+  } catch {
+    // Empty body is fine — draft-only cancel still works.
+  }
+
+  try {
+    const result = await cancelSessionRun(sessionId, auth, { clientAssistant });
     if (!result.ok) {
       return NextResponse.json(
         { error: result.error },

@@ -41,7 +41,9 @@ export function isEmptyUiMessage(message: UIMessage): boolean {
 
 /**
  * Failed / aborted turns often persist an assistant that only has
- * in-flight tool calls. Drop it so the next user turn is not blocked.
+ * empty placeholders. Drop it so the next user turn is not blocked.
+ * Callers should run `finalizeInterruptedMessages` first so in-flight
+ * tools become output-error (Interrupted by user) and stay visible.
  */
 function isInterruptedAssistant(message: UIMessage): boolean {
   if (message.role !== "assistant") {

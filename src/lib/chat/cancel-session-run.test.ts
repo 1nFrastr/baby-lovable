@@ -114,6 +114,55 @@ describe("cancelSessionRun", () => {
     expect(getRun).toHaveBeenCalledWith("wrun_1");
   });
 
+  it("uses the client SSE snapshot when the draft has not caught up yet", async () => {
+    getSession.mockResolvedValue(session());
+    readDraft.mockResolvedValue({
+      runId: "wrun_1",
+      updatedAt: "2026-01-01T00:00:01.000Z",
+      message: {
+        id: "a-draft",
+        role: "assistant",
+        parts: [],
+      },
+    });
+
+    const { cancelSessionRun } = await import("./cancel-session-run");
+    const result = await cancelSessionRun(
+      "sess_1",
+      { userId: "user_1" },
+      {
+        clientAssistant: {
+          id: "a-sse",
+          role: "assistant",
+          parts: [
+            {
+              type: "reasoning",
+              text: "Thought for 1 second",
+              state: "done",
+            },
+            {
+              type: "tool-editFile",
+              toolCallId: "call_9",
+              state: "input-available",
+              input: { path: "src/components/todo/Todo.tsx" },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      persistedAssistant: true,
+    });
+    const persisted = replaceMessages.mock.calls[0]?.[1] as UIMessage[];
+    expect(persisted.at(-1)?.parts[1]).toMatchObject({
+      type: "tool-editFile",
+      state: "output-error",
+      errorText: "Interrupted by user",
+    });
+  });
+
   it("marks cancelled without a run id so in-flight POST /chat can discard", async () => {
     getSession.mockResolvedValue(
       session({ lastRunId: undefined, runStatus: "pending" }),

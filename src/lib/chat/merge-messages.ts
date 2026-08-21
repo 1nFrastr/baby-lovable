@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 
+import { finalizeInterruptedMessages } from "./interrupt-assistant";
 import { repairUiMessages } from "./repair-messages";
 
 function lastMessage(messages: UIMessage[]): UIMessage | undefined {
@@ -36,6 +37,12 @@ export function dedupeConsecutiveAssistants(
   return ordered;
 }
 
+function sealThread(messages: UIMessage[]): UIMessage[] {
+  return repairUiMessages(
+    finalizeInterruptedMessages(dedupeConsecutiveAssistants(messages)),
+  );
+}
+
 /**
  * Merge client thread with server-persisted history.
  * Client may omit completed assistant messages between turns; server wins for
@@ -46,7 +53,7 @@ export function mergeClientMessagesWithPersisted(
   client: UIMessage[],
 ): UIMessage[] {
   if (client.length === 0) {
-    return repairUiMessages(dedupeConsecutiveAssistants(persisted));
+    return sealThread(persisted);
   }
 
   const byId = new Map(persisted.map((message) => [message.id, message]));
@@ -76,7 +83,7 @@ export function mergeClientMessagesWithPersisted(
     seen.add(message.id);
   }
 
-  return repairUiMessages(dedupeConsecutiveAssistants(ordered));
+  return sealThread(ordered);
 }
 
 /**
@@ -107,18 +114,23 @@ export function persistedMessagesLagChat(
  *
  * When the turn is no longer live but persisted history has not caught up yet,
  * keep overlaying chatMessages so the assistant bubble does not vanish.
+ *
+ * Pass `sealInterrupted` while Stop is in flight (or after the turn ends) so
+ * incomplete tools become "Interrupted by user" instead of stuck "Editing…".
  */
 export function mergeDisplayMessages(
   persisted: UIMessage[],
   chatMessages: UIMessage[],
   draft: UIMessage | null,
   isLiveTurn: boolean,
+  sealInterrupted = false,
 ): UIMessage[] {
   const treatAsLive =
     isLiveTurn || persistedMessagesLagChat(persisted, chatMessages);
+  const shouldSeal = sealInterrupted || !isLiveTurn;
 
   if (!treatAsLive) {
-    return repairUiMessages(dedupeConsecutiveAssistants(persisted));
+    return sealThread(persisted);
   }
 
   const byId = new Map(persisted.map((message) => [message.id, message]));
@@ -162,7 +174,8 @@ export function mergeDisplayMessages(
     }
   }
 
-  return dedupeConsecutiveAssistants(result);
+  const deduped = dedupeConsecutiveAssistants(result);
+  return shouldSeal ? finalizeInterruptedMessages(deduped) : deduped;
 }
 
 export function hasAssistantParts(message: UIMessage | undefined): boolean {

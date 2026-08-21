@@ -5,6 +5,8 @@ import {
   INTERRUPTED_BY_USER,
   assistantHasPersistedContent,
   finalizeInterruptedAssistant,
+  finalizeInterruptedMessages,
+  pickCancelledAssistantSnapshot,
 } from "./interrupt-assistant";
 
 function assistant(parts: UIMessage["parts"]): UIMessage {
@@ -54,6 +56,91 @@ describe("finalizeInterruptedAssistant", () => {
     expect(result.parts[1]).toMatchObject({
       state: "output-available",
       output: { content: "ok" },
+    });
+  });
+
+  it("finalizes reasoning + incomplete edit so Editing cannot linger", () => {
+    const result = finalizeInterruptedAssistant(
+      assistant([
+        {
+          type: "reasoning",
+          text: "Thought for 1 second",
+          state: "done",
+        },
+        {
+          type: "tool-editFile",
+          toolCallId: "call_3",
+          state: "input-available",
+          input: {
+            path: "src/components/todo/Todo.tsx",
+            old_string: "a",
+            new_string: "b",
+          },
+        },
+      ]),
+    );
+
+    expect(result.parts[1]).toMatchObject({
+      type: "tool-editFile",
+      state: "output-error",
+      errorText: INTERRUPTED_BY_USER,
+    });
+  });
+});
+
+describe("finalizeInterruptedMessages", () => {
+  it("seals only assistants that still have in-flight parts", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        parts: [{ type: "text", text: "add slogan" }],
+      },
+      assistant([
+        {
+          type: "tool-editFile",
+          toolCallId: "call_1",
+          state: "input-available",
+          input: { path: "src/app/page.tsx" },
+        },
+      ]),
+    ];
+
+    const sealed = finalizeInterruptedMessages(messages);
+    expect(sealed[1]?.parts[0]).toMatchObject({
+      state: "output-error",
+      errorText: INTERRUPTED_BY_USER,
+    });
+    expect(finalizeInterruptedMessages(sealed)).toBe(sealed);
+  });
+});
+
+describe("pickCancelledAssistantSnapshot", () => {
+  it("prefers the richer client snapshot when draft lagged", () => {
+    const draft: UIMessage = {
+      id: "a-draft",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "thinking", state: "done" }],
+    };
+    const client: UIMessage = {
+      id: "a-sse",
+      role: "assistant",
+      parts: [
+        { type: "reasoning", text: "thinking", state: "done" },
+        {
+          type: "tool-editFile",
+          toolCallId: "call_1",
+          state: "input-available",
+          input: { path: "src/components/todo/Todo.tsx" },
+        },
+      ],
+    };
+
+    const picked = pickCancelledAssistantSnapshot([draft, client]);
+    expect(picked?.parts).toHaveLength(2);
+    expect(picked?.parts[1]).toMatchObject({
+      state: "output-error",
+      errorText: INTERRUPTED_BY_USER,
     });
   });
 });

@@ -30,6 +30,10 @@ import { ChatMessageParts } from "@/components/chat-message-parts";
 import { Spinner } from "@/components/ui/spinner";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
+  finalizeInterruptedMessages,
+  pickCancelledAssistantSnapshot,
+} from "@/lib/chat/interrupt-assistant";
+import {
   isComposerLocked,
   shouldReleaseComposerAfterStop,
 } from "@/lib/chat/composer-lock";
@@ -169,8 +173,15 @@ export function Chat({
   const isLiveTurn = composerLocked;
 
   const displayMessages = useMemo(
-    () => mergeDisplayMessages(messages, chatMessages, draft, isLiveTurn),
-    [messages, chatMessages, draft, isLiveTurn],
+    () =>
+      mergeDisplayMessages(
+        messages,
+        chatMessages,
+        draft,
+        isLiveTurn,
+        stopping,
+      ),
+    [messages, chatMessages, draft, isLiveTurn, stopping],
   );
 
   useEffect(() => {
@@ -242,13 +253,26 @@ export function Chat({
     setCancelSucceeded(false);
     observedActiveRunRef.current = isActiveRunStatus(runStatus);
     setStopping(true);
+
+    // Seal incomplete tools in the live thread immediately so "Editing…" cannot
+    // linger while cancel + draft persist catch up.
+    const sealedMessages = finalizeInterruptedMessages(chatMessages);
+    setMessages(sealedMessages);
+    const clientAssistant = pickCancelledAssistantSnapshot([
+      sealedMessages.at(-1),
+    ]);
+
     stop();
 
     void (async () => {
       try {
         const response = await fetch(
           `/api/sessions/${sessionId}/chat/cancel`,
-          { method: "POST" },
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ assistant: clientAssistant }),
+          },
         );
         if (!response.ok) {
           const data = (await response.json().catch(() => null)) as {
@@ -267,7 +291,16 @@ export function Chat({
         );
       }
     })();
-  }, [composerLocked, onSessionRefresh, runStatus, sessionId, stop, stopping]);
+  }, [
+    chatMessages,
+    composerLocked,
+    onSessionRefresh,
+    runStatus,
+    sessionId,
+    setMessages,
+    stop,
+    stopping,
+  ]);
 
   const showStreamingIndicator =
     isLiveTurn &&

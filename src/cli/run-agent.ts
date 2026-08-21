@@ -9,6 +9,7 @@ import {
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
@@ -42,7 +43,7 @@ export async function runAgentTurn({
   maxSteps = 30,
 }: RunAgentOptions): Promise<RunAgentResult> {
   const modelMessages = await convertToModelMessages(
-    repairUiMessages(messages),
+    repairUiMessages(finalizeInterruptedMessages(messages)),
     {
       ignoreIncompleteToolCalls: true,
     },

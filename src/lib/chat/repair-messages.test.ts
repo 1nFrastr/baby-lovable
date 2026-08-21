@@ -36,18 +36,11 @@ describe("repairUiMessages", () => {
     expect(result[0]?.parts).toEqual([{ type: "text", text: "retry this" }]);
   });
 
-  it("drops an interrupted assistant then merges the surrounding users", () => {
+  it("drops an empty interrupted assistant then merges the surrounding users", () => {
     const interrupted: UIMessage = {
       id: "a-partial",
       role: "assistant",
-      parts: [
-        {
-          type: "tool-writeFile",
-          toolCallId: "call_1",
-          state: "input-available",
-          input: { path: "src/app/page.tsx" },
-        },
-      ],
+      parts: [],
     };
 
     const result = repairUiMessages([
@@ -61,6 +54,36 @@ describe("repairUiMessages", () => {
       type: "text",
       text: "add a sidebar\n\ntry again",
     });
+  });
+
+  it("keeps assistants that only had in-flight tools once callers finalize them", () => {
+    // repairUiMessages itself does not finalize — merge/cancel/builder seal first.
+    // An already-finalized interrupt must remain visible for the next turn.
+    const interrupted: UIMessage = {
+      id: "a-partial",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-writeFile",
+          toolCallId: "call_1",
+          state: "output-error",
+          input: { path: "src/app/page.tsx" },
+          errorText: "Interrupted by user",
+        },
+      ],
+    };
+
+    const result = repairUiMessages([
+      user("u1", "add a sidebar"),
+      interrupted,
+      user("u2", "try again"),
+    ]);
+
+    expect(result.map((message) => message.id)).toEqual([
+      "u1",
+      "a-partial",
+      "u2",
+    ]);
   });
 
   it("drops leading assistant leftovers", () => {

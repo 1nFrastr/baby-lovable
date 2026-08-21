@@ -18,6 +18,7 @@ import {
 import {
   assistantHasPersistedContent,
   finalizeInterruptedAssistant,
+  pickCancelledAssistantSnapshot,
 } from "./interrupt-assistant";
 
 export type CancelSessionRunResult = {
@@ -44,24 +45,31 @@ function mergeCancelledAssistant(
 }
 
 /**
- * Persist the in-flight draft as a cancelled assistant turn and unlock the
- * session. Caller is responsible for cancelling the Workflow run afterwards.
+ * Persist the in-flight draft (and optional client SSE snapshot) as a cancelled
+ * assistant turn and unlock the session. Caller cancels the Workflow run after.
  */
 export async function persistCancelledSessionTurn(options: {
   session: Session;
   runId: string | null;
   auth?: SessionAuthContext;
+  /** Live useChat assistant — often ahead of the draft materializer. */
+  clientAssistant?: UIMessage | null;
 }): Promise<{
   session: Session;
   persistedAssistant: boolean;
 }> {
-  const { session, runId, auth = { userId: session.userId } } = options;
+  const {
+    session,
+    runId,
+    auth = { userId: session.userId },
+    clientAssistant = null,
+  } = options;
   const draft = runId ? await readDraft(session.id, auth.userId) : null;
   const draftMatchesRun = Boolean(draft && draft.runId === runId);
-  const assistant =
-    draftMatchesRun && draft
-      ? finalizeInterruptedAssistant(draft.message)
-      : null;
+  const assistant = pickCancelledAssistantSnapshot([
+    draftMatchesRun ? draft?.message : null,
+    clientAssistant,
+  ]);
   const persistedAssistant = Boolean(
     assistant && assistantHasPersistedContent(assistant),
   );
@@ -106,6 +114,7 @@ export async function persistCancelledSessionTurn(options: {
 export async function cancelSessionRun(
   sessionId: string,
   auth: SessionAuthContext,
+  options: { clientAssistant?: UIMessage | null } = {},
 ): Promise<CancelSessionRunResult | { ok: false; error: string; status: number }> {
   const session = await getSession(sessionId, auth);
   if (!session) {
@@ -118,6 +127,7 @@ export async function cancelSessionRun(
       session,
       runId,
       auth,
+      clientAssistant: options.clientAssistant,
     });
     try {
       await cancelWorkflowRun(runId);
@@ -145,7 +155,23 @@ export async function cancelSessionRun(
   }
 
   // Composer sent a message but POST /chat has not stored lastRunId yet
-  // (`pending` claim, or the previous turn's terminal status).
+  // (`pending` claim, or the previous turn's terminal status). Still seal a
+  // client snapshot when present so the next turn does not see "Editing…".
+  if (options.clientAssistant) {
+    const { persistedAssistant } = await persistCancelledSessionTurn({
+      session,
+      runId: session.lastRunId ?? null,
+      auth,
+      clientAssistant: options.clientAssistant,
+    });
+    return {
+      ok: true,
+      runStatus: "cancelled",
+      cancelledRunId: null,
+      persistedAssistant,
+    };
+  }
+
   await updateSession(
     sessionId,
     { runStatus: "cancelled", lastRunId: null },
