@@ -164,7 +164,7 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
     session.id,
     "sandbox",
     snapshot
-      ? `create snapshot=${snapshot} (pnpm + node_modules prebaked)`
+      ? `create snapshot=${snapshot} (pnpm + node_modules + .next/dev prebaked)`
       : "create default image (runtime seed + install — set DAYTONA_SNAPSHOT)",
   );
 

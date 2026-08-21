@@ -4,11 +4,25 @@ import { DAYTONA_WORKSPACE_ROOT } from "./config";
 import {
   DAYTONA_STARTER_BASE_IMAGE,
   DAYTONA_STARTER_PNPM_VERSION,
+  NEXT_DEV_WARM_SCRIPT,
+  buildNextDevWarmCommands,
   buildStarterSnapshotImage,
 } from "./snapshot-image";
 
+describe("buildNextDevWarmCommands", () => {
+  it("runs the warm script after asserting node_modules", () => {
+    const cmds = buildNextDevWarmCommands(3000);
+    const joined = cmds.join("\n");
+
+    expect(joined).toContain("test -f node_modules/next/package.json");
+    expect(joined).toContain(`chmod +x ${NEXT_DEV_WARM_SCRIPT}`);
+    expect(joined).toContain(`bash ${NEXT_DEV_WARM_SCRIPT} 3000`);
+    expect(joined).toContain(`rm -f ${NEXT_DEV_WARM_SCRIPT}`);
+  });
+});
+
 describe("buildStarterSnapshotImage", () => {
-  it("bakes pnpm and node_modules into the image Dockerfile", () => {
+  it("bakes pnpm, node_modules, and next-dev warm into the image Dockerfile", () => {
     const image = buildStarterSnapshotImage();
     const df = image.dockerfile;
 
@@ -21,6 +35,7 @@ describe("buildStarterSnapshotImage", () => {
     expect(df).toContain("test -f node_modules/next/package.json");
     expect(df).toContain("test -d node_modules/.pnpm");
     expect(df).toContain("require('next/package.json')");
+    expect(df).toContain(`bash ${NEXT_DEV_WARM_SCRIPT}`);
   });
 
   it("includes the starter template as build context", () => {

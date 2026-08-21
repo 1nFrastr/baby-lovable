@@ -122,7 +122,9 @@ async function main(): Promise<void> {
     `Building snapshot "${name}" from ${DAYTONA_STARTER_BASE_IMAGE} (cpu=${cpu} memory=${memory}GiB disk=${disk}GiB)…`,
   );
   const image = buildStarterSnapshotImage();
-  console.log("\n--- Dockerfile (pnpm + node_modules baked at build time) ---");
+  console.log(
+    "\n--- Dockerfile (pnpm + node_modules + next-dev warm baked at build time) ---",
+  );
   console.log(image.dockerfile.trimEnd());
   console.log("--- end Dockerfile ---\n");
 
@@ -143,11 +145,11 @@ async function main(): Promise<void> {
   );
   console.log(`Resources: ${cpu} vCPU / ${memory} GiB / ${disk} GiB`);
   console.log(
-    "Image includes: Node, git, pnpm (system PATH), starter sources, node_modules.",
+    "Image includes: Node, git, pnpm (system PATH), starter sources, node_modules, warmed .next/dev.",
   );
   console.log(`Set DAYTONA_SNAPSHOT=${snapshot.name} (or rely on default).`);
   console.log(
-    "Cold start should skip runtime `pnpm install` when this snapshot is used.",
+    "Cold start should skip runtime `pnpm install` and reuse Turbopack/dev cache when this snapshot is used.",
   );
 }
 

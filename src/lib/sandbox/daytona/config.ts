@@ -15,12 +15,12 @@ export function getDaytonaIdleMinutes(): number {
 }
 
 /**
- * Prebuilt snapshot with starter + pnpm + node_modules.
+ * Prebuilt snapshot with starter + pnpm + node_modules + warmed `.next/dev`.
  * Empty string disables snapshot (seed sources only — no runtime dep install).
  * Build with: `npm run build:daytona-snapshot -- --force`
  * Default resources at build time: 1 vCPU / 2 GiB / 3 GiB.
  */
-export const DAYTONA_DEFAULT_SNAPSHOT = "baby-lovable-nextjs-starter-2g";
+export const DAYTONA_DEFAULT_SNAPSHOT = "baby-lovable-nextjs-starter-2g-warm2";
 
 export function getDaytonaSnapshotName(): string | null {
   if (process.env.DAYTONA_SNAPSHOT === "") {
