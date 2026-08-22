@@ -7,21 +7,46 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement } from "react";
+import { isValidElement, useCallback } from "react";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 
 import { CodeBlock } from "./code-block";
 import { Shimmer } from "./shimmer";
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
-export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible
-    className={cn("group not-prose w-full", className)}
-    {...props}
-  />
-);
+/**
+ * Tool disclosure. Named `group/tool` so the chevron only appears when this
+ * row is hovered — not when hovering sibling text in the same Message `group`.
+ *
+ * On toggle, stop StickToBottom resize-follow so the header stays pinned and
+ * content expands downward instead of the viewport sliding the header up.
+ */
+export const Tool = ({ className, onOpenChange, ...props }: ToolProps) => {
+  const { stopScroll } = useStickToBottomContext();
+
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      // Opening grows content below the header; unlock stick-to-bottom so the
+      // resize follower does not slide the trigger upward out of view.
+      if (open) {
+        stopScroll();
+      }
+      onOpenChange?.(open);
+    },
+    [onOpenChange, stopScroll],
+  );
+
+  return (
+    <Collapsible
+      className={cn("group/tool not-prose w-full", className)}
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  );
+};
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
@@ -67,7 +92,7 @@ export const ToolHeader = ({
       )}
       {...props}
     >
-      <span className="min-w-0 flex-1 truncate font-normal">
+      <span className="min-w-0 truncate font-normal">
         {isRunning ? (
           <Shimmer as="span" className="text-sm" duration={1.5}>
             {label}
@@ -76,11 +101,11 @@ export const ToolHeader = ({
           label
         )}
       </span>
-      <ChevronDownIcon
+      <ChevronRightIcon
         className={cn(
-          "size-3.5 shrink-0 text-muted-foreground/60 transition-transform",
-          "opacity-0 group-hover:opacity-100 group-data-[state=open]:opacity-100",
-          "group-data-[state=open]:rotate-180",
+          "size-3.5 shrink-0 text-muted-foreground/60 transition-[opacity,transform] duration-150",
+          "opacity-0 group-hover/tool:opacity-100 group-data-[state=open]/tool:opacity-100",
+          "group-data-[state=open]/tool:rotate-90",
         )}
       />
     </CollapsibleTrigger>
@@ -92,9 +117,8 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
+      // Keep the trigger row fixed; only this block grows downward.
       "overflow-hidden text-popover-foreground outline-none",
-      "data-[state=closed]:animate-out data-[state=open]:animate-in",
-      "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className,
     )}
     {...props}

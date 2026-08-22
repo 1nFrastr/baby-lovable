@@ -1,5 +1,7 @@
 import {
+  isActiveRunStatus,
   isLiveChatTurn,
+  isTerminalRunStatus,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
@@ -8,19 +10,55 @@ export interface ComposerLockState {
   awaitingRunStart: boolean;
   chatStatus: string;
   runStatus: SessionRunStatus;
+  /**
+   * True after a mid-run page refresh: server run is still active, but this
+   * mount never saw useChat submit/stream (SSE was lost). Distinct from
+   * auto-finish where transport went ready while Realtime still says running.
+   */
+  resumeActiveRun?: boolean;
 }
 
 /**
- * Composer must stay locked for the whole in-flight turn and the entire
- * cancel round-trip. Unlocking on cancel HTTP success alone is not enough —
- * a leftover `running` projection would let the user send into a still-live
- * workflow.
+ * Whether the user may send another message.
+ *
+ * Auto-finish follows the chat transport / early terminal runStatus
+ * (`isLiveChatTurn`). Mid-run refresh uses `resumeActiveRun`. Cancel
+ * confirmation is a separate `stopping` latch.
  */
 export function isComposerLocked(state: ComposerLockState): boolean {
   return (
     state.stopping ||
     state.awaitingRunStart ||
+    Boolean(state.resumeActiveRun) ||
     isLiveChatTurn(state.chatStatus, state.runStatus)
+  );
+}
+
+/**
+ * Stop control is only for an in-flight generation the user can cancel.
+ * Do not show it for awaiting-send gaps or post-turn HTTP drain after
+ * the server already reported terminal.
+ *
+ * After a mid-run refresh, transport is `ready` but the server run may still
+ * be active — still offer Stop via `resumeActiveRun`.
+ */
+export function shouldShowStopControl(state: {
+  stopping: boolean;
+  chatStatus: string;
+  runStatus: SessionRunStatus;
+  resumeActiveRun?: boolean;
+}): boolean {
+  if (state.stopping) {
+    return false;
+  }
+  if (isTerminalRunStatus(state.runStatus)) {
+    return false;
+  }
+  if (state.resumeActiveRun && isActiveRunStatus(state.runStatus)) {
+    return true;
+  }
+  return (
+    state.chatStatus === "submitted" || state.chatStatus === "streaming"
   );
 }
 

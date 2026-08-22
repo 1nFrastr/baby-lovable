@@ -30,6 +30,7 @@ import {
   replaceMessages,
   updateSession,
 } from "@/lib/session/store";
+import { isActiveRunStatus } from "@/lib/session/types";
 import { builderChat } from "@/workflow/builder-chat";
 
 /** Preview warm under after() must outlive the chat response headers. */
@@ -105,6 +106,27 @@ export async function POST(
     }
 
     await deleteDraft(sessionId, auth.userId);
+
+    // Mid-run refresh used to unlock the composer and let a second POST start
+    // another builderChat while the first still held the Daytona sandbox and
+    // Freestyle checkpoint barrier — stacked runs then starve on writeFile.
+    // Cancel the previous workflow only (do not persist a cancelled assistant);
+    // this POST owns the new user turn.
+    if (isActiveRunStatus(session.runStatus) && session.lastRunId) {
+      const orphanRunId = session.lastRunId;
+      try {
+        await cancelWorkflowRun(orphanRunId);
+        console.warn(
+          `[chat] cancelled orphan run before new turn session=${sessionId} run=${orphanRunId}`,
+        );
+      } catch (error) {
+        console.error(
+          `[chat] cancel orphan run failed session=${sessionId} run=${orphanRunId}:`,
+          error,
+        );
+      }
+    }
+
     // Claim the turn so a leftover `cancelled` from the previous stop cannot
     // discard this new send, while a Stop during kick still wins.
     await updateSession(sessionId, { runStatus: "pending" }, auth);

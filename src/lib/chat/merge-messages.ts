@@ -88,7 +88,8 @@ export function mergeClientMessagesWithPersisted(
 
 /**
  * Session detail can lag the in-memory useChat thread when runStatus flips
- * idle via runtime Realtime before `invalidateSessionDetail` lands.
+ * idle via runtime Realtime before `invalidateSessionDetail` lands — or when
+ * the persisted assistant is missing the final streamed text (stale draft).
  */
 export function persistedMessagesLagChat(
   persisted: UIMessage[],
@@ -104,13 +105,39 @@ export function persistedMessagesLagChat(
 
   const lastPersisted = lastMessage(persisted);
   const lastChat = lastMessage(chatMessages);
-  return lastChat?.role === "assistant" && lastPersisted?.role !== "assistant";
+  if (lastChat?.role === "assistant" && lastPersisted?.role !== "assistant") {
+    return true;
+  }
+
+  if (lastChat?.role === "assistant" && lastPersisted?.role === "assistant") {
+    return assistantTextLength(lastChat) > assistantTextLength(lastPersisted);
+  }
+
+  return false;
+}
+
+function assistantTextLength(message: UIMessage): number {
+  let length = 0;
+  for (const part of message.parts) {
+    if (
+      (part.type === "text" || part.type === "reasoning") &&
+      typeof part.text === "string"
+    ) {
+      length += part.text.length;
+    }
+  }
+  return length;
 }
 
 /**
  * Live-turn display: keep completed history from Supabase, overlay the
  * in-flight useChat thread, then fall back to the draft row when SSE has not
  * produced assistant parts yet (e.g. refresh mid-run).
+ *
+ * Only overlay `draft` when `allowDraftOverlay` is true (run still active).
+ * Optimistic send (`awaitingRunStart`) sets isLiveTurn before runStatus flips —
+ * applying a React Query–cached previous-turn draft there appends the old
+ * assistant after the new user message and causes a one-frame flicker.
  *
  * When the turn is no longer live but persisted history has not caught up yet,
  * keep overlaying chatMessages so the assistant bubble does not vanish.
@@ -124,6 +151,7 @@ export function mergeDisplayMessages(
   draft: UIMessage | null,
   isLiveTurn: boolean,
   sealInterrupted = false,
+  allowDraftOverlay = true,
 ): UIMessage[] {
   const treatAsLive =
     isLiveTurn || persistedMessagesLagChat(persisted, chatMessages);
@@ -166,10 +194,22 @@ export function mergeDisplayMessages(
   const liveHasAssistantParts =
     last?.role === "assistant" && last.parts.length > 0;
 
-  if (!liveHasAssistantParts && draft && draft.parts.length > 0) {
+  /**
+   * Never overlay a draft whose id is already in the thread — that is almost
+   * always the previous turn's assistant re-appended after a new user message
+   * when React Query still holds a stale draft row.
+   */
+  if (
+    allowDraftOverlay &&
+    !liveHasAssistantParts &&
+    draft &&
+    draft.parts.length > 0 &&
+    !result.some((message) => message.id === draft.id)
+  ) {
     if (last?.role === "assistant") {
       result = [...result.slice(0, -1), draft];
-    } else {
+    } else if (last?.role === "user") {
+      // Mid-run resume: draft follows the in-flight user turn.
       result = [...result, draft];
     }
   }

@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import {
+  useClearSessionDraft,
   useCreateSessionMutation,
   useInvalidateSessionDetail,
   useRefetchSessionOnActivate,
@@ -20,8 +21,12 @@ import {
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
-import { toSessionRunStatus, isFinishedRuntimeRunStatus } from "@/lib/session/runtime-projection";
+import {
+  isFinishedRuntimeRunStatus,
+  resolveLiveRunState,
+} from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime, useSessionRuntime } from "@/lib/session/runtime-query";
+import { isActiveRunStatus } from "@/lib/session/types";
 import { cn } from "@/lib/utils";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -151,15 +156,36 @@ export function AppShell() {
   const activeSession = sessionQuery.data?.session ?? null;
   const activeDraft = sessionQuery.data?.draft ?? null;
   const activeSummary = sessions.find((session) => session.id === activeSessionId);
-  /** Live run status from runtime projection; fall back to session detail. */
-  const liveRunStatus = runtimeQuery.data?.projection.run
-    ? toSessionRunStatus(runtimeQuery.data.projection.run.status)
-    : (activeSession?.runStatus ?? "idle");
+  /** Prefer newer of runtime projection vs session row (publish is best-effort). */
+  const liveRun = resolveLiveRunState(
+    runtimeQuery.data?.projection.run,
+    activeSession
+      ? {
+          runStatus: activeSession.runStatus,
+          updatedAt: activeSession.updatedAt,
+        }
+      : null,
+  );
+  const liveRunStatus = liveRun.runStatus;
+  const liveRunUpdatedAt = liveRun.updatedAt;
+  /** Only the draft for the current active run — never the previous turn's row. */
+  const activeRunId =
+    runtimeQuery.data?.projection.run?.runId ??
+    (isActiveRunStatus(liveRunStatus) ? activeSession?.lastRunId : null) ??
+    null;
+  const liveDraftMessage =
+    activeDraft &&
+    activeRunId &&
+    activeDraft.runId === activeRunId &&
+    isActiveRunStatus(liveRunStatus)
+      ? activeDraft.message
+      : null;
 
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
 
   const prevRuntimeRunStatus = useRef<string | undefined>(undefined);
+  const clearSessionDraft = useClearSessionDraft();
 
   useEffect(() => {
     setChatAppTest(null);
@@ -168,17 +194,19 @@ export function AppShell() {
   }, [activeSessionId]);
 
   // Runtime Realtime can flip run→done before onChatEnd's detail invalidate lands.
-  // Refetch the durable session as soon as the projection leaves "running".
+  // Drop the cached draft immediately and refetch durable messages.
   useEffect(() => {
     const status = runtimeQuery.data?.projection.run?.status;
     const prev = prevRuntimeRunStatus.current;
     prevRuntimeRunStatus.current = status;
 
     if (activeSessionId && prev === "running" && status && isFinishedRuntimeRunStatus(status)) {
+      clearSessionDraft(activeSessionId);
       invalidateSessionDetail(activeSessionId);
     }
   }, [
     activeSessionId,
+    clearSessionDraft,
     invalidateSessionDetail,
     runtimeQuery.data?.projection.run?.status,
   ]);
@@ -433,8 +461,12 @@ export function AppShell() {
                   key={activeSessionId}
                   sessionId={activeSessionId}
                   messages={activeSession.messages}
-                  draft={activeDraft?.message ?? null}
+                  draft={liveDraftMessage}
                   runStatus={liveRunStatus}
+                  runUpdatedAt={liveRunUpdatedAt}
+                  onClearDraft={() => {
+                    clearSessionDraft(activeSessionId);
+                  }}
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                     invalidateRuntime(activeSessionId);

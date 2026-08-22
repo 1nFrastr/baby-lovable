@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isComposerLocked,
   shouldReleaseComposerAfterStop,
+  shouldShowStopControl,
 } from "./composer-lock";
 
 describe("isComposerLocked", () => {
@@ -36,12 +37,38 @@ describe("isComposerLocked", () => {
     ).toBe(true);
   });
 
-  it("unlocks only when idle and not stopping", () => {
+  it("unlocks when the chat transport is ready even if projection still says running", () => {
+    // Auto-finish: HTTP closed ⇒ workflow returned; do not wait on Realtime.
     expect(
       isComposerLocked({
         stopping: false,
         awaitingRunStart: false,
         chatStatus: "ready",
+        runStatus: "running",
+        resumeActiveRun: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("locks after mid-run refresh while the server run is still active", () => {
+    // Transport remounts as ready; SSE is gone but the workflow continues.
+    expect(
+      isComposerLocked({
+        stopping: false,
+        awaitingRunStart: false,
+        chatStatus: "ready",
+        runStatus: "running",
+        resumeActiveRun: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("unlocks on terminal runStatus while the HTTP stream is still draining", () => {
+    expect(
+      isComposerLocked({
+        stopping: false,
+        awaitingRunStart: false,
+        chatStatus: "streaming",
         runStatus: "cancelled",
       }),
     ).toBe(false);
@@ -50,7 +77,78 @@ describe("isComposerLocked", () => {
         stopping: false,
         awaitingRunStart: false,
         chatStatus: "streaming",
-        runStatus: "cancelled",
+        runStatus: "completed",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldShowStopControl", () => {
+  it("shows stop only while generating and the server has not finished", () => {
+    expect(
+      shouldShowStopControl({
+        stopping: false,
+        chatStatus: "streaming",
+        runStatus: "running",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowStopControl({
+        stopping: false,
+        chatStatus: "submitted",
+        runStatus: "idle",
+      }),
+    ).toBe(true);
+  });
+
+  it("hides stop after terminal runStatus (HTTP may still drain)", () => {
+    expect(
+      shouldShowStopControl({
+        stopping: false,
+        chatStatus: "streaming",
+        runStatus: "completed",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides stop while cancel is in flight (stopping UI owns the button)", () => {
+    expect(
+      shouldShowStopControl({
+        stopping: true,
+        chatStatus: "streaming",
+        runStatus: "running",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides stop during awaiting-send when chat is not busy yet", () => {
+    expect(
+      shouldShowStopControl({
+        stopping: false,
+        chatStatus: "ready",
+        runStatus: "completed",
+      }),
+    ).toBe(false);
+  });
+
+  it("shows stop after mid-run refresh while the server run is still active", () => {
+    expect(
+      shouldShowStopControl({
+        stopping: false,
+        chatStatus: "ready",
+        runStatus: "running",
+        resumeActiveRun: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides stop on ready+running when this is auto-finish not a refresh resume", () => {
+    expect(
+      shouldShowStopControl({
+        stopping: false,
+        chatStatus: "ready",
+        runStatus: "running",
+        resumeActiveRun: false,
       }),
     ).toBe(false);
   });

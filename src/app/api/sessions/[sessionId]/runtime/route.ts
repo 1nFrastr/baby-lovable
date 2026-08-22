@@ -39,6 +39,7 @@ export async function GET(
     const projection = await ensureRuntimeProjection(
       sessionId,
       session.userId,
+      session,
     );
 
     return NextResponse.json({ projection });

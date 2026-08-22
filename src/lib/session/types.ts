@@ -80,34 +80,37 @@ export function isTerminalRunStatus(status: SessionRunStatus): boolean {
 }
 
 /**
- * Whether the composer should stay disabled for an in-flight turn.
+ * Whether this turn still blocks sending (auto-finish path).
  *
- * Unlock as soon as session/runtime reports a terminal runStatus — even if
- * useChat is still `streaming`. WorkflowChatTransport keeps the HTTP stream
- * open until the whole workflow returns, which can lag the persisted
- * "completed" signal by a noticeable amount.
+ * Primary signal is the chat transport:
+ * - `ready` / `error` → not in flight (workflow HTTP returned or failed).
+ *   Do not keep the composer locked on a stale Realtime `running`.
+ * - `submitted` / `streaming` → in flight until server reports terminal
+ *   (Realtime/session can unlock early while the HTTP stream still drains).
  *
  * Caveat (turn 2+): after a completed turn, runStatus stays terminal until the
- * next POST sets it back to running. During that gap, chatBusy+terminal would
- * look like post-turn drain and unlock — Chat must optimistic-lock on send
- * until `isActiveRunStatus(runStatus)` (see awaitingRunStart in chat.tsx).
+ * next POST. During that gap, chatBusy+terminal looks like post-turn drain —
+ * Chat must optimistic-lock on send (`awaitingRunStart` in chat.tsx).
  *
- * User Stop is a separate lock: keep the composer closed until cancel is
- * confirmed (`src/lib/chat/composer-lock.ts`), not merely until this helper
- * returns false.
+ * User Stop is a separate lock (`stopping` + cancel confirm in composer-lock).
  */
 export function isLiveChatTurn(
   chatStatus: string,
   runStatus: SessionRunStatus,
 ): boolean {
-  if (isActiveRunStatus(runStatus)) {
-    return true;
-  }
-
   const chatBusy =
     chatStatus === "submitted" || chatStatus === "streaming";
 
-  // Idle + just-submitted: lock until the server marks the run active/terminal.
-  // Completed/failed while transport still draining: unlock immediately.
-  return chatBusy && !isTerminalRunStatus(runStatus);
+  // Stream finished = durable workflow returned (persist already ran server-side).
+  if (!chatBusy) {
+    return false;
+  }
+
+  // Still draining HTTP after messages are persisted — unlock for send.
+  if (isTerminalRunStatus(runStatus)) {
+    return false;
+  }
+
+  // Busy and server not terminal yet (active, idle, or unknown).
+  return true;
 }

@@ -143,6 +143,49 @@ describe("pickCancelledAssistantSnapshot", () => {
       errorText: INTERRUPTED_BY_USER,
     });
   });
+
+  it("prefers the snapshot with the final summary text over a tool-heavy lagging draft", () => {
+    const draft: UIMessage = {
+      id: "a-draft",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-checkPreview",
+          toolCallId: "call_1",
+          state: "output-available",
+          input: {},
+          output: { ok: true },
+        },
+      ],
+    };
+    const fromModel: UIMessage = {
+      id: "a-model",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-checkPreview",
+          toolCallId: "call_1",
+          state: "output-available",
+          input: {},
+          output: { ok: true },
+        },
+        {
+          type: "text",
+          text: "预览已就绪，可以开始使用待办应用了。",
+        },
+      ],
+    };
+
+    const picked = pickCancelledAssistantSnapshot([draft, fromModel]);
+    expect(picked?.parts.some((part) => part.type === "text")).toBe(true);
+    expect(
+      picked?.parts.find((part) => part.type === "text") &&
+        "text" in (picked?.parts.find((part) => part.type === "text") ?? {})
+        ? (picked!.parts.find((part) => part.type === "text") as { text: string })
+            .text
+        : "",
+    ).toContain("预览已就绪");
+  });
 });
 
 describe("assistantHasPersistedContent", () => {

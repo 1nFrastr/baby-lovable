@@ -28,13 +28,14 @@ describe("isTerminalRunStatus", () => {
 });
 
 describe("isLiveChatTurn", () => {
-  it("locks while the run is pending or running", () => {
-    expect(isLiveChatTurn("ready", "running")).toBe(true);
-    expect(isLiveChatTurn("ready", "pending")).toBe(true);
-    expect(isLiveChatTurn("streaming", "running")).toBe(true);
+  it("does not lock on a stale running projection once the chat transport is ready", () => {
+    // Workflow HTTP returned ⇒ persist finished; Realtime may still say running.
+    expect(isLiveChatTurn("ready", "running")).toBe(false);
+    expect(isLiveChatTurn("ready", "pending")).toBe(false);
   });
 
-  it("locks on submit/stream before the server marks the run active", () => {
+  it("locks while streaming before the server marks the run terminal", () => {
+    expect(isLiveChatTurn("streaming", "running")).toBe(true);
     expect(isLiveChatTurn("submitted", "idle")).toBe(true);
     expect(isLiveChatTurn("streaming", "idle")).toBe(true);
   });

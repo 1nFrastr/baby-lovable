@@ -100,6 +100,72 @@ export function toSessionRunStatus(
   }
 }
 
+/**
+ * Pick the live runStatus for composer lock / chat UI.
+ *
+ * Runtime Realtime is the fast path, but `publishRuntimeUpdate` is best-effort.
+ * When the session row and projection disagree, prefer the newer `updatedAt`
+ * so a failed publish cannot leave the composer locked on a stale `running`.
+ */
+export function resolveLiveRunStatus(
+  projectionRun:
+    | { status: RuntimeRunStatus; updatedAt: string }
+    | null
+    | undefined,
+  session:
+    | { runStatus: SessionRunStatus; updatedAt: string }
+    | null
+    | undefined,
+): SessionRunStatus {
+  return resolveLiveRunState(projectionRun, session).runStatus;
+}
+
+export function resolveLiveRunState(
+  projectionRun:
+    | { status: RuntimeRunStatus; updatedAt: string }
+    | null
+    | undefined,
+  session:
+    | { runStatus: SessionRunStatus; updatedAt: string }
+    | null
+    | undefined,
+): { runStatus: SessionRunStatus; updatedAt: string } {
+  if (!projectionRun) {
+    return {
+      runStatus: session?.runStatus ?? "idle",
+      updatedAt: session?.updatedAt ?? "",
+    };
+  }
+  if (!session) {
+    return {
+      runStatus: toSessionRunStatus(projectionRun.status),
+      updatedAt: projectionRun.updatedAt,
+    };
+  }
+
+  const fromProjection = toSessionRunStatus(projectionRun.status);
+  if (fromProjection === session.runStatus) {
+    // Same status — prefer the newer stamp so awaitingRunStart can detect
+    // a fresh terminal after send.
+    const updatedAt =
+      session.updatedAt >= projectionRun.updatedAt
+        ? session.updatedAt
+        : projectionRun.updatedAt;
+    return { runStatus: fromProjection, updatedAt };
+  }
+
+  if (session.updatedAt >= projectionRun.updatedAt) {
+    return {
+      runStatus: session.runStatus,
+      updatedAt: session.updatedAt,
+    };
+  }
+  return {
+    runStatus: fromProjection,
+    updatedAt: projectionRun.updatedAt,
+  };
+}
+
 export function previewFromAllStatus(
   all: AllStatus,
   generation: number,

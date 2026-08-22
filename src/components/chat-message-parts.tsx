@@ -13,6 +13,7 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import { ChatActivityLabel } from "@/components/chat-activity-label";
 import {
   compactToolInput,
   formatToolPartLabel,
@@ -92,10 +93,13 @@ export function ChatMessageParts({
   message,
   isLastMessage,
   isStreaming,
+  activityLabel,
 }: {
   message: UIMessage;
   isLastMessage: boolean;
   isStreaming: boolean;
+  /** Idle planning label; rendered in the same column/gap as tool rows. */
+  activityLabel?: string | null;
 }) {
   const lastPartIndex = message.parts.length - 1;
   const nodes: ReactNode[] = [];
@@ -156,6 +160,12 @@ export function ChatMessageParts({
   });
 
   flushReasoning();
+
+  if (activityLabel) {
+    nodes.push(
+      <ChatActivityLabel key={`${message.id}-activity`} label={activityLabel} />,
+    );
+  }
 
   return <div className="flex flex-col gap-0.5">{nodes}</div>;
 }

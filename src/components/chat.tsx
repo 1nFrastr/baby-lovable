@@ -26,8 +26,9 @@ import {
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import { ChatActivityLabel } from "@/components/chat-activity-label";
 import { ChatMessageParts } from "@/components/chat-message-parts";
-import { Spinner } from "@/components/ui/spinner";
+import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
   finalizeInterruptedMessages,
@@ -36,14 +37,15 @@ import {
 import {
   isComposerLocked,
   shouldReleaseComposerAfterStop,
+  shouldShowStopControl,
 } from "@/lib/chat/composer-lock";
 import {
-  hasAssistantParts,
   mergeDisplayMessages,
   persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
 import {
   isActiveRunStatus,
+  isTerminalRunStatus,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
@@ -61,7 +63,11 @@ interface ChatProps {
   /** In-flight assistant from the Supabase draft row; null when idle. */
   draft: UIMessage | null;
   runStatus?: SessionRunStatus;
+  /** updatedAt of the winning live runStatus source (session or projection). */
+  runUpdatedAt?: string;
   onSessionRefresh?: () => void;
+  /** Drop cached draft as soon as the user sends (before refetch). */
+  onClearDraft?: () => void;
   /** Live View URL / running state from streamed testPreview tool output. */
   onAppTestStatus?: (
     status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
@@ -73,7 +79,9 @@ export function Chat({
   messages,
   draft,
   runStatus = "idle",
+  runUpdatedAt = "",
   onSessionRefresh,
+  onClearDraft,
   onAppTestStatus,
 }: ChatProps) {
   const transport = useMemo(
@@ -114,13 +122,24 @@ export function Chat({
   const [cancelSucceeded, setCancelSucceeded] = useState(false);
   const [cancelledHint, setCancelledHint] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  /** This mount observed submit/stream — distinguishes auto-finish from mid-run refresh. */
+  const [sawLocalTransportBusy, setSawLocalTransportBusy] = useState(false);
   const leftReadyDuringAwaitRef = useRef(false);
+  const awaitingSinceRef = useRef("");
   const lastSyncedPersistedRef = useRef("");
   const observedActiveRunRef = useRef(false);
 
   useEffect(() => {
+    if (status === "submitted" || status === "streaming") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- latch local stream for refresh vs auto-finish
+      setSawLocalTransportBusy(true);
+    }
+  }, [status]);
+
+  useEffect(() => {
     if (!awaitingRunStart) {
       leftReadyDuringAwaitRef.current = false;
+      awaitingSinceRef.current = "";
       return;
     }
 
@@ -135,11 +154,36 @@ export function Chat({
       return;
     }
 
+    // Server reported a fresh terminal after this send (Realtime may have
+    // skipped pending/running). Do not treat the previous turn's completed
+    // stamp as success — require updatedAt >= send time.
+    if (
+      isTerminalRunStatus(runStatus) &&
+      runUpdatedAt &&
+      awaitingSinceRef.current &&
+      runUpdatedAt >= awaitingSinceRef.current
+    ) {
+      setAwaitingRunStart(false);
+      return;
+    }
+
     // Send failed or finished without ever projecting "running".
     if (leftReadyDuringAwaitRef.current && status === "ready") {
       setAwaitingRunStart(false);
     }
-  }, [awaitingRunStart, runStatus, status]);
+  }, [awaitingRunStart, runStatus, runUpdatedAt, status]);
+
+  // Safety net: never leave the composer permanently locked if POST/run
+  // projection never arrives (network error with status stuck on ready).
+  useEffect(() => {
+    if (!awaitingRunStart) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setAwaitingRunStart(false);
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [awaitingRunStart]);
 
   useEffect(() => {
     if (stopping && isActiveRunStatus(runStatus)) {
@@ -164,13 +208,57 @@ export function Chat({
     setCancelledHint(true);
   }, [cancelSucceeded, runStatus]);
 
+  // Mid-run refresh: transport remounts as ready while the server run continues.
+  // Lock + draft overlay + Stop until runStatus goes terminal. Do not use this
+  // latch after we already had a local stream (auto-finish must stay unlocked
+  // even if Realtime briefly lags on "running").
+  const resumeActiveRun =
+    isActiveRunStatus(runStatus) && !sawLocalTransportBusy;
+
   const composerLocked = isComposerLocked({
     stopping,
     awaitingRunStart,
     chatStatus: status,
     runStatus,
+    resumeActiveRun,
   });
-  const isLiveTurn = composerLocked;
+  // Draft recovery after refresh needs treatAsLive even before lock settles.
+  const isLiveTurn = composerLocked || resumeActiveRun;
+  const showStop = shouldShowStopControl({
+    stopping,
+    chatStatus: status,
+    runStatus,
+    resumeActiveRun,
+  });
+
+  // Only poll while we still need a server signal (early unlock / cancel /
+  // mid-run draft refresh), not after the transport already finished.
+  useEffect(() => {
+    if (!onSessionRefresh) {
+      return;
+    }
+    const needsReconcile =
+      stopping ||
+      resumeActiveRun ||
+      (showStop && isActiveRunStatus(runStatus)) ||
+      (awaitingRunStart && !isActiveRunStatus(runStatus));
+    if (!needsReconcile) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      onSessionRefresh();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [
+    awaitingRunStart,
+    onSessionRefresh,
+    resumeActiveRun,
+    runStatus,
+    showStop,
+    stopping,
+  ]);
+
+  const allowDraftOverlay = isActiveRunStatus(runStatus);
 
   const displayMessages = useMemo(
     () =>
@@ -180,8 +268,9 @@ export function Chat({
         draft,
         isLiveTurn,
         stopping,
+        allowDraftOverlay,
       ),
-    [messages, chatMessages, draft, isLiveTurn, stopping],
+    [messages, chatMessages, draft, isLiveTurn, stopping, allowDraftOverlay],
   );
 
   useEffect(() => {
@@ -223,13 +312,15 @@ export function Chat({
       }
 
       setAwaitingRunStart(true);
+      awaitingSinceRef.current = new Date().toISOString();
       setStopError(null);
       setCancelSucceeded(false);
       setCancelledHint(false);
+      onClearDraft?.();
       void sendMessage({ text: trimmed });
       onSessionRefresh?.();
     },
-    [composerLocked, onSessionRefresh, sendMessage],
+    [composerLocked, onClearDraft, onSessionRefresh, sendMessage],
   );
 
   const handleRunAppTest = useCallback(() => {
@@ -237,15 +328,17 @@ export function Chat({
       return;
     }
     setAwaitingRunStart(true);
+    awaitingSinceRef.current = new Date().toISOString();
     setStopError(null);
     setCancelSucceeded(false);
     setCancelledHint(false);
+    onClearDraft?.();
     void sendMessage({ text: APP_TEST_USER_PROMPT });
     onSessionRefresh?.();
-  }, [composerLocked, onSessionRefresh, sendMessage]);
+  }, [composerLocked, onClearDraft, onSessionRefresh, sendMessage]);
 
   const handleStop = useCallback(() => {
-    if (stopping || !composerLocked) {
+    if (stopping || !showStop) {
       return;
     }
 
@@ -293,46 +386,54 @@ export function Chat({
     })();
   }, [
     chatMessages,
-    composerLocked,
     onSessionRefresh,
     runStatus,
     sessionId,
     setMessages,
+    showStop,
     stop,
     stopping,
   ]);
 
-  const showStreamingIndicator =
-    isLiveTurn &&
-    !stopping &&
-    !hasAssistantParts(displayMessages[displayMessages.length - 1]);
+  // Cursor-style idle feedback inside the message column (same gap as tools).
+  const activityLabel = resolveChatActivityLabel({
+    live: isLiveTurn && !stopping,
+    lastMessage: displayMessages[displayMessages.length - 1],
+  });
+  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
+  const showStandaloneActivity =
+    Boolean(activityLabel) &&
+    (!lastDisplayMessage || lastDisplayMessage.role === "user");
 
   // After the first completed turn only; hide while a turn is in flight.
   const showAppTestButton =
     !composerLocked &&
     displayMessages.some((message) => message.role === "assistant");
 
-  const isStreaming =
-    isLiveTurn &&
-    !stopping &&
-    (status === "streaming" || status === "submitted");
-  const submitStatus = composerLocked
-    ? status === "error"
-      ? "error"
-      : "streaming"
-    : status === "error"
-      ? "error"
-      : "ready";
+  const isStreaming = showStop;
+  // Stop button only while generating; awaiting-send keeps textarea locked
+  // without forcing a destructive Stop affordance.
+  const submitStatus = stopping
+    ? "streaming"
+    : showStop
+      ? "streaming"
+      : status === "error"
+        ? "error"
+        : awaitingRunStart
+          ? "submitted"
+          : "ready";
   const composerPlaceholder = stopping
     ? "正在停止，取消成功后即可发送…"
     : "描述你想构建的应用…";
   const sessionStatusHint = stopping
     ? " · 正在停止…"
-    : composerLocked
+    : showStop
       ? " · 正在生成…"
-      : cancelledHint
-        ? " · 已停止"
-        : "";
+      : awaitingRunStart
+        ? " · 正在发送…"
+        : cancelledHint
+          ? " · 已停止"
+          : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -357,20 +458,35 @@ export function Chat({
               description=""
             />
           ) : (
-            displayMessages.map((message, index) => (
-              <Message from={message.role} key={message.id}>
-                <MessageContent>
-                  <ChatMessageParts
-                    isLastMessage={index === displayMessages.length - 1}
-                    isStreaming={isStreaming}
-                    message={message}
-                  />
-                </MessageContent>
-              </Message>
-            ))
+            displayMessages.map((message, index) => {
+              const isLast = index === displayMessages.length - 1;
+              const messageActivityLabel =
+                isLast && message.role === "assistant" ? activityLabel : null;
+
+              return (
+                <Message from={message.role} key={message.id}>
+                  <MessageContent>
+                    <ChatMessageParts
+                      activityLabel={messageActivityLabel}
+                      isLastMessage={isLast}
+                      isStreaming={isStreaming}
+                      message={message}
+                    />
+                  </MessageContent>
+                </Message>
+              );
+            })
           )}
 
-          {showStreamingIndicator ? <Spinner /> : null}
+          {showStandaloneActivity && activityLabel ? (
+            <Message from="assistant">
+              <MessageContent>
+                <div className="flex flex-col gap-0.5">
+                  <ChatActivityLabel label={activityLabel} />
+                </div>
+              </MessageContent>
+            </Message>
+          ) : null}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
@@ -412,7 +528,7 @@ export function Chat({
               ) : null}
             </PromptInputTools>
             <PromptInputSubmit
-              onStop={handleStop}
+              onStop={showStop ? handleStop : undefined}
               status={submitStatus}
               stopping={stopping}
             />

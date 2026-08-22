@@ -114,10 +114,20 @@ export async function saveSessionMessagesStep(
 
   const runId = session.lastRunId;
   const draft = await readDraft(sessionId, session.userId);
+  const fromDraft =
+    draft && draft.runId === session.lastRunId ? draft.message : null;
+  const fromModel = modelMessagesToAssistantUIMessage(
+    modelMessages,
+    previousModelCount,
+  );
+  // Draft writes are throttled and can miss the final streamed summary;
+  // pick the richer of draft vs model so completion does not drop it.
+  const { pickCancelledAssistantSnapshot } = await import(
+    "@/lib/chat/interrupt-assistant"
+  );
+  const picked = pickCancelledAssistantSnapshot([fromDraft, fromModel]);
   const assistantMessage =
-    draft && draft.runId === session.lastRunId
-      ? draft.message
-      : modelMessagesToAssistantUIMessage(modelMessages, previousModelCount);
+    picked && fromDraft ? { ...picked, id: fromDraft.id } : picked;
 
   const mergedMessages = assistantMessage
     ? [...uiMessages, assistantMessage]

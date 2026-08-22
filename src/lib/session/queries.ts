@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
 import type { SessionDraft } from "@/lib/session/draft-store";
 import type { Session, SessionSummary } from "@/lib/session/types";
@@ -160,6 +160,22 @@ export function useInvalidateSessionDetail() {
       queryKey: sessionKeys.detail(sessionId),
     });
   };
+}
+
+/**
+ * Drop a cached in-flight draft immediately (e.g. when the run leaves
+ * "running"). Avoids mergeDisplayMessages briefly overlaying a stale
+ * previous-turn assistant after the next send.
+ */
+export function useClearSessionDraft() {
+  const queryClient = useQueryClient();
+
+  return useCallback((sessionId: string) => {
+    queryClient.setQueryData<SessionDetailData>(
+      sessionKeys.detail(sessionId),
+      (current) => (current ? { ...current, draft: null } : current),
+    );
+  }, [queryClient]);
 }
 
 /** Keep sidebar summaries in sync when session detail refetches. */

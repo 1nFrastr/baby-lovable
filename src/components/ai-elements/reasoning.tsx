@@ -6,7 +6,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 import {
   createContext,
@@ -18,6 +18,7 @@ import {
   useRef,
 } from "react";
 import { Streamdown } from "streamdown";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 
 import { Shimmer } from "./shimmer";
 
@@ -59,6 +60,7 @@ export const Reasoning = memo(
     children,
     ...props
   }: ReasoningProps) => {
+    const { stopScroll } = useStickToBottomContext();
     const [isOpen, setIsOpen] = useControllableState<boolean>({
       defaultProp: defaultOpen,
       onChange: onOpenChange,
@@ -87,9 +89,13 @@ export const Reasoning = memo(
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {
+        // Same as tools: keep the trigger pinned when content grows downward.
+        if (newOpen) {
+          stopScroll();
+        }
         setIsOpen(newOpen);
       },
-      [setIsOpen],
+      [setIsOpen, stopScroll],
     );
 
     const contextValue = useMemo(
@@ -100,7 +106,7 @@ export const Reasoning = memo(
     return (
       <ReasoningContext.Provider value={contextValue}>
         <Collapsible
-          className={cn("not-prose w-full", className)}
+          className={cn("group/reasoning not-prose w-full", className)}
           onOpenChange={handleOpenChange}
           open={isOpen}
           {...props}
@@ -120,16 +126,16 @@ export type ReasoningTriggerProps = ComponentProps<
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking</Shimmer>;
+    return (
+      <Shimmer as="span" className="text-sm" duration={1.5}>
+        Thinking
+      </Shimmer>
+    );
   }
   if (duration === undefined) {
-    return <span>Thought for a few seconds</span>;
+    return "Thought for a few seconds";
   }
-  return (
-    <span>
-      Thought for {duration} second{duration === 1 ? "" : "s"}
-    </span>
-  );
+  return `Thought for ${duration} second${duration === 1 ? "" : "s"}`;
 };
 
 export const ReasoningTrigger = memo(
@@ -139,23 +145,26 @@ export const ReasoningTrigger = memo(
     getThinkingMessage = defaultGetThinkingMessage,
     ...props
   }: ReasoningTriggerProps) => {
-    const { isStreaming, isOpen, duration } = useReasoning();
+    const { isStreaming, duration } = useReasoning();
 
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-1.5 py-0.5 text-muted-foreground text-sm transition-colors hover:text-foreground",
+          "flex w-full items-center gap-1.5 py-0.5 text-left text-sm text-muted-foreground transition-colors hover:text-foreground",
           className,
         )}
         {...props}
       >
         {children ?? (
           <>
-            {getThinkingMessage(isStreaming, duration)}
-            <ChevronDownIcon
+            <span className="min-w-0 truncate font-normal">
+              {getThinkingMessage(isStreaming, duration)}
+            </span>
+            <ChevronRightIcon
               className={cn(
-                "size-3.5 shrink-0 opacity-60 transition-transform",
-                isOpen ? "rotate-180" : "rotate-0",
+                "size-3.5 shrink-0 text-muted-foreground/60 transition-[opacity,transform] duration-150",
+                "opacity-0 group-hover/reasoning:opacity-100 group-data-[state=open]/reasoning:opacity-100",
+                "group-data-[state=open]/reasoning:rotate-90",
               )}
             />
           </>
@@ -180,7 +189,7 @@ export const ReasoningContent = memo(
     return (
       <div
         className={cn(
-          "mt-1 ml-0.5 border-muted-foreground/20 border-l pl-3 text-muted-foreground text-sm outline-none",
+          "mt-1 overflow-hidden pl-0.5 text-muted-foreground text-sm outline-none",
           className,
         )}
         {...props}

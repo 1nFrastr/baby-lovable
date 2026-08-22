@@ -5,6 +5,8 @@ import {
   isFinishedRuntimeRunStatus,
   mapSessionRunStatus,
   mergeRuntimeProjection,
+  resolveLiveRunState,
+  resolveLiveRunStatus,
   shouldBumpRuntimeVersion,
   toSessionRunStatus,
 } from "./runtime-projection";
@@ -85,5 +87,54 @@ describe("session run status mapping", () => {
     expect(toSessionRunStatus("cancelled")).toBe("cancelled");
     expect(isFinishedRuntimeRunStatus("cancelled")).toBe(true);
     expect(isFinishedRuntimeRunStatus("running")).toBe(false);
+  });
+});
+
+describe("resolveLiveRunStatus", () => {
+  it("prefers a newer terminal session over a stale running projection", () => {
+    expect(
+      resolveLiveRunStatus(
+        { status: "running", updatedAt: "2026-01-01T00:00:00.000Z" },
+        {
+          runStatus: "completed",
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+      ),
+    ).toBe("completed");
+  });
+
+  it("keeps a newer running projection when session detail still lags", () => {
+    expect(
+      resolveLiveRunStatus(
+        { status: "running", updatedAt: "2026-01-01T00:00:02.000Z" },
+        {
+          runStatus: "completed",
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+      ),
+    ).toBe("running");
+  });
+
+  it("falls back to session when projection is missing", () => {
+    expect(
+      resolveLiveRunStatus(null, {
+        runStatus: "failed",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe("failed");
+  });
+
+  it("exposes the newer updatedAt via resolveLiveRunState", () => {
+    const state = resolveLiveRunState(
+      { status: "done", updatedAt: "2026-01-01T00:00:02.000Z" },
+      {
+        runStatus: "completed",
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+    );
+    expect(state).toEqual({
+      runStatus: "completed",
+      updatedAt: "2026-01-01T00:00:02.000Z",
+    });
   });
 });
