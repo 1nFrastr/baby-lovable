@@ -8,6 +8,14 @@ import type { DaytonaProjectSandbox } from "./provider";
  */
 export const PREVIEW_HTTP_TIMEOUT_MS = 1_500;
 
+/**
+ * Light-probe timeout while `starting-devserver`.
+ * Must stay ≥ {@link PREVIEW_HTTP_TIMEOUT_MS}: Daytona proxy RTT often exceeds a
+ * sub-second abort even after Next already logged `GET / 200` inside the VM.
+ * Aborting early maps to 503 and the UI never leaves "starting".
+ */
+export const STARTING_DEV_HTTP_TIMEOUT_MS = PREVIEW_HTTP_TIMEOUT_MS;
+
 const COMPILE_MARKERS = [
   /Parsing CSS source code failed/i,
   /Failed to compile/i,

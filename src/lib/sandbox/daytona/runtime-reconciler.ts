@@ -11,7 +11,10 @@ import {
   startDevSession,
   stopDevSession,
 } from "./app-server-boot";
-import { httpStatus } from "./app-server-health";
+import {
+  httpStatus,
+  STARTING_DEV_HTTP_TIMEOUT_MS,
+} from "./app-server-health";
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
 import { clearDaytonaAttachCache } from "./fs-attach-cache";
@@ -49,6 +52,74 @@ import {
 const LEASE_TTL_MS = 45_000;
 const RECONCILE_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 2_000;
+/** While waiting for Next after startDev — no Daytona reconnect between probes. */
+const STARTING_DEV_POLL_INTERVAL_MS = 500;
+
+function canLightProbeStartingDev(snapshot: DaytonaRuntimeSnapshot): boolean {
+  return (
+    snapshot.observed === "starting-devserver" &&
+    Boolean(snapshot.sandboxId) &&
+    Boolean(snapshot.previewUrl)
+  );
+}
+
+function isStalePreviewLinkStatus(http: number): boolean {
+  return http === 401 || http === 403 || http === 404 || http === 410;
+}
+
+/**
+ * HTTP-only observe while pnpm/Next is booting. Skips Daytona reconnect —
+ * the VM is already up; we only need the public URL to answer.
+ */
+async function observeStartingDevLight(
+  sessionId: string,
+  snapshot: DaytonaRuntimeSnapshot,
+): Promise<ObservedRuntime> {
+  const url = snapshot.previewUrl!;
+  const port = snapshot.previewPort ?? getDaytonaDevPort();
+  const t0 = Date.now();
+  const probe = await httpStatus(
+    url,
+    undefined,
+    STARTING_DEV_HTTP_TIMEOUT_MS,
+  );
+  const ready = probe >= 200 && probe < 400;
+  logDaytonaTiming(
+    sessionId,
+    "reconcile.lightProbe",
+    Date.now() - t0,
+    `http=${probe} ready=${ready}`,
+  );
+
+  if (ready) {
+    return {
+      phase: "preview-ready",
+      sandboxId: snapshot.sandboxId,
+      sandboxState: null,
+      previewUrl: url,
+      previewPort: port,
+      probeUrl: url,
+      httpStatus: probe,
+      lastError: null,
+    };
+  }
+
+  return {
+    phase: "workspace-ready",
+    sandboxId: snapshot.sandboxId,
+    sandboxState: null,
+    previewUrl: url,
+    previewPort: port,
+    probeUrl: url,
+    httpStatus: probe,
+    lastError:
+      probe >= 500
+        ? null
+        : `Preview returned HTTP ${probe}`,
+    // httpStatus maps hang/abort → 503; treat like a soft miss.
+    transient: probe === 503 || isStalePreviewLinkStatus(probe),
+  };
+}
 
 export interface EnsureDesiredOptions {
   wait?: boolean;
@@ -290,6 +361,78 @@ async function demoteStalePreviewReady(
 
 /** Process-local create lock — duplicate after()/lease stealers share one VM create. */
 const createInFlight = new Map<string, Promise<void>>();
+/** Process-local Freestyle hydrate lock — create/reconcile share one background pull. */
+const hydrateInFlight = new Map<string, Promise<void>>();
+
+/**
+ * Freestyle already has commits (e.g. sandbox recreate) — must pull before
+ * trusting the workspace. New sessions have null remoteHeadSha; snapshot tree
+ * matches the starter seed so hydrate can run after startDev.
+ */
+function needsBlockingFreestyleHydrate(remoteHeadSha: string | null | undefined) {
+  return Boolean(remoteHeadSha);
+}
+
+/**
+ * Seed + SDK pull into the sandbox. Does not change runtime observed phase on
+ * failure (preview may already be up); provision error still blocks agent writes.
+ */
+function kickBackgroundFreestyleHydrate(
+  sessionId: string,
+  project: DaytonaProjectSandbox,
+  userId: string | null,
+): void {
+  if (hydrateInFlight.has(sessionId)) {
+    return;
+  }
+
+  const work = (async () => {
+    const t0 = Date.now();
+    try {
+      const { hydrateWorkspaceFromFreestyle } = await import(
+        "@/lib/git/hydrate-workspace"
+      );
+      const hydrate = await hydrateWorkspaceFromFreestyle(
+        sessionId,
+        project,
+        userId,
+      );
+      logDaytonaTiming(
+        sessionId,
+        "action.hydrateFreestyle.bg",
+        Date.now() - t0,
+        `ok=${hydrate.ok}`,
+      );
+      if (!hydrate.ok) {
+        logDaytonaBootstrap(
+          sessionId,
+          "reconcile",
+          `background Freestyle hydrate failed: ${hydrate.error ?? "unknown"}`,
+        );
+        // Leave observed alone so startDev/preview keep running; barrier gates writes.
+        await upsertWithRetry(sessionId, {
+          lastError: hydrate.error ?? "Freestyle workspace hydrate failed",
+        }).catch(() => {
+          // best effort
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logDaytonaBootstrap(
+        sessionId,
+        "reconcile",
+        `background Freestyle hydrate threw: ${message}`,
+      );
+    }
+  })();
+
+  hydrateInFlight.set(sessionId, work);
+  void work.finally(() => {
+    if (hydrateInFlight.get(sessionId) === work) {
+      hydrateInFlight.delete(sessionId);
+    }
+  });
+}
 
 async function actionCreateSandbox(
   sessionId: string,
@@ -355,34 +498,49 @@ async function actionCreateSandbox(
       // iframe can wait until startDev; create still succeeds
     }
 
-    // Freestyle hydrate before workspace-ready — SDK git only, no shell.
-    // Isolated runtime tests may omit Freestyle; production entry points require it.
-    // Session create API still requires FREESTYLE_API_KEY for Daytona.
+    // Freestyle: recreate (remoteHeadSha set) blocks; new sessions defer hydrate
+    // so snapshot-baked workspace can start pnpm immediately.
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
     if (isFreestyleConfigured()) {
-      await upsertWithRetry(sessionId, {
-        sandboxId: sdk.id,
-        observed: "bootstrapping-workspace",
-        lastError: null,
-        previewPort,
-        ...(previewUrl ? { previewUrl } : {}),
-      });
-
+      const { readGitRepository } = await import("@/lib/git/repository-store");
+      const repo = await readGitRepository(sessionId, session.userId);
+      const blockHydrate = needsBlockingFreestyleHydrate(repo?.remoteHeadSha);
       const project = wrapSandbox(sessionId, sdk);
-      const { hydrateWorkspaceFromFreestyle } = await import(
-        "@/lib/git/hydrate-workspace"
-      );
-      const hydrate = await hydrateWorkspaceFromFreestyle(
-        sessionId,
-        project,
-        session.userId,
-      );
-      if (!hydrate.ok) {
+
+      if (blockHydrate) {
         await upsertWithRetry(sessionId, {
-          observed: "error",
-          lastError: hydrate.error ?? "Freestyle workspace hydrate failed",
+          sandboxId: sdk.id,
+          observed: "bootstrapping-workspace",
+          lastError: null,
+          previewPort,
+          ...(previewUrl ? { previewUrl } : {}),
         });
-        throw new Error(hydrate.error ?? "Freestyle workspace hydrate failed");
+
+        const { hydrateWorkspaceFromFreestyle } = await import(
+          "@/lib/git/hydrate-workspace"
+        );
+        const tHydrate = Date.now();
+        const hydrate = await hydrateWorkspaceFromFreestyle(
+          sessionId,
+          project,
+          session.userId,
+        );
+        logDaytonaTiming(
+          sessionId,
+          "action.hydrateFreestyle",
+          Date.now() - tHydrate,
+          `ok=${hydrate.ok} mode=blocking`,
+        );
+        if (!hydrate.ok) {
+          await upsertWithRetry(sessionId, {
+            observed: "error",
+            lastError: hydrate.error ?? "Freestyle workspace hydrate failed",
+          });
+          throw new Error(hydrate.error ?? "Freestyle workspace hydrate failed");
+        }
+      } else {
+        // Trust snapshot tree; seed/pull in background while startDev proceeds.
+        kickBackgroundFreestyleHydrate(sessionId, project, session.userId);
       }
     }
 
@@ -651,30 +809,22 @@ async function reconcileOnce(
   }
 
   if (latest.observed === "creating-sandbox") {
-    // VM exists but Freestyle hydrate may still be running in actionCreateSandbox.
-    // Do not skip hydrate by promoting early.
-    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
-    if (!isFreestyleConfigured()) {
-      await upsertWithRetry(sessionId, {
-        observed: "workspace-ready",
-        lastError: null,
-      });
-      return true;
+    // Wait only while create (and optional blocking hydrate) is still in-process.
+    if (createInFlight.has(sessionId)) {
+      return false;
     }
-    const { readGitRepository } = await import("@/lib/git/repository-store");
-    const repo = await readGitRepository(sessionId);
-    if (repo?.provisionStatus === "ready") {
-      await upsertWithRetry(sessionId, {
-        observed: "workspace-ready",
-        lastError: null,
-      });
-      return true;
-    }
-    return false;
+    await upsertWithRetry(sessionId, {
+      observed: "workspace-ready",
+      lastError: null,
+    });
+    return true;
   }
 
   if (latest.observed === "bootstrapping-workspace") {
-    // Legacy / in-flight hydrate — wait for actionCreateSandbox to finish.
+    // Blocking recreate hydrate (remoteHeadSha set) — wait for create/hydrate.
+    if (createInFlight.has(sessionId) || hydrateInFlight.has(sessionId)) {
+      return false;
+    }
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
     if (!isFreestyleConfigured()) {
       await upsertWithRetry(sessionId, {
@@ -685,13 +835,6 @@ async function reconcileOnce(
     }
     const { readGitRepository } = await import("@/lib/git/repository-store");
     const repo = await readGitRepository(sessionId);
-    if (repo?.provisionStatus === "ready") {
-      await upsertWithRetry(sessionId, {
-        observed: "workspace-ready",
-        lastError: null,
-      });
-      return true;
-    }
     if (repo?.provisionStatus === "error") {
       await upsertWithRetry(sessionId, {
         observed: "error",
@@ -699,43 +842,77 @@ async function reconcileOnce(
       });
       return true;
     }
+    if (
+      repo?.provisionStatus === "ready" ||
+      !needsBlockingFreestyleHydrate(repo?.remoteHeadSha)
+    ) {
+      await upsertWithRetry(sessionId, {
+        observed: "workspace-ready",
+        lastError: null,
+      });
+      return true;
+    }
     return false;
   }
 
-  // Existing Daytona sessions without Freestyle binding — hydrate once.
+  // Freestyle provision: blocking pull only when remote already has commits
+  // (recreate). New sessions keep snapshot workspace and hydrate in background.
   {
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
     if (isFreestyleConfigured()) {
       const { readGitRepository } = await import("@/lib/git/repository-store");
       const repo = await readGitRepository(sessionId);
       if (!repo || repo.provisionStatus !== "ready") {
-        const project = await attachProject(sessionId, latest.sandboxId, false);
-        if (project) {
-          await upsertWithRetry(sessionId, {
-            observed: "bootstrapping-workspace",
-            lastError: null,
-          });
-          const { hydrateWorkspaceFromFreestyle } = await import(
-            "@/lib/git/hydrate-workspace"
-          );
-          const session = await getSession(sessionId);
-          const hydrate = await hydrateWorkspaceFromFreestyle(
+        const blockHydrate = needsBlockingFreestyleHydrate(repo?.remoteHeadSha);
+        if (blockHydrate) {
+          const project = await attachProject(
             sessionId,
-            project,
-            session?.userId ?? null,
+            latest.sandboxId,
+            false,
           );
-          if (!hydrate.ok) {
+          if (project) {
             await upsertWithRetry(sessionId, {
-              observed: "error",
-              lastError: hydrate.error ?? "Freestyle hydrate failed",
+              observed: "bootstrapping-workspace",
+              lastError: null,
+            });
+            const { hydrateWorkspaceFromFreestyle } = await import(
+              "@/lib/git/hydrate-workspace"
+            );
+            const session = await getSession(sessionId);
+            const hydrate = await hydrateWorkspaceFromFreestyle(
+              sessionId,
+              project,
+              session?.userId ?? null,
+            );
+            if (!hydrate.ok) {
+              await upsertWithRetry(sessionId, {
+                observed: "error",
+                lastError: hydrate.error ?? "Freestyle hydrate failed",
+              });
+              return true;
+            }
+            await upsertWithRetry(sessionId, {
+              observed: "workspace-ready",
+              lastError: null,
             });
             return true;
           }
-          await upsertWithRetry(sessionId, {
-            observed: "workspace-ready",
-            lastError: null,
-          });
-          return true;
+        } else {
+          // New session / empty remote — do not block startDev on provision.
+          const project = await attachProject(
+            sessionId,
+            latest.sandboxId,
+            false,
+          );
+          if (project) {
+            const session = await getSession(sessionId);
+            kickBackgroundFreestyleHydrate(
+              sessionId,
+              project,
+              session?.userId ?? null,
+            );
+          }
+          // Fall through to startDev while hydrate runs.
         }
       }
     }
@@ -785,18 +962,35 @@ async function reconcileLoop(
     let snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
 
     const tObserve = Date.now();
-    const observed = await observeRuntime(sessionId, {
-      wake:
-        snapshot.desired === "sandbox-ready" ||
-        snapshot.desired === "preview-ready" ||
-        snapshot.desired === "deleted",
-      snapshot,
-    });
+    let usedLightProbe = canLightProbeStartingDev(snapshot);
+    let observed: ObservedRuntime;
+    if (usedLightProbe) {
+      observed = await observeStartingDevLight(sessionId, snapshot);
+      // Stale proxy URL — refresh via full Daytona observe once.
+      if (
+        observed.httpStatus != null &&
+        isStalePreviewLinkStatus(observed.httpStatus)
+      ) {
+        usedLightProbe = false;
+        observed = await observeRuntime(sessionId, {
+          wake: true,
+          snapshot,
+        });
+      }
+    } else {
+      observed = await observeRuntime(sessionId, {
+        wake:
+          snapshot.desired === "sandbox-ready" ||
+          snapshot.desired === "preview-ready" ||
+          snapshot.desired === "deleted",
+        snapshot,
+      });
+    }
     logDaytonaTiming(
       sessionId,
       "reconcile.observe",
       Date.now() - tObserve,
-      `phase=${observed.phase} http=${observed.httpStatus ?? "null"} err=${observed.lastError ?? "none"} durable=${snapshot.observed}`,
+      `phase=${observed.phase} http=${observed.httpStatus ?? "null"} err=${observed.lastError ?? "none"} durable=${snapshot.observed}${usedLightProbe ? " light=1" : ""}`,
     );
 
     if (shouldPreserveSnapshotOnObserveMiss(observed, snapshot)) {
@@ -850,16 +1044,31 @@ async function reconcileLoop(
       return snapshot;
     }
 
-    const tAction = Date.now();
-    const acted = await reconcileOnce(sessionId, snapshot, observed);
-    logDaytonaTiming(
-      sessionId,
-      "reconcile.action",
-      Date.now() - tAction,
-      `acted=${acted} desired=${snapshot.desired} observed=${snapshot.observed}`,
-    );
+    // Light-probe wait: Next is already starting — skip reconcileOnce (another
+    // fresh store round-trip ~500ms) until HTTP succeeds or we need an action.
+    let acted = false;
+    if (
+      !(
+        usedLightProbe &&
+        observed.phase !== "preview-ready" &&
+        snapshot.observed === "starting-devserver"
+      )
+    ) {
+      const tAction = Date.now();
+      acted = await reconcileOnce(sessionId, snapshot, observed);
+      logDaytonaTiming(
+        sessionId,
+        "reconcile.action",
+        Date.now() - tAction,
+        `acted=${acted} desired=${snapshot.desired} observed=${snapshot.observed}`,
+      );
+    }
     if (!acted) {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      const pollMs =
+        canLightProbeStartingDev(snapshot) || usedLightProbe
+          ? STARTING_DEV_POLL_INTERVAL_MS
+          : POLL_INTERVAL_MS;
+      await new Promise((r) => setTimeout(r, pollMs));
     }
   }
 

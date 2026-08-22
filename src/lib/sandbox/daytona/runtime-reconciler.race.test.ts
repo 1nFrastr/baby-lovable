@@ -66,6 +66,7 @@ vi.mock("./app-server-boot", () => ({
 vi.mock("./app-server-health", () => ({
   httpStatus,
   PREVIEW_HTTP_TIMEOUT_MS: 1_500,
+  STARTING_DEV_HTTP_TIMEOUT_MS: 1_500,
 }));
 
 vi.mock("./runtime-observer", () => ({
@@ -316,6 +317,46 @@ describe("runtime-reconciler isolate / UI races", () => {
         isDesiredSatisfied({ ...fsSnap, desired: "sandbox-ready" }),
       ).toBe(true);
       expect(fsSnap.sandboxId).toBe("sb_snap");
+    });
+  });
+
+  it("starting-devserver uses HTTP light probe without Daytona observe", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+
+      const { upsertRuntimeSnapshot } = await import("./runtime-store");
+      await withFreshIsolate(sessionId, () =>
+        upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "starting-devserver",
+          sandboxId: "sb_light",
+          generation: 1,
+          devSessionName: "preview-sess",
+          previewUrl: "https://embed.example/warm",
+          previewPort: 3000,
+        }),
+      );
+
+      let probes = 0;
+      httpStatus.mockImplementation(async () => {
+        probes += 1;
+        return probes < 3 ? 502 : 200;
+      });
+      observeRuntime.mockImplementation(async () => {
+        throw new Error("observeRuntime must not run during light probe");
+      });
+
+      const snap = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "light-probe",
+        }),
+      );
+
+      expect(snap.observed).toBe("preview-ready");
+      expect(probes).toBeGreaterThanOrEqual(3);
+      expect(observeRuntime).not.toHaveBeenCalled();
+      expect(startDevSession).not.toHaveBeenCalled();
     });
   });
 

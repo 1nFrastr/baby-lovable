@@ -56,6 +56,8 @@ vi.mock("./app-server-health", () => ({
   extractCompileError,
   remoteFileExists: vi.fn(),
   httpStatus,
+  PREVIEW_HTTP_TIMEOUT_MS: 1_500,
+  STARTING_DEV_HTTP_TIMEOUT_MS: 1_500,
 }));
 
 vi.mock("./app-server-boot", () => ({
