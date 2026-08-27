@@ -36,7 +36,7 @@ Step schema (each item):
   Placeholders in selector/text/value: {{unique}} or {{now}}
 
 Example:
-  npm run test:app-preview -- -s sess_xxx --steps examples/app-test-todo-steps.json --hold-ms 0
+  npm run test:app-preview -- -s sess_xxx --steps-json '[{"action":"fill","selector":"input[type=text]","value":"hello"},{"action":"click","selector":"button:has-text(\\"Add\\")"}]' --hold-ms 0
 
 After the Cloudflare session starts, open the printed Live View URL (or
 app-tests/<runId>/monitor.html) in a browser to watch the remote Chrome.
