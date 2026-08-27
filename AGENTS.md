@@ -46,8 +46,8 @@ The CLI runs the **same** builder agent, tools, and system prompt as the web app
 
 npm run agent -- -h                          # help
 npm run agent -- -l                          # list sessions
-npm run agent -- -p "创建一个待办事项应用"    # one-shot: run one turn, then exit
-npm run agent -- -s sess_abc123 -p "加渐变色" # resume session + one-shot
+npm run agent -- -p "Create a todo app"       # one-shot: run one turn, then exit
+npm run agent -- -s sess_abc123 -p "Add a gradient" # resume session + one-shot
 npm run agent                                # interactive REPL (new session)
 npm run agent -- -s sess_abc123              # interactive REPL on existing session
 ```

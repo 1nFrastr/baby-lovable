@@ -1,82 +1,82 @@
-# Workflow Agent 设计
+# Workflow Agent design
 
-BabyLovable 使用 Vercel AI SDK v7 `WorkflowAgent` 和 Serverless Workflow，在 Serverless 环境中承载可恢复的长任务 Agent。
+BabyLovable uses Vercel AI SDK v7 `WorkflowAgent` and Serverless Workflow to run recoverable long-task Agents in a Serverless environment.
 
-一句话概括：
+In one sentence:
 
-> Agent 的执行过程不绑定单次 HTTP 请求，而是拆成可持久化、可恢复、可重试的工作流步骤。
+> Agent execution is not bound to a single HTTP request; it is split into durable, recoverable, and retryable workflow steps.
 
-## 要解决的问题
+## Problems to solve
 
-Coding Agent 一轮对话通常不是一次模型调用就能结束。它可能需要连续执行很多步骤：
+A Coding Agent turn is rarely finished with one model call. It may need many consecutive steps:
 
-- 理解用户需求
-- 读取项目文件
-- 修改源码
-- 安装依赖
-- 启动或检查 Preview
-- 打开浏览器验收结果
-- 根据错误继续修复
-- 把最终状态同步给前端
+- Understand the user request
+- Read project files
+- Edit source
+- Install dependencies
+- Start or check Preview
+- Open a browser to accept results
+- Keep fixing based on errors
+- Sync final state to the frontend
 
-这些操作耗时长，而且中间可能失败。如果把整轮任务都放在一个普通 HTTP 请求里，会遇到几个问题。
+These operations take time and can fail in the middle. Putting a whole turn in one ordinary HTTP request causes several problems.
 
-**第一，请求生命周期太短。** Serverless 请求不适合长期占用。一轮 Agent 任务可能持续几十秒甚至更久，不能依赖单次请求一直存活。
+**First, request lifecycles are too short.** Serverless requests are a poor fit for long occupancy. One Agent turn may last tens of seconds or longer and cannot depend on a single request staying alive.
 
-**第二，页面连接不可靠。** 用户可能刷新页面、切换 tab，或者网络中断。如果输出流只绑定当前连接，断开后就很难恢复。
+**Second, page connections are unreliable.** Users may refresh, switch tabs, or lose network. If the output stream is bound only to the current connection, recovery after disconnect is hard.
 
-**第三，失败恢复成本高。** 如果某个工具调用失败（依赖安装、Preview 检查、浏览器测试），系统应该从失败步骤附近重试，而不是把整轮对话从头再跑一遍。
+**Third, failure recovery is expensive.** If a tool call fails (dependency install, Preview check, browser test), the system should retry near the failed step rather than re-run the whole conversation from scratch.
 
-所以这里需要的不是一个普通的 chat API，而是一套可恢复的 Agent Workflow。
+So what is needed is not an ordinary chat API, but a recoverable Agent Workflow.
 
-## 核心设计
+## Core design
 
-BabyLovable 用 `WorkflowAgent` 来编排一轮 Agent 对话。一轮对话会被拆成多个可观测的步骤，每个步骤的执行状态由 Workflow 运行时保存，而不是只存在当前 isolate 的内存里。
+BabyLovable uses `WorkflowAgent` to orchestrate one Agent turn. A turn is split into observable steps; each step’s execution state is saved by the Workflow runtime, not only in the current isolate’s memory.
 
-这样做的好处是：
+Benefits:
 
-- Agent 执行不依赖单次 HTTP 请求生命周期
-- 页面刷新后仍然可以恢复输出
-- 步骤失败后可以按 Workflow 语义重试
-- 工具调用过程可以被观察和调试
-- Web 和 CLI 可以复用同一套 Agent 能力
+- Agent execution does not depend on a single HTTP request lifecycle
+- Output can still be recovered after a page refresh
+- Failed steps can be retried under Workflow semantics
+- Tool calls can be observed and debugged
+- Web and CLI can share the same Agent capabilities
 
-## 持久执行
+## Durable execution
 
-在普通 Serverless 模型里，一个请求结束后，当前 isolate 里的内存状态就不可靠了。但 Agent 任务需要跨越多个异步步骤。
+In a plain Serverless model, after a request ends, memory state in the current isolate is unreliable. Agent work needs to span many async steps.
 
-BabyLovable 把 Agent 的执行过程放进 Serverless Workflow 中。Workflow 运行时负责记录步骤状态、执行进度和失败信息。
+BabyLovable places Agent execution inside a Serverless Workflow. The Workflow runtime records step state, progress, and failure information.
 
-这意味着：
+That means:
 
-> Agent 的进度属于 Workflow，不属于某个正在运行的 HTTP 请求。
+> Agent progress belongs to the Workflow, not to a live HTTP request.
 
-即使某次连接断开，或者某个 isolate 不再存活，后续请求仍然可以根据持久化的 Workflow 状态恢复执行或继续观察结果。
+Even if a connection drops or an isolate is gone, later requests can still resume execution or keep observing results from durable Workflow state.
 
-## 可恢复流
+## Recoverable streams
 
-用户在 Web UI 中看到的是 Agent 输出流，但这个流不能只依赖当前浏览器连接。如果用户刷新页面，系统需要做到：
+What users see in the Web UI is an Agent output stream, but that stream must not depend only on the current browser connection. If the user refreshes, the system needs to:
 
-> 新页面能够重新接上当前会话的输出和状态。
+> Let the new page reconnect to the current session’s output and state.
 
-BabyLovable 通过 Workflow 传输恢复会话流。前端重新进入会话时，可以根据已有的 Workflow 状态和消息历史恢复展示，而不是重新发起一轮 Agent 执行。这让用户体验更接近一个持续运行的任务，而不是一次脆弱的 HTTP streaming。
+BabyLovable recovers session streams via Workflow transport. When the frontend re-enters a session, it can restore display from existing Workflow state and message history instead of starting a new Agent run. The experience is closer to a continuously running task than a fragile HTTP stream.
 
-## 工具隔离
+## Tool isolation
 
-Agent 编排层不直接关心具体工具怎么实现。BabyLovable 将工具能力拆出来，作为独立的 tool / step 暴露给 Agent。典型工具包括：
+The Agent orchestration layer should not care how each tool is implemented. BabyLovable splits tool capabilities out and exposes them as independent tools / steps. Typical tools include:
 
-- 文件读取 / 写入
-- 目录查看
-- 依赖安装
-- Preview 检查
+- File read / write
+- Directory listing
+- Dependency install
+- Preview check
 - Browser Test
-- 沙盒相关操作
+- Sandbox-related operations
 
-编排层负责决定什么时候调用工具，工具层负责执行具体副作用。这样可以让 Agent 的系统提示、工具定义、沙盒实现和 UI 同步各自演进，不互相耦合。
+Orchestration decides when to call tools; the tool layer performs the side effects. That lets the Agent system prompt, tool definitions, sandbox implementation, and UI sync evolve independently without tight coupling.
 
-## 和声明式资源调和的关系
+## Relationship to declarative resource reconciliation
 
-Agent 需要 Preview，但它不应该直接命令式地创建 sandbox 或启动 dev server。也就是说，Agent 不应该这样做：
+The Agent needs Preview, but it should not imperatively create a sandbox or start a dev server. In other words, the Agent should not do this:
 
 ```txt
 createSandbox
@@ -84,61 +84,61 @@ startDevServer
 createPreviewURL
 ```
 
-它应该只声明自己需要的目标状态：
+It should only declare the desired state it needs:
 
 ```txt
 preview-ready
 ```
 
-Preview 生命周期由沙盒调度层负责。沙盒调度层会根据当前状态决定是否需要创建 sandbox、启动 dev server、刷新 PreviewURL，直到目标状态满足。
+Preview lifecycle is owned by the sandbox scheduling layer. That layer decides whether to create a sandbox, start the dev server, or refresh PreviewURL until the desired state is satisfied.
 
-所以 Agent 和沙盒之间的关系是：
+So the relationship between Agent and sandbox is:
 
 ```txt
-Agent 声明需要 preview-ready
-  → Runtime 调度层负责收敛
-  → Agent 拿到可用 Preview 后继续执行
+Agent declares need for preview-ready
+  → Runtime scheduling layer converges
+  → Agent continues after Preview is available
 ```
 
-这样可以避免多个 Agent 工具调用、后台 warm、用户 Restart 同时操作沙盒时产生重复创建和状态覆盖。
+That avoids duplicate creation and state clobbering when multiple Agent tool calls, background warm, and user Restart all operate on the sandbox at once.
 
-详见：[声明式资源调和设计](./declarative-reconciliation.md)
+See: [Declarative resource reconciliation design](./declarative-reconciliation.md)
 
-## 验证闭环
+## Verification loop
 
-BabyLovable 里的 Agent 不只是写代码。它可以通过工具形成一个完整反馈闭环：
+In BabyLovable the Agent does more than write code. Tools form a full feedback loop:
 
 ```txt
-编辑源码
+Edit source
   → checkPreview
   → Browser Test
-  → 根据反馈继续修复
+  → Keep fixing from feedback
 ```
 
-比如，Agent 修改完页面后，可以先检查 Preview 是否可用。如果 Preview 启动失败，Agent 可以读取错误信息并修复代码；如果 Preview 可用，Agent 还可以打开浏览器访问页面，观察渲染结果，再根据测试反馈继续迭代。
+For example, after editing a page the Agent can first check whether Preview is available. If Preview fails to start, it can read the error and fix code; if Preview is available, it can open a browser, observe rendering, and iterate from test feedback.
 
-这让 Agent 的工作方式从「生成代码」变成「生成代码 → 运行 → 检查 → 修复」。这是云端 Coding Agent 的关键闭环。
+That shifts the Agent from “generate code” to “generate → run → check → fix.” That closed loop is central to a cloud Coding Agent.
 
-## Host 和 Workspace 的边界
+## Host vs Workspace boundary
 
-BabyLovable 把系统分成两部分：
+BabyLovable splits the system into two parts:
 
 ```txt
 Host
-  → Agent 编排
+  → Agent orchestration
   → Workflow
   → Tools
-  → 状态同步
+  → State sync
 
 Workspace / Sandbox
-  → 用户项目
-  → 源码文件
-  → 依赖
+  → User project
+  → Source files
+  → Dependencies
   → dev server
   → Preview
 ```
 
-Host 层代码主要位于：
+Host-layer code mainly lives under:
 
 ```txt
 src/workflow/
@@ -146,46 +146,46 @@ src/tools/
 src/cli/
 ```
 
-它负责 Agent 编排、工具定义、运行状态和对外接口。每个会话生成的应用都运行在独立 Daytona workspace 中。这样用户项目和 Host 系统隔离，多个会话之间也不会互相污染。
+It owns Agent orchestration, tool definitions, runtime state, and external APIs. Each session’s generated app runs in an independent Daytona workspace. User projects stay isolated from the Host system, and sessions do not contaminate each other.
 
-## Web 和 CLI 复用同一套 Agent
+## Web and CLI share the same Agent
 
-除了 Web UI，BabyLovable 还提供 headless CLI 跑法。CLI 和 Web 共用：
+Besides the Web UI, BabyLovable provides a headless CLI. CLI and Web share:
 
-- 同一套 Agent
-- 同一套工具
-- 同一套 system prompt
-- 同一套工作区逻辑
+- The same Agent
+- The same tools
+- The same system prompt
+- The same workspace logic
 
-这样可以在不打开浏览器的情况下做端到端验证。很多 Agent 问题不一定来自 UI，而是来自工具、提示词、沙盒状态或工作流编排。CLI 跑法可以把 Web UI 从调试链路里拿掉，让问题更容易定位。
+That enables end-to-end verification without opening a browser. Many Agent issues come from tools, prompts, sandbox state, or workflow orchestration — not from the UI. The CLI removes the Web UI from the debug path so issues are easier to locate.
 
-详见：[本地开发指南](./local-development.md)
+See: [Local development guide](./local-development.md)
 
-## 相关入口
+## Related entry points
 
-| 路径 | 作用 |
+| Path | Role |
 | --- | --- |
-| `src/workflow/builder-agent.ts` | 共享 `WorkflowAgent` 和 system prompt |
-| `src/workflow/builder-chat.ts` | Web 持久 workflow，包含 `'use workflow'` 入口 |
-| `src/tools/builder-tools.ts` | Agent 工具面定义 |
-| `src/cli/` | 与 Web 共用同一套 Agent 的 headless 跑法 |
+| `src/workflow/builder-agent.ts` | Shared `WorkflowAgent` and system prompt |
+| `src/workflow/builder-chat.ts` | Durable web workflow with `'use workflow'` entry |
+| `src/tools/builder-tools.ts` | Agent tool surface definitions |
+| `src/cli/` | Headless runner sharing the same Agent as Web |
 
-## 总结
+## Summary
 
-这套 Workflow Agent 设计的核心是：
+The core of this Workflow Agent design is:
 
-> 用 Workflow 承载 Agent 长任务，用 Tools 隔离副作用，用可恢复流连接 Web UI。
+> Use Workflow to carry long Agent tasks, Tools to isolate side effects, and recoverable streams to connect the Web UI.
 
-具体来说：
+Specifically:
 
-- Agent 任务不依赖单次 HTTP 请求跑完
-- Workflow 保存步骤状态、执行进度和失败信息
-- 页面刷新后可以恢复会话输出
-- 工具调用和 Agent 编排解耦
-- Preview 由沙盒调度层声明式收敛
-- Agent 可以通过 Preview 和 Browser Test 形成验证闭环
-- CLI 和 Web 复用同一套 Agent，方便端到端回归
+- Agent work does not depend on finishing in one HTTP request
+- Workflow stores step state, progress, and failure info
+- Session output can be recovered after page refresh
+- Tool calls are decoupled from Agent orchestration
+- Preview converges declaratively via the sandbox scheduling layer
+- Agent can form a verification loop with Preview and Browser Test
+- CLI and Web share the same Agent for easier end-to-end regression
 
-最终效果是：
+The end result:
 
-> Agent 不只是一次聊天请求，而是一条可以持续执行、恢复、观察和验证的云端工作流。
+> An Agent is not a single chat request — it is a cloud workflow that can keep running, recovering, observing, and verifying.

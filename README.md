@@ -4,8 +4,8 @@
 <h2>BabyLovable</h2>
 
 <h3>
-  Serverless 架构上的多用户 Coding Agent
-  ·
+  Multi-user Coding Agent on a Serverless Architecture
+  |
   <a href="https://baby-lovable.vercel.app/">Demo ↗</a>
 </h3>
 
@@ -18,114 +18,114 @@
 <a href="https://developers.cloudflare.com/browser-rendering/"><img src="https://img.shields.io/badge/Cloudflare-Browser_Run-F38020?logo=cloudflare&logoColor=white"></a>
 </div>
 
-## BabyLovable 是什么
+## What is BabyLovable
 
-BabyLovable 是一个运行在 Serverless 架构上的多用户 Coding Agent。
+BabyLovable is a multi-user Coding Agent that runs on a Serverless architecture.
 
-用户可以在浏览器里发起需求，Agent 会在远程沙盒中生成和修改项目，启动开发服务，提供实时 Preview，并可以自动打开浏览器验证结果。
+Users can describe requirements in the browser; the Agent generates and edits projects in a remote sandbox, starts a development server, provides a live Preview, and can automatically open a browser to verify the results.
 
-这个项目重点不只是复刻一个 Lovable 类产品，而是探索：
+The focus of this project is not only to recreate a Lovable-style product, but to explore:
 
-> 在 Serverless 环境下，如何可靠地编排长时间 Agent 任务、远程开发沙盒、多用户状态同步和自动化验收。
+> How to reliably orchestrate long-running Agent tasks, remote development sandboxes, multi-user state sync, and automated acceptance checks in a Serverless environment.
 
-## 核心能力
+## Core capabilities
 
-| 能力 | 价值 |
+| Capability | Value |
 | --- | --- |
-| **云端 Coding Agent** | 用户无需本地环境，直接在浏览器中生成、修改和预览项目 |
-| **持久工作流** | Agent 执行过程可中断、可续跑、失败可重试 |
-| **可恢复会话流** | 页面刷新后仍能恢复 Agent 输出和会话状态 |
-| **远程沙盒 Preview** | 每个会话拥有独立 sandbox，支持启动 dev server 和实时预览 |
-| **声明式沙盒调度** | 多个请求同时触发时，避免重复创建 sandbox 和状态互相覆盖 |
-| **实时状态同步** | Preview、Agent Run、Browser Test 状态通过 Realtime 推送到前端 |
-| **自动浏览器验收** | Agent 可以打开浏览器检查自己生成的页面结果 |
-| **多用户隔离** | 基于 Supabase Auth 和 RLS 隔离用户数据与会话资源 |
+| **Cloud Coding Agent** | Users need no local environment; generate, edit, and preview projects directly in the browser |
+| **Durable workflows** | Agent runs can be interrupted, resumed, and retried on failure |
+| **Recoverable session streams** | Agent output and session state survive page refreshes |
+| **Remote sandbox Preview** | Each session gets an independent sandbox with a managed dev server and live preview |
+| **Declarative sandbox scheduling** | When multiple requests fire at once, avoid duplicate sandbox creation and state clobbering |
+| **Realtime state sync** | Preview, Agent Run, and Browser Test status are pushed to the frontend via Realtime |
+| **Automated browser acceptance** | The Agent can open a browser and inspect the pages it generated |
+| **Multi-user isolation** | Supabase Auth and RLS isolate user data and session resources |
 
-## 功能演示
+## Feature demos
 
 <table>
   <tr>
     <td align="center" valign="top" width="50%">
-      <p><strong>基础能力</strong></p>
+      <p><strong>Core capabilities</strong></p>
       <video src="https://github.com/user-attachments/assets/df081939-f3ec-44fb-ba3f-13a68d9ce010" width="420" controls muted></video>
     </td>
     <td align="center" valign="top" width="50%">
-      <p><strong>可恢复流</strong></p>
+      <p><strong>Recoverable streams</strong></p>
       <video src="https://github.com/user-attachments/assets/2eca82e8-ebeb-4bcb-b359-abd4bcb76b98" width="420" controls muted></video>
     </td>
   </tr>
   <tr>
     <td align="center" valign="top" width="50%">
-      <p><strong>自动化浏览器测试</strong></p>
+      <p><strong>Automated browser testing</strong></p>
       <video src="https://github.com/user-attachments/assets/3d307aae-430f-4a4d-8659-d11ce6f7f050" width="420" controls muted></video>
     </td>
     <td align="center" valign="top" width="50%">
-      <p><strong>持久工作流</strong></p>
+      <p><strong>Durable workflows</strong></p>
       <video src="https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9" width="420" controls muted></video>
     </td>
   </tr>
 </table>
 
-## 设计亮点
+## Design highlights
 
-### 1. Serverless 上的持久 Agent Workflow
+### 1. Durable Agent Workflow on Serverless
 
-普通请求生命周期不适合承载长时间 Agent 任务。
+Ordinary request lifecycles are a poor fit for long-running Agent tasks.
 
-BabyLovable 使用 Vercel AI SDK v7 的 `WorkflowAgent` 编排 Agent 执行过程，将任务拆成可观测、可恢复、可重试的步骤。
+BabyLovable uses Vercel AI SDK v7 `WorkflowAgent` to orchestrate Agent execution, splitting work into observable, recoverable, and retryable steps.
 
-这样即使页面刷新、连接中断，或者某个步骤失败，系统也可以从持久化状态中恢复，而不是依赖单次 HTTP 请求跑完所有逻辑。
+Even if the page refreshes, the connection drops, or a step fails, the system can recover from durable state instead of depending on a single HTTP request to finish all logic.
 
-详见：[Workflow Agent 设计](./docs/workflow-agent.md)
+See: [Workflow Agent design](./docs/workflow-agent.md)
 
-### 2. 声明式资源调和，而不是命令式过程
+### 2. Declarative resource reconciliation, not imperative procedures
 
-在 Serverless 环境里，同一个会话可能被多个 isolate 同时触发：
+In a Serverless environment, the same session may be triggered by multiple isolates at once:
 
-- 用户打开 Preview
-- Agent 调用工具
-- 后台 warm 工作区
-- 用户点击 Restart
+- The user opens Preview
+- The Agent calls tools
+- Background warm of the workspace
+- The user clicks Restart
 
-如果每个请求都直接创建 sandbox 或启动 dev server，很容易出现重复创建、端口冲突和状态覆盖。
+If every request directly creates a sandbox or starts a dev server, you easily get duplicate creation, port conflicts, and state clobbering.
 
-BabyLovable 不让调用方直接命令式地执行 `create` / `start`。  
-调用方只声明目标状态，例如：
+BabyLovable does not let callers imperatively run `create` / `start`.  
+Callers only declare a desired state, for example:
 
 ```ts
 desired = "preview-ready"
 ```
 
-系统通过类似 Kubernetes controller 的方式不断调和：
+The system reconciles continuously, similar to a Kubernetes controller:
 
 ```txt
 observe → act → observe → act
 ```
 
-Lease 负责选出当前唯一的调和器。  
-CAS 负责防止旧 snapshot 覆盖新状态。
+Lease elects the single current reconciler.  
+CAS prevents an old snapshot from overwriting newer state.
 
-详见：[声明式资源调和设计](./docs/declarative-reconciliation.md)
+See: [Declarative resource reconciliation design](./docs/declarative-reconciliation.md)
 
-### 3. 实时状态投影，替代前端轮询
+### 3. Realtime state projection instead of frontend polling
 
-Preview、Agent Run、Browser Test 的状态变化频繁。
+Preview, Agent Run, and Browser Test state change frequently.
 
-BabyLovable 不让前端不断轮询多个接口拼状态，而是在服务端维护一份统一的 `SessionRuntimeProjection`。
+BabyLovable does not make the frontend poll many endpoints and assemble state itself. Instead, the server maintains a unified `SessionRuntimeProjection`.
 
-后端状态变化后，将运行态投影成前端需要的读模型，再通过 Supabase Realtime 推送整行更新。
+When backend state changes, the runtime is projected into the read model the frontend needs, then the whole row is pushed via Supabase Realtime.
 
-前端进入页面时拉取一次初始状态，之后只接收 Realtime 更新，并用单调 `version` 拒绝旧包。
+On page entry the frontend fetches initial state once, then only receives Realtime updates, rejecting stale packets with a monotonic `version`.
 
-这样可以减少轮询压力，也能避免多 tab 和刷新后的状态分叉。
+This reduces polling pressure and avoids state forks across multiple tabs and refreshes.
 
-详见：[实时状态同步设计](./docs/realtime-projection.md)
+See: [Realtime state sync design](./docs/realtime-projection.md)
 
-### 4. Agent 自动浏览器验收
+### 4. Agent automated browser acceptance
 
-集成 Cloudflare Browser Rendering，Agent 可打开 Preview 页面检查渲染结果，并据此继续修复，形成「生成 → 预览 → 验收」闭环。
+With Cloudflare Browser Rendering integrated, the Agent can open the Preview page, inspect rendering results, and keep fixing based on that feedback — a closed loop of generate → preview → accept.
 
-## 架构概览
+## Architecture overview
 
 ```txt
 User
@@ -143,7 +143,7 @@ Dev Server / PreviewURL
 Browser Test
 ```
 
-运行态同步链路：
+Runtime sync path:
 
 ```txt
 Agent / Preview API
@@ -156,44 +156,44 @@ Agent / Preview API
   → Web UI
 ```
 
-资源调和负责让远程沙盒稳定收敛。  
-实时投影负责让前端及时、一致地看到状态变化。
+Resource reconciliation keeps the remote sandbox converging stably.  
+Realtime projection keeps the frontend seeing timely, consistent state changes.
 
-这两件事拆开，是为了避免用轮询、进程内状态或单次请求生命周期硬扛 Serverless 并发。
+Splitting these two concerns avoids leaning on polling, in-process state, or a single request lifecycle to survive Serverless concurrency.
 
-## 技术栈
+## Tech stack
 
-| 模块 | 技术 |
+| Module | Technology |
 | --- | --- |
 | App | Next.js 16 |
 | Agent | Vercel AI SDK v7 `WorkflowAgent` |
 | Workflow | Vercel Workflow / Serverless Workflow |
-| Sandbox | Daytona Sandbox + 自建镜像 |
+| Sandbox | Daytona Sandbox + custom image |
 | Auth | Supabase Auth |
 | Realtime | Supabase Realtime |
 | Database | Supabase Postgres |
 | Browser Test | Cloudflare Browser Rendering |
 | UI Sync | SessionRuntimeProjection + Realtime |
 
-## 本地开发
+## Local development
 
-- 本地与线上统一使用 Supabase 元数据存储与 Realtime
-- 本地与线上统一使用 Daytona Sandbox + Freestyle `main`
-- 本地开发必须配置 Supabase Auth、数据库和 CLI 用户
-- 支持 CLI 端到端验证，不维护本机沙箱模拟分支
+- Local and production both use Supabase for metadata storage and Realtime
+- Local and production both use Daytona Sandbox + Freestyle `main`
+- Local development requires Supabase Auth, database, and a CLI user
+- CLI end-to-end verification is supported; there is no local sandbox simulation branch
 
-详见：[本地开发指南](./docs/local-development.md)
+See: [Local development guide](./docs/local-development.md)
 
-## 文档
+## Docs
 
-- [声明式资源调和设计](./docs/declarative-reconciliation.md)
-- [Freestyle Git 持久化设计](./docs/freestyle-git.md)
-- [实时状态同步设计](./docs/realtime-projection.md)
-- [Workflow Agent 设计](./docs/workflow-agent.md)
-- [本地开发指南](./docs/local-development.md)
+- [Declarative resource reconciliation design](./docs/declarative-reconciliation.md)
+- [Freestyle Git persistence design](./docs/freestyle-git.md)
+- [Realtime state sync design](./docs/realtime-projection.md)
+- [Workflow Agent design](./docs/workflow-agent.md)
+- [Local development guide](./docs/local-development.md)
 
 ## Roadmap
 
-- [ ] Agent Runtime 治理：长上下文治理、工具结果压缩等
-- [ ] 产品体验优化：UI / UX 优化
-- [ ] 第三方连接器：Supabase BaaS、Vercel Deploy、图片素材生成 MCP 工具等
+- [ ] Agent Runtime governance: long-context management, tool-result compression, etc.
+- [ ] Product experience: UI / UX improvements
+- [ ] Third-party connectors: Supabase BaaS, Vercel Deploy, image-generation MCP tools, etc.

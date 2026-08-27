@@ -1,38 +1,38 @@
-# 声明式资源调和设计
+# Declarative resource reconciliation design
 
-## 核心洞察
+## Core insight
 
-这套机制主要解决三个问题：
+This mechanism mainly solves three problems:
 
-1. 多个请求同时操作同一个工作区，导致资源重复创建和状态互相覆盖。
-2. 调度方式从「调用方决定下一步做什么」变成「调用方声明最终想要什么状态」。
-3. Lease 负责控制谁能推进真实资源，CAS 负责防止旧状态覆盖新状态。
+1. Multiple requests operating on the same workspace at once, causing duplicate resource creation and state clobbering.
+2. Moving scheduling from “the caller decides what to do next” to “the caller declares the final desired state.”
+3. Lease controls who may advance real resources; CAS prevents old state from overwriting new state.
 
-## 背景
+## Background
 
-当用户打开一个新会话时，后台会开始预热工作区：创建 sandbox、启动 dev server、准备 PreviewURL。这些操作都需要时间。
+When a user opens a new session, the backend starts warming the workspace: create a sandbox, start the dev server, prepare a PreviewURL. These operations take time.
 
-与此同时，Agent 也可能已经开始工作。它在调用工具之前，需要一个可用的工作区。如果这时工作区还没准备好，Agent 也会触发一遍资源准备流程。更麻烦的是，用户可能没有耐心等待，会连续点击 Restart，试图重启整个预览服务。
+Meanwhile the Agent may already be working. Before calling tools it needs a usable workspace. If the workspace is not ready yet, the Agent also triggers resource preparation. Worse, the user may not wait patiently and may click Restart repeatedly, trying to restart the whole preview service.
 
-于是，同一个 session 下可能同时出现多个请求：
+So under the same session, multiple requests may appear at once:
 
-1. 后台预热请求
-2. Agent 工具调用请求
-3. 用户手动 Restart 请求
+1. Background warm request
+2. Agent tool-call request
+3. User manual Restart request
 
-它们都在操作同一组资源。如果没有处理好，就会出现两个典型问题。
+They all operate on the same set of resources. Without careful handling, two typical problems appear.
 
-**第一是重复创建。** 比如同一个 session 启动了两个 sandbox，或者启动了两个 dev server。它们会占用额外资源，也可能抢占端口，生成多份 PreviewURL，最后让状态变得不可预测。
+**First: duplicate creation.** For example, the same session starts two sandboxes, or two dev servers. They consume extra resources, may fight over ports, produce multiple PreviewURLs, and leave state unpredictable.
 
-**第二是状态覆盖。** 比如服务已经启动完成了，但另一个较早发起的请求还认为服务没有准备好，于是又执行了一次重启。结果就是，新状态被旧判断覆盖，用户看到的体验会非常混乱。
+**Second: state clobbering.** For example, the service is already ready, but an earlier request still believes it is not, so it restarts again. The new state is overwritten by an old judgment, and the user experience becomes chaotic.
 
-所以，这里真正要解决的不是简单的「并发请求」问题，而是：
+So what we really need to solve is not a simple “concurrent requests” problem, but:
 
-> 多个请求同时围绕同一个工作区做决策，并且每个请求看到的状态都可能已经过期。
+> Multiple requests make decisions about the same workspace at the same time, and each request may be looking at already-stale state.
 
-## 朴素方案：临界区锁
+## Naive approach: critical-section lock
 
-最直接的做法是加锁。
+The most direct approach is locking.
 
 ```typescript
 lock()
@@ -41,179 +41,179 @@ lock()
 unlock()
 ```
 
-这能解决一部分问题：至少同一时间不会有两个请求同时进入这段代码，能避免最直接的并发执行。但它仍然有明显缺陷。
+This solves part of the problem: at least two requests will not enter this code at the same time, avoiding the most direct concurrent execution. But it still has clear flaws.
 
-锁只能保证「同一时间只有一个人在执行」，不能保证「这个人接下来要做的事情是对的」。调用方仍然在命令式地决定下一步动作，比如 create sandbox、start dev server、restart preview。这些判断通常来自调用方当时看到的状态，而这个状态可能已经过期了。
+A lock only guarantees “only one person executes at a time,” not “what that person is about to do is still correct.” Callers still decide the next action imperatively — create sandbox, start dev server, restart preview. Those decisions usually come from state the caller saw at the time, which may already be stale.
 
-请求 A 看到工作区还没准备好，于是准备创建 sandbox。但在 A 真正执行之前，请求 B 可能已经把 sandbox 创建好了。如果 A 拿到锁后只是继续执行自己一开始决定好的动作，就仍然可能重复创建资源。
+Request A sees the workspace is not ready and plans to create a sandbox. Before A actually runs, request B may already have created it. If A acquires the lock and simply continues the action it decided earlier, it can still duplicate resources.
 
-所以，锁只解决了「别同时干」，没有解决「干之前要重新确认真实状态」。更大的问题是，状态写入也可能互相覆盖：某个请求手里拿着一份旧的 snapshot，经过一段时间后又把它写回 durable storage。如果这期间已经有别的请求写入了新状态，这次旧写入就会把新状态覆盖掉。
+So a lock only solves “don’t do it at the same time,” not “reconfirm real state before acting.” A larger problem is that state writes can also clobber each other: a request holds an old snapshot and later writes it back to durable storage. If another request has already written newer state in between, that stale write overwrites the new state.
 
-因此，单纯的临界区锁不够。我们需要的不只是互斥，而是一套能让系统围绕目标状态持续收敛的机制。
+Therefore a pure critical-section lock is not enough. We need more than mutual exclusion — a mechanism that lets the system keep converging around a desired state.
 
-## 从命令式调度到声明式调度
+## From imperative to declarative scheduling
 
-之前的模式是命令式的。调用方会说：
+The previous pattern was imperative. The caller would say:
 
-> 帮我创建 sandbox，然后启动 dev server。
+> Create a sandbox for me, then start the dev server.
 
-新的模式是声明式的。调用方只说：
+The new pattern is declarative. The caller only says:
 
-> 我希望这个 session 进入 preview-ready 状态。
+> I want this session to reach the preview-ready state.
 
-至于当前有没有 sandbox、dev server 是否已经启动、PreviewURL 是否已经可用，这些都不由调用方直接判断，而是交给调和器完成。
+Whether a sandbox exists, whether the dev server has started, and whether PreviewURL is available are not decided directly by the caller — they are left to the reconciler.
 
-调和器每次都会重新观察真实世界，然后决定下一步要做什么：没有 sandbox 就创建；已存在就不重复创建；dev server 没启动就启动；服务已可用就什么都不做；目标状态已满足就直接结束。
+Each time, the reconciler re-observes the real world, then decides the next step: create if there is no sandbox; skip create if one exists; start the dev server if it is down; do nothing if the service is already available; stop when the desired state is satisfied.
 
-这就是从命令式调度到声明式调度的变化。命令式调度关注「现在执行什么命令？」；声明式调度关注「最终要变成什么状态？」
+That is the shift from imperative to declarative scheduling. Imperative scheduling asks “what command do I run now?” Declarative scheduling asks “what state should we end up in?”
 
-调用方不再直接编排 create、start、restart 这些动作，只写入目标状态。系统根据当前状态和目标状态之间的差距，自己选择最小动作，让真实世界逐步收敛到目标状态。
+Callers no longer directly orchestrate create, start, and restart. They only write the desired state. The system chooses the minimal action based on the gap between current and desired state, so the real world converges step by step.
 
-## 基础概念
+## Basic concepts
 
-这套机制借鉴了 Kubernetes controller 的模型。
+This mechanism borrows the Kubernetes controller model.
 
-### 目标状态
+### Desired state
 
-目标状态表示系统希望变成什么样。例如：
+Desired state is what the system wants to become. For example:
 
 ```typescript
 desired = "preview-ready"
 ```
 
-它表达的是：我希望这个 session 的预览服务最终可用。
+It means: I want this session’s preview service to eventually be available.
 
-### 当前状态
+### Observed state
 
-当前状态表示系统最近一次观察到的真实情况。例如：
+Observed state is the real situation last observed by the system. For example:
 
-1. sandbox 是否存在
-2. dev server 是否启动
-3. PreviewURL 是否可访问
-4. 当前处于 creating、starting、ready 还是 failed
+1. Whether the sandbox exists
+2. Whether the dev server is started
+3. Whether PreviewURL is reachable
+4. Whether the phase is creating, starting, ready, or failed
 
-目标状态是「想要什么」，当前状态是「现在是什么」。
+Desired state is “what we want”; observed state is “what it is now.”
 
-### 调和器
+### Reconciler
 
-调和器负责把当前状态推进到目标状态。它不会盲目执行固定命令，而是反复做三件事：
+The reconciler advances current state toward desired state. It does not blindly run fixed commands; it repeatedly does three things:
 
-1. 观察真实世界
-2. 判断当前状态和目标状态的差距
-3. 执行一个最小动作
+1. Observe the real world
+2. Measure the gap between current and desired state
+3. Execute one minimal action
 
-这个过程会不断循环，直到目标状态满足，或者超过本次调和的时间限制。
+This loop continues until the desired state is satisfied or the current reconcile time budget is exceeded.
 
-### 租约
+### Lease
 
-租约用来决定当前由谁负责调和。同一个 session 可能同时有多个请求进来，但同一时间只能有一个请求真正操作 sandbox、dev server、PreviewURL 这些外部资源。拿到租约的人，就是这一轮的调和器。
+A lease decides who is responsible for reconciliation right now. Multiple requests may enter for the same session, but only one request may actually operate external resources such as sandbox, dev server, and PreviewURL at a time. Whoever holds the lease is the reconciler for this round.
 
-租约有过期时间。如果持有租约的 isolate 中途挂了，租约不会永久占住。过期之后，其他请求可以接管。
+Leases expire. If the isolate holding the lease dies mid-way, the lease does not stick forever. After expiry, another request can take over.
 
-### 版本检查
+### Version check
 
-版本检查用来防止旧状态覆盖新状态。每份 snapshot 都有一个 `revision`。写入时必须确认当前存储里的 `revision` 仍然是自己读到的那个版本。
+Version checks prevent old state from overwriting new state. Every snapshot has a `revision`. On write you must confirm the `revision` still in storage is the one you read.
 
-如果版本已经变化，说明别人已经写入了更新状态。这时当前写入必须失败，然后重新读取最新状态再决定下一步。这就是 CAS 的作用。
+If the version has changed, someone else already wrote a newer state. The current write must fail; the request re-reads the latest state and decides the next step again. That is what CAS does.
 
-## Reconcile：声明式调和
+## Reconcile: declarative reconciliation
 
-新的调度流程是这样的：
+The new scheduling flow looks like this:
 
-1. 调用方写入目标状态，比如 `preview-ready`
-2. 请求尝试获取租约
-3. 拿到租约的人开始调和
-4. 调和器观察真实世界
-5. 根据观察结果执行最小动作
-6. 再次观察
-7. 直到目标状态满足，或者本轮调和超时
+1. The caller writes the desired state, e.g. `preview-ready`
+2. The request tries to acquire a lease
+3. The lease holder starts reconciling
+4. The reconciler observes the real world
+5. It executes a minimal action based on observation
+6. It observes again
+7. Until the desired state is satisfied, or this round times out
 
-抢到租约的人，并不是获得了「随便起停资源」的权限，而是获得了调和权。它唯一的职责是：
+Winning the lease is not permission to start and stop resources arbitrarily — it is the right to reconcile. Its only job is:
 
-> 让当前状态逐步追上目标状态。
+> Advance current state toward desired state.
 
-如果 sandbox 已经存在，就不应该再创建；如果 dev server 已经启动，就不应该重复启动；如果 PreviewURL 已经可用，就应该直接结束；如果目标状态在调和过程中变化了，也应该根据新的目标继续收敛。
+If a sandbox already exists, do not create another; if the dev server is already up, do not start it again; if PreviewURL is already available, finish; if the desired state changes mid-reconcile, keep converging toward the new goal.
 
-没有抢到租约的请求也不需要立刻失败。它可以等待当前调和器完成；如果租约过期，说明当前调和器可能已经挂了，它就可以尝试接管。
+Requests that do not win the lease need not fail immediately. They can wait for the current reconciler to finish; if the lease expires, the current reconciler may be dead, and they can try to take over.
 
-所以，整个系统不再是多个请求各自执行自己的流程，而是多个请求围绕同一个目标状态协作。
+So the system is no longer multiple requests each running their own procedure — it is multiple requests collaborating around one desired state.
 
-## Lease 解决什么
+## What Lease solves
 
-Lease 解决的是外部资源的并发操作问题。同一个 session 下，创建 sandbox、启动 dev server、准备 PreviewURL 这些操作都属于外部副作用，不能随便并发执行，否则很容易出现重复创建和状态互相覆盖。
+Lease solves concurrent operation of external resources. Under the same session, create sandbox, start dev server, and prepare PreviewURL are all external side effects. Running them concurrently easily causes duplicate creation and state clobbering.
 
-Lease 的作用是：
+Lease’s role is:
 
-1. 同一时间只有一个调和器能操作外部资源
-2. 如果调和器中途挂了，其他请求可以在租约过期后接管
+1. Only one reconciler can operate external resources at a time
+2. If the reconciler dies mid-way, other requests can take over after the lease expires
 
-这和普通的进程内锁不一样。进程内锁只能保护当前进程；但在 Serverless 环境里，同一个 session 的请求可能落到不同 isolate 上。每个 isolate 都有自己的内存状态，不能依赖本地锁来协调。
+This differs from an in-process lock. An in-process lock only protects the current process; in Serverless, requests for the same session may land on different isolates. Each isolate has its own memory and cannot rely on a local lock to coordinate.
 
-Lease 存在 durable storage 里，所以多个 isolate 都能看到同一份租约状态。Lease 也不是永久锁：它有过期时间，并且需要持有者持续续约。如果持有者还活着，它会不断续约；如果持有者挂了，续约停止，租约过期，别人就可以接手。
+The lease lives in durable storage, so every isolate sees the same lease state. A lease is also not a permanent lock: it has an expiry and the holder must keep renewing it. While the holder is alive it renews; if the holder dies, renewal stops, the lease expires, and someone else can take over.
 
-因此，Lease 解决的是：
+Therefore Lease answers:
 
-> 谁有资格推进真实世界。
+> Who is allowed to advance the real world.
 
-## CAS 解决什么
+## What CAS solves
 
-Lease 解决了谁能操作外部资源，但它没有解决所有问题。还有一种情况是旧状态覆盖新状态。
+Lease solves who may operate external resources, but not everything. Another failure mode is old state overwriting new state.
 
-比如请求 A 读取了一份 snapshot：
+For example, request A reads a snapshot:
 
 ```typescript
 revision = 10
 observed = "starting"
 ```
 
-然后它开始执行某些操作。与此同时，请求 B 也完成了一次调和，把状态更新成：
+Then it starts some work. Meanwhile request B finishes a reconcile and updates state to:
 
 ```typescript
 revision = 11
 observed = "ready"
 ```
 
-如果请求 A 后面又把自己手里的旧 snapshot 写回去，就可能把 `ready` 覆盖回 `starting`。这就是状态覆盖问题。
+If request A later writes back its old snapshot, it may overwrite `ready` with `starting`. That is state clobbering.
 
-CAS 用来防止这种情况。每次写入时，请求都必须带上自己读取时的 `revision`。只有 durable storage 里的当前版本仍然等于这个 `revision`，写入才会成功。如果版本已经变了，写入失败；请求需要重新读取最新 snapshot，再重新判断下一步动作。
+CAS prevents this. On every write, the request must carry the `revision` it read. The write succeeds only if durable storage’s current version still equals that `revision`. If the version changed, the write fails; the request must re-read the latest snapshot and re-decide the next action.
 
-所以，CAS 解决的是：
+So CAS answers:
 
-> 谁的状态写入仍然有效。
+> Whose state write is still valid.
 
-Lease 关注外部资源的操作权，CAS 关注状态写入的新旧关系。两者解决的问题不同，缺一不可。
+Lease is about the right to operate external resources; CAS is about whether a state write is still current. They solve different problems; both are required.
 
-## 为什么不是普通分布式锁
+## Why not a plain distributed lock
 
-传统分布式锁通常表达的是：
+A traditional distributed lock usually means:
 
-> 我拿到锁了，所以我可以执行这段代码。
+> I hold the lock, so I may run this code.
 
-这仍然偏命令式。它能阻止两个请求同时进入临界区，但不关心临界区里执行的动作是否仍然合理，也不关心你写回的状态是不是基于最新版本。
+That is still imperative. It can stop two requests from entering a critical section at once, but it does not care whether the action inside is still sensible, or whether the state you write back is based on the latest version.
 
-在这个项目里，真正危险的不是单纯的「两个请求同时跑」。更具体地说，我们担心的是三件事：
+In this project, the real danger is not simply “two requests running at once.” More specifically, we worry about three things:
 
-1. 同一个 session 创建出多个 sandbox
-2. 某个 isolate 中途死掉，导致协调流程卡住
-3. 某个 isolate 拿着过期 snapshot，把旧状态写回 durable storage
+1. The same session creates multiple sandboxes
+2. An isolate dies mid-way and the coordination flow stalls
+3. An isolate holds a stale snapshot and writes old state back to durable storage
 
-Lease 解决前两个问题：同一时间只有一个调和器推进外部资源；因为租约会过期，持有者挂掉后别人可以接管。CAS 解决第三个问题：每次状态写入都必须基于最新版本；如果有人已经更新过 snapshot，旧写入就不能再覆盖新状态。
+Lease solves the first two: only one reconciler advances external resources at a time; because leases expire, someone else can take over after the holder dies. CAS solves the third: every state write must be based on the latest version; if someone already updated the snapshot, a stale write cannot overwrite newer state.
 
-所以，这套机制并不是「不要锁」，而是用带过期时间的租约，加上版本检查，来替代单纯的分布式互斥锁。这样更适合 Serverless 场景下的并发模型：
+So this mechanism is not “no locks” — it replaces a pure distributed mutex with an expiring lease plus version checks. That fits Serverless concurrency better:
 
-> 多个请求可以同时声明目标，但同一时间只有一个调和器推进真实世界，并且所有状态写入都必须经过版本检查。
+> Multiple requests may declare desired state at once, but only one reconciler advances the real world at a time, and every state write must pass a version check.
 
-## 和 Kubernetes 的对应关系
+## Correspondence to Kubernetes
 
-这套模型和 Kubernetes controller 很像。Kubernetes 里，用户通常不会直接说「现在去某台机器上启动一个容器」，而是声明「我希望有 3 个副本在运行」。这个「希望的状态」会被写入 API Server；Controller 会不断观察集群当前状态，然后创建、删除或更新资源，让当前状态逐渐接近目标状态。
+This model is similar to a Kubernetes controller. In Kubernetes, users usually do not say “go start a container on that machine now”; they declare “I want 3 replicas running.” That desired state is written to the API Server; Controllers keep observing cluster state and create, delete, or update resources so current state approaches desired state.
 
-这里也是同样的思路。调用方不直接命令系统创建 sandbox 或启动 dev server，只写入目标状态，比如 `preview-ready`。系统保存两类状态：目标状态和当前状态。调和器不断观察当前状态，并执行必要动作，让当前状态追上目标状态。
+The same idea applies here. Callers do not directly command sandbox creation or dev server start; they only write a desired state such as `preview-ready`. The system stores two kinds of state: desired and observed. The reconciler keeps observing and taking necessary actions so observed catches up to desired.
 
-Lease 类似于选出当前负责调和的 controller。CAS 类似于 etcd 的乐观并发控制，保证状态写入不会互相覆盖。
+Lease is like electing the controller currently responsible for reconciliation. CAS is like etcd’s optimistic concurrency control, ensuring state writes do not clobber each other.
 
-## 代码实现
+## Code implementation
 
-核心状态存放在 `DaytonaRuntimeSnapshot` 里。它只保存目标状态和当前状态，不让每个 API 直接命令式地起停 sandbox 或 dev server。
+Core state lives in `DaytonaRuntimeSnapshot`. It only stores desired and observed state; it does not let every API imperatively start or stop the sandbox or dev server.
 
 ```typescript
 export interface DaytonaRuntimeSnapshot {
@@ -229,31 +229,31 @@ export interface DaytonaRuntimeSnapshot {
 }
 ```
 
-这里最重要的是几类字段：
+The important field groups:
 
-- `desired`：目标状态，比如调用方希望预览服务最终可用
-- `observed`：当前状态，来自系统最近一次对真实世界的观察
-- `leaseOwner` / `leaseExpiresAt`：当前谁持有租约，以及租约什么时候过期
-- `revision`：用于版本检查；每次写入 snapshot 时，都要确认版本没有被别人更新过
-- `generation`：目标状态的代次；当目标状态变化时，generation 会变化，调和器可以据此知道自己正在处理的是不是最新目标
+- `desired`: target state, e.g. the caller wants preview eventually available
+- `observed`: current state from the system’s latest observation of the real world
+- `leaseOwner` / `leaseExpiresAt`: who holds the lease and when it expires
+- `revision`: used for version checks; on every snapshot write, confirm nobody else updated the version
+- `generation`: generation of the desired state; when desired changes, generation changes so the reconciler knows whether it is still working on the latest goal
 
-## ensureDesiredState 的流程
+## ensureDesiredState flow
 
-`ensureDesiredState` 做的事情可以分成四步。
+`ensureDesiredState` can be split into four steps.
 
-**第一步，写入目标状态。** 比如调用方希望预览可用，就写入：
+**Step 1: write desired state.** For example, if the caller wants preview available:
 
 ```typescript
 desired = "preview-ready"
 ```
 
-调用方不需要关心当前是否已经有 sandbox，也不需要自己决定要不要启动 dev server。
+The caller does not need to know whether a sandbox already exists, or decide whether to start the dev server.
 
-**第二步，尝试获取租约。** 如果当前没有人调和，或者之前的租约已经过期，当前请求就可以成为新的调和器。如果租约已经被别人持有，当前请求不需要重复创建资源；它可以等待状态收敛，或者在租约过期后尝试接管。
+**Step 2: try to acquire a lease.** If nobody is reconciling, or the previous lease has expired, the current request can become the new reconciler. If someone else holds the lease, the current request should not create resources again; it can wait for convergence, or try to take over after expiry.
 
-**第三步，进入观察和行动循环。** 调和器会反复执行：续约 → 读取最新 snapshot → 观察真实世界 → 合并观察结果 → 判断目标是否已经满足 → 如果没有满足，就执行一个最小动作。
+**Step 3: enter the observe-and-act loop.** The reconciler repeatedly: renew → read latest snapshot → observe the real world → merge observations → check whether desired is satisfied → if not, execute one minimal action.
 
-简化后的代码类似这样：
+Simplified code looks like:
 
 ```typescript
 async function reconcileLoop(...) {
@@ -266,7 +266,7 @@ async function reconcileLoop(...) {
 
     const observed = await observeRuntime(...);
 
-    // 将真实观察结果合并进 snapshot
+    // Merge real observations into the snapshot
 
     if (isDesiredSatisfied(snapshot)) {
       return snapshot;
@@ -274,24 +274,24 @@ async function reconcileLoop(...) {
 
     const acted = await reconcileOnce(sessionId, snapshot, observed);
 
-    // 如果执行了动作，就继续下一轮观察
+    // If an action ran, continue to the next observation round
   }
 }
 ```
 
-这里最关键的是，调和器不是根据一开始的判断一路执行到底。它每一轮都会重新读取最新 snapshot，并重新观察真实世界，避免基于过期状态继续执行错误动作。
+The key point: the reconciler does not execute a one-shot plan from its first judgment. Every round it re-reads the latest snapshot and re-observes the real world, avoiding wrong actions based on stale state.
 
-**第四步，结束或释放租约。** 如果目标状态已经满足，本轮调和结束；如果超过时间限制，也会停止，让后续请求继续接管。
+**Step 4: finish or release the lease.** If desired state is satisfied, this round ends; if the time budget is exceeded, it also stops so later requests can take over.
 
-## reconcileOnce 做什么
+## What reconcileOnce does
 
-`reconcileOnce` 只负责推进一步。它不会一次性把所有动作都执行完，而是根据当前状态和目标状态之间的差距，选择一个最小动作。
+`reconcileOnce` only advances one step. It does not run every action in one go; it picks one minimal action based on the gap between current and desired state.
 
-比如目标是 `preview-ready`：当前还没有 sandbox，就创建 sandbox；已有 sandbox 但 dev server 没启动，就启动；dev server 已启动但 PreviewURL 还不可用，就等待或刷新；所有条件都满足，就什么都不做。
+For example, when desired is `preview-ready`: if there is no sandbox yet, create one; if the sandbox exists but the dev server is down, start it; if the dev server is up but PreviewURL is not ready, wait or refresh; if all conditions are met, do nothing.
 
-这种「一次只做一步」的方式很重要。因为每个动作执行后，真实世界都可能发生变化；下一步应该基于新的观察结果来决定，而不是基于旧 snapshot 继续往下跑。
+Doing “one step at a time” matters. After each action the real world may change; the next step should be decided from a new observation, not by continuing from an old snapshot.
 
-这也是声明式调和和命令式流程最大的区别。命令式流程像这样：
+That is the biggest difference between declarative reconciliation and an imperative flow. Imperative looks like:
 
 ```typescript
 createSandbox()
@@ -299,7 +299,7 @@ startDevServer()
 createPreviewURL()
 ```
 
-声明式调和像这样：
+Declarative reconciliation looks like:
 
 ```typescript
 observe()
@@ -322,56 +322,56 @@ if (!previewURLReady) {
 return ready
 ```
 
-每一步之后都回到观察阶段。这样即使中途有其他请求更新了状态，或者外部资源状态发生变化，系统也能在下一轮调和中纠正回来。
+After every step, return to observation. Even if another request updated state mid-way, or external resource state changed, the next reconcile round can correct course.
 
-## 一个典型场景
+## A typical scenario
 
-假设用户打开 session 后，后台预热开始执行。它写入目标状态：
+Suppose after the user opens a session, background warm starts. It writes desired state:
 
 ```typescript
 desired = "preview-ready"
 ```
 
-然后它拿到租约，开始创建 sandbox。这时 Agent 也开始调用工具。Agent 发现自己也需要工作区，于是同样调用 `ensureDesiredState("preview-ready")`。但它拿不到租约。
+Then it acquires the lease and starts creating a sandbox. Meanwhile the Agent starts calling tools. The Agent also needs a workspace, so it calls `ensureDesiredState("preview-ready")` as well — but it cannot get the lease.
 
-这时 Agent 不会再创建一套 sandbox，只需要等待当前调和器把状态推进到 `preview-ready`。
+The Agent does not create another sandbox; it only waits for the current reconciler to advance state to `preview-ready`.
 
-如果后台预热的 isolate 正常工作，它会继续创建 sandbox、启动 dev server、准备 PreviewURL；Agent 等到目标状态满足后就可以继续执行。如果后台预热的 isolate 中途挂了，它就不会继续续约；租约过期后，Agent 对应的请求可以接管调和。
+If the background-warm isolate is healthy, it continues creating the sandbox, starting the dev server, and preparing PreviewURL; once desired is satisfied the Agent continues. If that isolate dies mid-way, it stops renewing; after the lease expires, the Agent’s request can take over reconciliation.
 
-接管后，它不会从头盲目创建资源，而会重新观察真实世界：sandbox 已经创建好了就复用；dev server 还没启动就只启动；PreviewURL 已经准备好了就直接结束。这样就避免了重复创建，也避免了流程卡死。
+After takeover it does not blindly recreate from scratch — it re-observes the real world: reuse the sandbox if it already exists; only start the dev server if needed; finish immediately if PreviewURL is ready. That avoids both duplicate creation and a stuck flow.
 
-## Restart 场景
+## Restart scenario
 
-Restart 是最容易触发状态竞争的场景。用户可能连续点击 Restart，每次点击都会产生一个新的意图。
+Restart is the scenario most likely to trigger state races. Users may click Restart repeatedly; each click creates a new intent.
 
-如果用命令式方式处理，每个请求都可能执行一遍停止和启动。多个 restart 交错执行时，很容易出现服务刚启动又被停止，或者旧请求覆盖新状态的问题。
+Handled imperatively, every request may stop and start again. When multiple restarts interleave, a service that just started may be stopped again, or an old request may overwrite newer state.
 
-在声明式模型里，Restart 不应该被理解成「立刻执行 stop 再 start」，更像是写入一个新的目标代次。系统知道：
+In the declarative model, Restart should not mean “immediately stop then start.” It is more like writing a new desired generation. The system knows:
 
-> 用户希望预览服务重新收敛到可用状态。
+> The user wants the preview service to converge to available again.
 
-调和器会根据最新 generation 和真实状态决定下一步动作。如果旧的调和器发现目标代次已经变化，它就不能继续按旧目标写状态；如果它尝试写入旧 snapshot，也会因为 revision 不匹配而失败。最终，只有基于最新目标和最新版本的调和结果能够写入成功。这样可以减少连续 Restart 带来的状态覆盖问题。
+The reconciler decides the next action from the latest generation and real state. If an old reconciler sees the desired generation has changed, it must not keep writing under the old goal; if it tries to write an old snapshot, it fails on revision mismatch. Ultimately only reconcile results based on the latest goal and latest version can write successfully. That reduces state clobbering from rapid Restarts.
 
-## 最终模型
+## Final model
 
-这套机制可以总结成一句话：
+This mechanism can be summarized in one sentence:
 
-> 调用方只声明目标状态，系统用租约选出唯一调和器，再用版本检查保证状态写入不会覆盖更新结果。
+> Callers only declare desired state; the system uses a lease to elect a single reconciler, and version checks to ensure state writes do not overwrite newer results.
 
-更具体地说：
+More specifically:
 
-1. 调用方不直接 create、start、restart
-2. 调用方只写入目标状态
-3. Lease 决定当前由谁负责推进真实资源
-4. 调和器不断观察真实状态
-5. 每次只执行一个最小动作
-6. CAS 保证旧 snapshot 不能覆盖新 snapshot
-7. 如果调和器挂了，租约过期后别人可以接管
+1. Callers do not directly create, start, or restart
+2. Callers only write desired state
+3. Lease decides who currently advances real resources
+4. The reconciler keeps observing real state
+5. Each round executes only one minimal action
+6. CAS ensures an old snapshot cannot overwrite a new snapshot
+7. If the reconciler dies, others can take over after the lease expires
 
-Lease、CAS、Reconciler 的分工：
+Division of labor among Lease, CAS, and Reconciler:
 
-- **Lease**：同一时间谁能操作外部资源，以及持有者挂掉后如何接管
-- **CAS**：写入状态时，如何避免旧版本覆盖新版本
-- **Reconciler**：如何让当前状态逐步收敛到目标状态
+- **Lease**: who may operate external resources at a time, and how takeover works after the holder dies
+- **CAS**: how to avoid old versions overwriting new versions on state writes
+- **Reconciler**: how current state converges step by step to desired state
 
-这套方案的重点不是用了一个更复杂的锁。真正的变化是，我们把系统从命令式操作改成了声明式收敛：调用方只负责表达意图；租约负责选出当前的调和器；版本检查负责保护状态一致性；调和器负责观察、行动、再观察，直到工作区进入目标状态。
+The point of this design is not a more complex lock. The real change is moving the system from imperative operations to declarative convergence: callers only express intent; the lease elects the current reconciler; version checks protect state consistency; the reconciler observes, acts, and observes again until the workspace reaches the desired state.
