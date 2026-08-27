@@ -1005,7 +1005,7 @@ export function PreviewPanel({
                   <p className="max-w-md whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
                     {displayError}
                   </p>
-                  {/contact the author|\u8054\u7cfb\u4f5c\u8005/.test(displayError) ? (
+                  {/contact the author/i.test(displayError) ? (
                     <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
                       This is a platform Daytona resource limit. The author needs
                       to clean up idle sandboxes or raise the quota in the

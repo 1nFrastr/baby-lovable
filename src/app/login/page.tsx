@@ -10,7 +10,7 @@ const IS_DEV = process.env.NODE_ENV === "development";
 type OAuthProvider = "github";
 
 const PROVIDERS: Array<{ id: OAuthProvider; label: string }> = [
-  { id: "github", label: "使用 GitHub 登录" },
+  { id: "github", label: "Continue with GitHub" },
 ];
 
 function LoginForm() {
@@ -42,7 +42,7 @@ function LoginForm() {
       }
     } catch (err) {
       setStatus("error");
-      setMessage(err instanceof Error ? err.message : "登录失败");
+      setMessage(err instanceof Error ? err.message : "Sign-in failed");
     }
   };
 
@@ -64,7 +64,9 @@ function LoginForm() {
       router.refresh();
     } catch (err) {
       setStatus("error");
-      setMessage(err instanceof Error ? err.message : "匿名登录失败");
+      setMessage(
+        err instanceof Error ? err.message : "Anonymous sign-in failed",
+      );
     }
   };
 
@@ -79,16 +81,16 @@ function LoginForm() {
           className="mx-auto rounded-2xl"
         />
         <h1 className="mt-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          登录 BabyLovable
+          Sign in to BabyLovable
         </h1>
         <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          使用第三方账号登录以管理你的项目会话
+          Sign in with a third-party account to manage your project sessions
         </p>
       </div>
 
       {error === "auth_callback_failed" && (
         <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
-          认证回调失败，请重试。
+          Authentication callback failed. Please try again.
           {errorReason ? (
             <span className="mt-1 block text-xs opacity-80">{errorReason}</span>
           ) : null}
@@ -110,7 +112,7 @@ function LoginForm() {
             disabled={status === "loading"}
             className="w-full rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
-            {status === "loading" ? "跳转中…" : label}
+            {status === "loading" ? "Redirecting…" : label}
           </button>
         ))}
       </div>
@@ -123,7 +125,7 @@ function LoginForm() {
             </div>
             <div className="relative flex justify-center text-xs">
               <span className="bg-white px-2 text-zinc-400 dark:bg-zinc-950">
-                开发环境
+                Development
               </span>
             </div>
           </div>
@@ -134,10 +136,10 @@ function LoginForm() {
             disabled={status === "loading"}
             className="w-full rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
           >
-            {status === "loading" ? "登录中…" : "匿名登录（测试）"}
+            {status === "loading" ? "Signing in…" : "Anonymous sign-in (test)"}
           </button>
           <p className="text-center text-xs text-zinc-400">
-            每次点击创建新测试账号，退出后可再试
+            Each click creates a new test account; sign out to try again
           </p>
         </>
       )}

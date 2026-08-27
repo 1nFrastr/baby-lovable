@@ -60,7 +60,7 @@ export async function GET(request: Request) {
       origin,
       returnTo,
       setupAction === "request"
-        ? "GitHub App 安装仍在等待审批"
+        ? "GitHub App installation is still pending approval"
         : "missing_installation_id",
     );
   }
@@ -71,7 +71,11 @@ export async function GET(request: Request) {
 
   const auth = await getSessionAuthContext(request);
   if (!auth.userId) {
-    return redirectWithError(origin, returnTo, "请先使用 GitHub 登录");
+    return redirectWithError(
+      origin,
+      returnTo,
+      "Please sign in with GitHub first",
+    );
   }
   if (state.userId !== auth.userId) {
     return redirectWithError(
@@ -84,24 +88,27 @@ export async function GET(request: Request) {
     return redirectWithError(
       origin,
       returnTo,
-      "当前账号不是 GitHub 登录，无法校验安装归属",
+      "Current account is not a GitHub login; cannot verify installation ownership",
     );
   }
 
   try {
     const installation = await getGithubAppInstallation(installationId);
     if (installation.suspended) {
-      throw new GithubAppError("GitHub App installation 已暂停", 403);
+      throw new GithubAppError("GitHub App installation is suspended", 403);
     }
     if (installation.accountType !== "User") {
-      throw new GithubAppError("当前仅支持 GitHub 个人账号仓库", 400);
+      throw new GithubAppError(
+        "Only personal GitHub account repositories are supported",
+        400,
+      );
     }
     if (
       auth.githubIdentity &&
       installation.accountId !== auth.githubIdentity.id
     ) {
       throw new GithubAppError(
-        "GitHub App installation 不属于当前登录账号",
+        "GitHub App installation does not belong to the current account",
         403,
       );
     }

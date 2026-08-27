@@ -106,8 +106,8 @@ function printHelp(): void {
       `  -h, --help             Show this help\n` +
       `      --test-resume      Run headless stream-resume test and exit\n\n` +
       `Examples:\n` +
-      `  npm run agent -- -p "创建一个待办事项应用"\n` +
-      `  npm run agent -- --session sess_abc123 -p "给标题加上渐变色"\n` +
+      `  npm run agent -- -p "Create a todo app"\n` +
+      `  npm run agent -- --session sess_abc123 -p "Add a gradient to the title"\n` +
       `  npm run agent            # interactive REPL (new session)\n` +
       `  npm run agent -- -s sess_abc123   # interactive REPL on an existing session\n\n`,
   );
@@ -239,7 +239,7 @@ async function interactiveLoop(
 
   try {
     while (true) {
-      const answer = (await rl.question(`\n\x1b[1m你 ▸ \x1b[0m`)).trim();
+      const answer = (await rl.question(`\n\x1b[1myou ▸ \x1b[0m`)).trim();
       if (!answer) {
         continue;
       }

@@ -55,7 +55,7 @@ describe("freestyle git helpers", () => {
   it("builds turn commit messages with trailers", () => {
     const message = buildTurnCommitMessage({
       turnIndex: 2,
-      userPrompt: "加一个按钮",
+      userPrompt: "Add a button",
       sessionId: "sess_abc",
       sessionTitle: "Todo App",
       runId: "run_1",

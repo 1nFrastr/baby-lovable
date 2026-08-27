@@ -308,9 +308,8 @@ export function isGithubAppInstallMissingError(error: unknown): boolean {
     (message.includes("installation") ||
       message.includes("not found") ||
       message.includes("uninstalled") ||
-      message.includes("suspended") ||
-      message.includes("已卸载") ||
-      message.includes("未安装"))
+      message.includes("not installed") ||
+      message.includes("suspended"))
   );
 }
 
