@@ -1,89 +1,89 @@
-# 实时状态同步设计
+# Realtime state sync design
 
-Preview、Agent Run、Browser Test 的状态都在服务端变化。前端不应该反复轮询多个接口，然后自己拼出当前状态。更合理的方式是：服务端维护一份统一的读模型，前端只订阅这份读模型的变化。
+Preview, Agent Run, and Browser Test state all change on the server. The frontend should not repeatedly poll multiple endpoints and assemble current state itself. A better approach: the server maintains one unified read model, and the frontend only subscribes to changes of that read model.
 
-一句话概括：
+In one sentence:
 
-> 沙盒和任务状态的真相在服务端，UI 只订阅一份投影后的运行态视图。
+> Truth for sandbox and task state lives on the server; the UI only subscribes to one projected runtime view.
 
-## 要解决的问题
+## Problems to solve
 
-在一个会话里，很多状态都会频繁变化：
+In a session, many states change frequently:
 
-- Agent Run 正在排队、执行、完成或失败
-- Preview 正在创建、启动、重启或就绪
-- Browser Test 正在运行、通过或失败
+- Agent Run is queued, running, completed, or failed
+- Preview is creating, starting, restarting, or ready
+- Browser Test is running, passed, or failed
 
-如果前端通过轮询来拼这些状态，会带来几个问题。
+If the frontend polls to assemble these states, several problems follow.
 
-**第一，请求量高。** 每次刷新 UI 都要临时查询多份状态（run、preview、app test），再在服务端现场拼装。多个 tab 同时打开时，请求量会进一步放大。
+**First, high request volume.** Every UI refresh temporarily queries multiple states (run, preview, app test) and assembles them on the server. With multiple tabs open, request volume grows further.
 
-**第二，前端容易看到不一致状态。** 用户刷新页面、多 tab 同时存在、网络包乱序到达时，前端可能会用旧状态覆盖新状态，导致 UI 和服务端真实状态分叉。
+**Second, the frontend easily sees inconsistent state.** On refresh, multi-tab use, or out-of-order network packets, the frontend may overwrite new state with old state, so UI and server truth diverge.
 
-**第三，状态同步模型不清晰。** Supabase Realtime 更适合推送一整行数据变化。如果前端自己维护多个局部事件再手动 merge，很容易让 UI 状态变成另一套隐式状态机。
+**Third, the sync model is unclear.** Supabase Realtime is better at pushing whole-row changes. If the frontend maintains many partial events and merges them by hand, UI state easily becomes another implicit state machine.
 
-所以这里需要一个明确的读模型：
+So we need a clear read model:
 
-> 服务端负责拼好状态，前端只负责接收和替换。
+> The server assembles state; the frontend only receives and replaces.
 
-## 核心设计
+## Core design
 
-这套同步机制分成两层：
+This sync mechanism has two layers:
 
-1. 命令侧负责更新真实业务状态
-2. 查询侧负责维护 UI 需要的读模型
+1. The command side updates real domain state
+2. The query side maintains the read model the UI needs
 
-也就是把写路径和读模型分开。
+That is: separate the write path from the read model.
 
-## 写路径
+## Write path
 
-业务状态仍然由各自的领域模块更新。比如：
+Domain state is still updated by each domain module. For example:
 
-- Agent Run 更新执行状态
-- Daytona Runtime 更新 Preview 状态
-- Browser Test 更新测试状态
+- Agent Run updates execution status
+- Daytona Runtime updates Preview status
+- Browser Test updates test status
 
-这些领域状态更新成功后，会调用：
+After those domain updates succeed, they call:
 
 ```typescript
 publishRuntimeUpdate(...)
 ```
 
-它的作用不是直接驱动 UI，而是把领域状态转换成前端需要的统一视图。如果这次更新没有改变任何 UI 关心的字段，就不会递增 `version`。例如 Lease 续租只是内部协调状态，不需要通知前端刷一遍。这样可以减少无意义推送，避免 UI 被内部状态变化频繁打扰。
+Its job is not to drive the UI directly, but to convert domain state into the unified view the frontend needs. If the update does not change any UI-relevant fields, `version` is not incremented. For example, lease renewal is only internal coordination and should not force a UI refresh. That reduces useless pushes and avoids the UI being disturbed by internal state churn.
 
-## 读模型
+## Read model
 
-前端订阅的不是多个零散事件，而是一份统一的 `SessionRuntimeProjection`。它包含：
+The frontend does not subscribe to many scattered events — it subscribes to one unified `SessionRuntimeProjection`. It includes:
 
 - `run`
 - `preview`
 - `appTest`
-- `sourceControl`（Freestyle 仓库准备 / 轮次同步状态；聊天输入框仍只看 `run`）
+- `sourceControl` (Freestyle repo preparation / turn sync status; the chat input still only looks at `run`)
 - `version`
 
-其中 `version` 是单调递增的版本号。每次 UI 相关状态发生变化，服务端都会生成一份新的 projection，并递增 `version`。
+`version` is a monotonically increasing version number. Whenever UI-relevant state changes, the server builds a new projection and increments `version`.
 
-前端收到 projection 后，不做局部 merge，而是整份替换。如果收到的 `version` 比当前版本旧，就直接丢弃。这样可以避免网络乱序导致旧状态覆盖新状态。
+After receiving a projection, the frontend does not partially merge — it replaces the whole document. If the incoming `version` is older than the current one, it is discarded. That prevents out-of-order network delivery from overwriting newer state with older state.
 
-## 输送层
+## Transport
 
-本地与云端使用同一条通道：
+Local and cloud use the same channel:
 
 ```txt
 Supabase Postgres → Supabase Realtime → Web UI
 ```
 
-使用的表是 `session_runtime_projection`。前端订阅这张表中当前 session 对应的行。
+The table is `session_runtime_projection`. The frontend subscribes to the row for the current session.
 
-## 前端消费方式
+## How the frontend consumes it
 
-前端通过 `useSessionRuntime` 消费运行态。进入页面时，先拉取一次初始状态：
+The frontend consumes runtime state via `useSessionRuntime`. On page entry it fetches initial state once:
 
 ```txt
 GET /runtime
 ```
 
-之后不再轮询，所有后续变化都通过 Realtime 推送。简化代码如下：
+After that there is no polling; all later changes arrive via Realtime. Simplified code:
 
 ```typescript
 const channel = supabase
@@ -102,7 +102,7 @@ const channel = supabase
   );
 ```
 
-核心逻辑是：
+Core logic:
 
 ```txt
 if incoming.version > current.version:
@@ -111,11 +111,11 @@ else:
   ignore
 ```
 
-也就是说，前端不需要理解每个事件如何合并。它只需要判断版本，然后接受一份新的完整状态。
+In other words, the frontend does not need to understand how to merge each event. It only checks version, then accepts a new complete state.
 
-## Preview 状态如何发布
+## How Preview state is published
 
-Preview 的真实状态来自 Daytona runtime snapshot。Daytona 侧每次 CAS 写入成功后，会从 snapshot 中投影出 UI 需要的 preview 状态，然后发布到 `SessionRuntimeProjection`。
+Preview’s real state comes from the Daytona runtime snapshot. After each successful CAS write on the Daytona side, UI-needed preview state is projected from the snapshot and published to `SessionRuntimeProjection`.
 
 ```typescript
 // Publish UI projection only when derived preview fields change.
@@ -123,41 +123,41 @@ Preview 的真实状态来自 Daytona runtime snapshot。Daytona 侧每次 CAS �
 void publishPreviewFromSnapshot(saved, ownerId);
 ```
 
-这里有一个重要约束：
+An important constraint:
 
-> 只有 UI 可见字段变化时，才发布新的 projection。
+> Publish a new projection only when UI-visible fields change.
 
-例如租约续期、内部 owner 变化、仅用于协调的字段更新，都不应该让前端收到一条新状态。
+For example, lease renewal, internal owner changes, or fields used only for coordination should not deliver a new state to the frontend.
 
-前端关心的是：Preview 是否 ready、PreviewURL、当前是否 starting / restarting / failed、是否有可展示的错误信息。前端不关心当前 Lease holder、Lease 过期时间，或某次内部 CAS 是否只是续租。这样可以把控制面状态和 UI 状态隔离开。
+What the frontend cares about: whether Preview is ready, PreviewURL, whether it is starting / restarting / failed, and whether there is a displayable error. It does not care who holds the Lease, when the Lease expires, or whether a CAS was only a renewal. That separates control-plane state from UI state.
 
-## 为什么不让客户端自己 merge
+## Why not let the client merge
 
-一个看似简单的方案是：后端推送 `preview.updated`、`run.updated`、`appTest.updated` 这类局部事件，然后前端自己合并。这里没有这么做，原因是这样会把复杂度转移到客户端。
+A seemingly simple approach is: the backend pushes partial events like `preview.updated`, `run.updated`, `appTest.updated`, and the frontend merges them. We do not do that, because it moves complexity to the client.
 
-客户端需要处理：事件乱序、局部状态缺失、页面刷新后的初始状态恢复、多 tab 下的状态一致性、不同事件之间的依赖关系。最后前端很容易变成一个隐式状态机。
+The client would have to handle: out-of-order events, missing partial state, restoring initial state after refresh, multi-tab consistency, and dependencies between events. The frontend easily becomes an implicit state machine.
 
-所以这里选择服务端拼好整份 projection。前端只接收完整读模型，并根据 `version` 判断是否应用。这让同步语义更简单：
+So we choose to assemble the full projection on the server. The frontend only receives the complete read model and decides whether to apply it via `version`. Sync semantics stay simple:
 
-> 服务端负责生成事实，前端负责展示最新事实。
+> The server produces facts; the frontend displays the latest fact.
 
-## 刻意不做的事情
+## What we deliberately do not do
 
-### 不在客户端 merge 局部事件
+### No client-side merge of partial events
 
-客户端不处理 `preview.updated` 这类局部 patch，只接收完整的 `SessionRuntimeProjection`。
+The client does not handle partial patches like `preview.updated`; it only receives a full `SessionRuntimeProjection`.
 
-### 不再引入第二条状态总线
+### No second state bus
 
-没有额外引入 Ably、Redis Pub/Sub 或其他消息系统作为第二条 UI 状态通道。状态已经落在 Postgres 中，Realtime 可以直接推送表变化。再加一层状态总线会增加一致性成本。
+We do not add Ably, Redis Pub/Sub, or another messaging system as a second UI state channel. State already lives in Postgres; Realtime can push table changes directly. Another state bus would add consistency cost.
 
-### 不把 chat token 混进运行态通道
+### Do not mix chat tokens into the runtime channel
 
-Agent 的流式文本仍然走 Workflow SSE。运行态投影只负责 Preview、Run、Browser Test 这些结构化状态。这两类数据的生命周期和消费方式不同，不应该混在一条通道里。
+Agent streaming text still goes through Workflow SSE. Runtime projection only covers structured state such as Preview, Run, and Browser Test. Those two data types have different lifecycles and consumption patterns and should not share one channel.
 
-## 和沙盒调度的关系
+## Relationship to sandbox scheduling
 
-沙盒调度负责让真实资源收敛，实时同步负责让 UI 看到收敛结果。完整链路如下：
+Sandbox scheduling converges real resources; realtime sync lets the UI see the convergence result. The full path:
 
 ```txt
 Agent / Preview API
@@ -170,7 +170,7 @@ Agent / Preview API
   → Web UI
 ```
 
-前半段是控制面：
+The first half is the control plane:
 
 ```txt
 ensureDesiredState
@@ -179,9 +179,9 @@ ensureDesiredState
   → CAS
 ```
 
-它解决的是：多个 isolate 同时操作同一个沙盒时，如何避免重复创建和状态覆盖。
+It solves: when multiple isolates operate the same sandbox at once, how to avoid duplicate creation and state clobbering.
 
-后半段是读模型推送：
+The second half is read-model push:
 
 ```txt
 publishRuntimeUpdate
@@ -189,25 +189,25 @@ publishRuntimeUpdate
   → Realtime
 ```
 
-它解决的是：前端如何及时、一致地看到服务端运行状态。
+It solves: how the frontend sees server runtime state promptly and consistently.
 
-这两件事拆开，是为了让系统边界更清晰。资源调和不直接驱动 UI，UI 也不直接推断资源状态。资源调和只负责把真实世界推进到目标状态；实时投影只负责把当前运行态转换成前端需要的展示状态。
+Splitting these keeps system boundaries clear. Resource reconciliation does not drive the UI directly; the UI does not infer resource state itself. Reconciliation only advances the real world to desired state; realtime projection only converts current runtime into the display state the frontend needs.
 
-## 总结
+## Summary
 
-这套实时同步设计的核心是：
+The core of this realtime sync design is:
 
-> 服务端维护统一读模型，前端订阅整份 projection，并用 version 防止旧状态覆盖新状态。
+> The server maintains a unified read model; the frontend subscribes to the full projection and uses version to prevent old state from overwriting new state.
 
-具体来说：
+Specifically:
 
-- Preview、Agent Run、Browser Test 被投影成同一份 `SessionRuntimeProjection`
-- 前端进页只拉一次初始状态，之后通过 Realtime 接收更新
-- 每次更新都是整份 projection 替换，而不是客户端局部 merge
-- `version` 用来拒绝乱序或过期的状态包
-- Lease 续租等内部协调变化不会触发 UI 刷新
-- Chat token 仍然走 Workflow SSE，不混入运行态通道
+- Preview, Agent Run, and Browser Test are projected into one `SessionRuntimeProjection`
+- On page entry the frontend fetches initial state once, then receives updates via Realtime
+- Each update replaces the whole projection; the client does not partially merge
+- `version` rejects out-of-order or stale state packets
+- Internal coordination such as lease renewal does not trigger UI refresh
+- Chat tokens still use Workflow SSE and are not mixed into the runtime channel
 
-最终效果是：
+The end result:
 
-> 后端负责生成一致的运行态视图，前端只负责展示最新版本。
+> The backend produces a consistent runtime view; the frontend only displays the latest version.

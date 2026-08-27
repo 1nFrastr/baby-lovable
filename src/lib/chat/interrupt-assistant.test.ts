@@ -171,7 +171,7 @@ describe("pickCancelledAssistantSnapshot", () => {
         },
         {
           type: "text",
-          text: "预览已就绪，可以开始使用待办应用了。",
+          text: "Preview is ready; you can start using the todo app.",
         },
       ],
     };
@@ -184,7 +184,7 @@ describe("pickCancelledAssistantSnapshot", () => {
         ? (picked!.parts.find((part) => part.type === "text") as { text: string })
             .text
         : "",
-    ).toContain("预览已就绪");
+    ).toContain("Preview is ready");
   });
 });
 

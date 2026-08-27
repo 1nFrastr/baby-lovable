@@ -40,11 +40,11 @@ export function WorkspaceMainSplit({
         ) : null}
       </div>
       <ResizeHandle
-        label="调整对话与预览宽度"
+        label="Resize chat and preview"
         valueNow={chatPercent}
         valueMin={Math.round(CHAT_RATIO_MIN * 100)}
         valueMax={Math.round(CHAT_RATIO_MAX * 100)}
-        valueText={`对话 ${chatPercent}%，预览 ${100 - chatPercent}%`}
+        valueText={`Chat ${chatPercent}%, preview ${100 - chatPercent}%`}
         onDrag={onResize}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}

@@ -58,7 +58,7 @@ describe("mergeDisplayMessages", () => {
   it("keeps the live assistant when persisted is missing the final summary text", () => {
     const chatAssistant = assistant(
       "a-sse",
-      "预览已通过 checkPreview，应用可以正常使用。",
+      "Preview passed checkPreview; the app is ready to use.",
     );
     const persistedAssistant = assistant("a-draft", "");
     persistedAssistant.parts = [
@@ -71,8 +71,8 @@ describe("mergeDisplayMessages", () => {
       },
     ];
 
-    const persisted = [user("u1", "做一个待办"), persistedAssistant];
-    const chatMessages = [user("u1", "做一个待办"), chatAssistant];
+    const persisted = [user("u1", "Build a todo app"), persistedAssistant];
+    const chatMessages = [user("u1", "Build a todo app"), chatAssistant];
 
     const merged = mergeDisplayMessages(
       persisted,
@@ -89,7 +89,7 @@ describe("mergeDisplayMessages", () => {
       last?.parts.some(
         (part) =>
           part.type === "text" &&
-          part.text.includes("应用可以正常使用"),
+          part.text.includes("the app is ready to use"),
       ),
     ).toBe(true);
   });

@@ -51,21 +51,21 @@ export function SessionSidebar({
     return (
       <aside
         className="flex h-full w-full flex-col items-center border-r border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-800 dark:bg-zinc-950"
-        aria-label="会话栏"
+        aria-label="Sessions sidebar"
       >
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
               onClick={onToggleCollapsed}
-              aria-label="展开会话栏"
+              aria-label="Expand sessions sidebar"
               aria-expanded={false}
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             >
               <PanelLeft className="h-4 w-4" strokeWidth={2} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="right">展开会话栏</TooltipContent>
+          <TooltipContent side="right">Expand sessions sidebar</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -75,7 +75,7 @@ export function SessionSidebar({
               onClick={onCreate}
               disabled={navigationBusy}
               aria-busy={isCreating}
-              aria-label="新建会话"
+              aria-label="New session"
               className="mt-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
             >
               {isCreating ? (
@@ -85,7 +85,7 @@ export function SessionSidebar({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="right">新建会话</TooltipContent>
+          <TooltipContent side="right">New session</TooltipContent>
         </Tooltip>
       </aside>
     );
@@ -94,7 +94,7 @@ export function SessionSidebar({
   return (
     <aside
       className="flex h-full w-full flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950"
-      aria-label="会话栏"
+      aria-label="Sessions sidebar"
     >
       <div className="border-b border-zinc-200 px-3 py-3 dark:border-zinc-800">
         <div className="flex items-center justify-between gap-2">
@@ -129,14 +129,14 @@ export function SessionSidebar({
                   <button
                     type="button"
                     onClick={onToggleCollapsed}
-                    aria-label="收起会话栏"
+                    aria-label="Collapse sessions sidebar"
                     aria-expanded={true}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                   >
                     <PanelLeftClose className="h-4 w-4" strokeWidth={2} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">收起会话栏</TooltipContent>
+                <TooltipContent side="bottom">Collapse sessions sidebar</TooltipContent>
               </Tooltip>
             ) : null}
           </div>
@@ -146,9 +146,9 @@ export function SessionSidebar({
       <div className="flex-1 overflow-y-auto p-3">
         {sessions.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            还没有项目会话
+            No project sessions yet
             <br />
-            点击 New 开始构建
+            Click New to start building
           </div>
         ) : (
           <div className="space-y-2">

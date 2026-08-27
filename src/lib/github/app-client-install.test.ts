@@ -49,7 +49,10 @@ describe("isGithubAppInstallMissingError", () => {
     ).toBe(true);
     expect(
       isGithubAppInstallMissingError(
-        new GithubAppError("GitHub App 已卸载或未安装，请重新授权安装", 401),
+        new GithubAppError(
+          "GitHub App is uninstalled or not installed; please authorize installation again",
+          401,
+        ),
       ),
     ).toBe(true);
     expect(

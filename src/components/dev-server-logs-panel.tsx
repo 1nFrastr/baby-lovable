@@ -64,22 +64,22 @@ const MAX_HEIGHT = 480;
 function statusLabel(state: ConnectionState): string {
   switch (state) {
     case "live":
-      return "实时";
+      return "Live";
     case "waiting":
-      return "等待";
+      return "Waiting";
     case "reconnecting":
-      return "重新连接";
+      return "Reconnecting";
     case "offline":
-      return "网络断开";
+      return "Offline";
     case "ended":
-      return "进程已结束";
+      return "Process ended";
     case "stale":
-      return "不可用";
+      return "Unavailable";
     case "connecting":
-      return "连接中";
+      return "Connecting";
     case "idle":
     default:
-      return "未连接";
+      return "Disconnected";
   }
 }
 
@@ -108,20 +108,20 @@ function canRetryStatus(status: AppServerStatus["status"]): boolean {
 
 function readableReason(reason: string): string {
   if (/Dev session not started/i.test(reason)) {
-    return "开发服务尚未启动";
+    return "Dev server has not started";
   }
   if (/Sandbox unavailable/i.test(reason)) {
-    return "Sandbox 尚不可用，正在等待预览启动";
+    return "Sandbox unavailable; waiting for preview to start";
   }
   if (/command id not ready/i.test(reason)) {
-    return "日志进程尚未就绪";
+    return "Log process not ready yet";
   }
   const exit = reason.match(/exited with code\s+(-?\d+)/i);
   if (exit) {
-    return `开发进程已结束（退出码 ${exit[1]}）`;
+    return `Dev process ended (exit code ${exit[1]})`;
   }
   if (/Failed to read command logs/i.test(reason)) {
-    return "暂时无法读取日志，正在重新连接";
+    return "Unable to read logs; reconnecting";
   }
   return reason;
 }
@@ -211,7 +211,7 @@ export function DevServerLogsPanel({
 
       if (!navigator.onLine) {
         setStreamState("offline");
-        setStatusDetail("网络已断开，等待恢复");
+        setStatusDetail("Network offline; waiting to reconnect");
         return;
       }
 
@@ -223,7 +223,7 @@ export function DevServerLogsPanel({
       if (retryAttempt >= 8) {
         retryExhaustedRef.current = true;
         setStreamState("stale");
-        setStatusDetail("长时间无法连接日志；可收起后重新打开重试");
+        setStatusDetail("Unable to connect to logs for a while; collapse and reopen to retry");
         return;
       }
 
@@ -246,7 +246,7 @@ export function DevServerLogsPanel({
       }
       if (!navigator.onLine) {
         setStreamState("offline");
-        setStatusDetail("网络已断开，等待恢复");
+        setStatusDetail("Network offline; waiting to reconnect");
         return;
       }
 
@@ -342,8 +342,8 @@ export function DevServerLogsPanel({
         closeSource({ ignoreError: true });
         scheduleRetry(
           sawLive
-            ? "日志连接已中断，正在重新连接"
-            : "连接失败，正在重试",
+            ? "Log connection interrupted; reconnecting"
+            : "Connection failed; retrying",
         );
       };
     };
@@ -352,7 +352,7 @@ export function DevServerLogsPanel({
       closeSource({ ignoreError: true });
       clearRetry();
       setStreamState("offline");
-      setStatusDetail("网络已断开，等待恢复");
+      setStatusDetail("Network offline; waiting to reconnect");
     };
     const onOnline = () => {
       if (cancelled) {
@@ -360,7 +360,7 @@ export function DevServerLogsPanel({
       }
       retryAttempt = 0;
       retryExhaustedRef.current = false;
-      setStatusDetail("网络已恢复，正在重新连接");
+      setStatusDetail("Network restored; reconnecting");
       connect();
     };
     window.addEventListener("offline", onOffline);
@@ -473,16 +473,16 @@ export function DevServerLogsPanel({
                 onChange={(e) => setFollow(e.target.checked)}
                 className="h-3 w-3 rounded border-zinc-300"
               />
-              自动滚动
+              Auto-scroll
             </label>
             <button
               type="button"
               onClick={() => setBuffer((current) => clearDevLogBuffer(current))}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              title="清空当前进程的本地显示"
+              title="Clear local display for this process"
             >
               <Trash2 className="h-3 w-3" strokeWidth={2} />
-              清空
+              Clear
             </button>
           </>
         ) : null}
@@ -503,12 +503,12 @@ export function DevServerLogsPanel({
           ) : (
             <span className="text-zinc-500">
               {connection === "waiting" || connection === "connecting"
-                ? "等待开发服务器日志…"
+                ? "Waiting for dev server logs…"
                 : connection === "offline"
-                  ? "网络已断开，恢复后会自动继续。"
+                  ? "Network offline; streaming will resume when connected."
                   : connection === "ended"
-                    ? "当前开发进程已结束，等待服务恢复。"
-                    : "暂无输出。"}
+                    ? "Dev process ended; waiting for the server to come back."
+                    : "No output yet."}
             </span>
           )}
         </pre>

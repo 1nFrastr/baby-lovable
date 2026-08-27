@@ -45,7 +45,7 @@ export function normalizeGithubRepoName(raw: string): string {
   const trimmed = raw.trim().replace(/^https?:\/\/github\.com\//i, "");
   const withoutGit = trimmed.replace(/\.git$/i, "").replace(/\/+$/, "");
   if (!GITHUB_REPO_NAME_RE.test(withoutGit)) {
-    throw new GithubSyncError("GitHub 返回了无效的仓库名称");
+    throw new GithubSyncError("GitHub returned an invalid repository name");
   }
   return withoutGit;
 }
@@ -67,11 +67,11 @@ function assertRepoReadyForGithubSync(
   repo: SessionGitRepository | null,
 ): SessionGitRepository {
   if (!repo?.repoId) {
-    throw new GithubSyncError("代码库尚未就绪，请稍后再试", 409);
+    throw new GithubSyncError("Repository is not ready yet. Please try again later.", 409);
   }
   if (repo.provisionStatus !== "ready") {
     throw new GithubSyncError(
-      repo.provisionError ?? "代码库尚未就绪，请稍后再试",
+      repo.provisionError ?? "Repository is not ready yet. Please try again later.",
       409,
     );
   }
@@ -84,14 +84,17 @@ function assertBindingMatchesIdentity(
   githubIdentity: GithubAuthIdentity | null,
 ): void {
   if (userId && !githubIdentity) {
-    throw new GithubSyncError("请使用 GitHub 账号登录后再连接仓库", 401);
+    throw new GithubSyncError(
+      "Sign in with a GitHub account before connecting a repository",
+      401,
+    );
   }
   if (
     githubIdentity &&
     binding.githubAccountId !== githubIdentity.id
   ) {
     throw new GithubSyncError(
-      "GitHub App installation 不属于当前登录账号",
+      "GitHub App installation does not belong to the current account",
       403,
     );
   }
@@ -106,7 +109,10 @@ async function verifyGithubInstallation(
 }> {
   const binding = await readGithubAppInstallationBinding(userId);
   if (!binding) {
-    throw new GithubSyncError("请先安装 GitHub App 并选择仓库", 401);
+    throw new GithubSyncError(
+      "Install the GitHub App and select a repository first",
+      401,
+    );
   }
   assertBindingMatchesIdentity(binding, userId, githubIdentity);
 
@@ -120,8 +126,8 @@ async function verifyGithubInstallation(
       await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
       throw new GithubSyncError(
         installation.suspended
-          ? "GitHub App installation 已暂停"
-          : "GitHub App installation 归属已变化，请重新安装",
+          ? "GitHub App installation is suspended"
+          : "GitHub App installation ownership changed. Please reinstall.",
         401,
       );
     }
@@ -133,13 +139,13 @@ async function verifyGithubInstallation(
     if (isGithubAppInstallMissingError(error)) {
       await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
       throw new GithubSyncError(
-        "GitHub App 已卸载或不可访问，请重新安装",
+        "GitHub App is uninstalled or inaccessible. Please reinstall.",
         401,
       );
     }
     throw new GithubSyncError(
       redactSecrets(
-        error instanceof Error ? error.message : "GitHub installation 验证失败",
+        error instanceof Error ? error.message : "GitHub installation verification failed",
       ),
       error instanceof GithubAppError ? error.status : 502,
     );
@@ -323,13 +329,13 @@ export async function listAvailableGithubRepositories(
     if (isGithubAppInstallMissingError(error)) {
       await deleteGithubAppInstallationBinding(userId).catch(() => undefined);
       throw new GithubSyncError(
-        "GitHub App 已卸载或仓库权限已失效，请重新安装",
+        "GitHub App is uninstalled or repository access was revoked. Please reinstall.",
         401,
       );
     }
     throw new GithubSyncError(
       redactSecrets(
-        error instanceof Error ? error.message : "加载 GitHub 仓库失败",
+        error instanceof Error ? error.message : "Failed to load GitHub repositories",
       ),
       error instanceof GithubAppError ? error.status : 502,
     );
@@ -381,7 +387,7 @@ export async function linkSelectedGithubRepository(
   githubIdentity: GithubAuthIdentity | null,
 ): Promise<SessionGitRepository> {
   if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
-    throw new GithubSyncError("请选择有效的 GitHub 仓库");
+    throw new GithubSyncError("Please select a valid GitHub repository");
   }
   assertRepoReadyForGithubSync(await readGitRepository(sessionId, userId));
   const { binding, installationId } = await verifyGithubInstallation(
@@ -403,13 +409,13 @@ export async function linkSelectedGithubRepository(
         error.status === 422)
     ) {
       throw new GithubSyncError(
-        "所选仓库不在当前 GitHub App installation 的授权范围内",
+        "The selected repository is outside the current GitHub App installation scope",
         403,
       );
     }
     throw new GithubSyncError(
       redactSecrets(
-        error instanceof Error ? error.message : "GitHub 仓库校验失败",
+        error instanceof Error ? error.message : "GitHub repository validation failed",
       ),
       502,
     );
@@ -417,7 +423,10 @@ export async function linkSelectedGithubRepository(
   if (
     selected.ownerLogin.toLowerCase() !== binding.githubLogin.toLowerCase()
   ) {
-    throw new GithubSyncError("当前仅支持个人账号名下的 GitHub 仓库", 403);
+    throw new GithubSyncError(
+      "Only GitHub repositories under your personal account are supported",
+      403,
+    );
   }
   return enableGithubRepoSync(
     sessionId,

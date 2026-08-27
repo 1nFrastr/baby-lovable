@@ -6,7 +6,8 @@ import type { Session } from "@/lib/session/types";
 import { logger } from "./logger";
 
 const DEFAULT_BASE_URL = process.env.RESUME_TEST_BASE_URL ?? "http://localhost:3000";
-const DEFAULT_PROMPT = "创建一个只有标题的极简待办应用，先写首页即可";
+const DEFAULT_PROMPT =
+  "Create a minimal todo app with only a title; start with the home page";
 const PARTIAL_READ_MS = 4_000;
 const WORKFLOW_TIMEOUT_MS = 120_000;
 

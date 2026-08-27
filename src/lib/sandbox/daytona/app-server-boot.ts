@@ -9,12 +9,12 @@ export const DEV_SESSION = (sessionId: string) => `preview-${sessionId}`;
 export function formatStartError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   if (/disk limit exceeded/i.test(raw) || /Total disk limit/i.test(raw)) {
-    return "Daytona 磁盘配额已满（上限 30GiB）。请联系作者清理闲置 Sandbox 后再试。";
+    return "Daytona disk quota is full (30 GiB limit). Contact the author to clean up idle sandboxes, then try again.";
   }
   const trimmed = raw.trim();
   return trimmed.length > 0
     ? trimmed.slice(0, 500)
-    : "Daytona 预览启动失败，请稍后重试或联系作者。";
+    : "Daytona preview failed to start. Please try again later or contact the author.";
 }
 
 /**

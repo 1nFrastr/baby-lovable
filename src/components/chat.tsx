@@ -423,16 +423,16 @@ export function Chat({
           ? "submitted"
           : "ready";
   const composerPlaceholder = stopping
-    ? "正在停止，取消成功后即可发送…"
-    : "描述你想构建的应用…";
+    ? "Stopping… you can send again after cancel succeeds"
+    : "Describe the app you want to build…";
   const sessionStatusHint = stopping
-    ? " · 正在停止…"
+    ? " - Stopping…"
     : showStop
-      ? " · 正在生成…"
+      ? " - Generating…"
       : awaitingRunStart
-        ? " · 正在发送…"
+        ? " - Sending…"
         : cancelledHint
-          ? " · 已停止"
+          ? " - Stopped"
           : "";
 
   return (
@@ -444,8 +444,8 @@ export function Chat({
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Session {sessionId}
           {sessionStatusHint}
-          {error ? ` · ${error.message}` : ""}
-          {stopError ? ` · ${stopError}` : ""}
+          {error ? ` - ${error.message}` : ""}
+          {stopError ? ` - ${stopError}` : ""}
         </p>
       </div>
 
@@ -454,7 +454,7 @@ export function Chat({
           {displayMessages.length === 0 ? (
             <ConversationEmptyState
               icon={<MessageSquare className="size-10" />}
-              title="描述你想构建的应用"
+              title="Describe the app you want to build"
               description=""
             />
           ) : (

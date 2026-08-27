@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 
 const NOTICE_MESSAGES = [
-  "当前为 MVP 演示版，仍处于密集开发中，体验可能不稳定",
-  "沙盒服务额度有限，用量很快可能触达上限，请适量体验",
+  "This is an MVP demo still under active development; the experience may be unstable",
+  "Sandbox quota is limited and may run out quickly — please use sparingly",
   <>
-    如需频繁测试，请联系作者{" "}
+    For frequent testing, contact the author{" "}
     <a
       href="mailto:zhoukai960@gmail.com"
       className="underline decoration-amber-500/60 underline-offset-2 hover:text-amber-800 dark:hover:text-amber-200"
