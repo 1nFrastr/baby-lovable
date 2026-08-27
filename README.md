@@ -4,7 +4,7 @@
 <h2>BabyLovable</h2>
 
 <h3>
-  Multi-user Coding Agent on a Serverless Architecture
+  Multi-user coding agent, built for serverless
   |
   <a href="https://baby-lovable.vercel.app/">Demo ↗</a>
 </h3>
