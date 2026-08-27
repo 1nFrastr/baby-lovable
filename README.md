@@ -41,31 +41,6 @@ The focus of this project is not only to recreate a Lovable-style product, but t
 | **Automated browser acceptance** | The Agent can open a browser and inspect the pages it generated |
 | **Multi-user isolation** | Supabase Auth and RLS isolate user data and session resources |
 
-## Feature demos
-
-<table>
-  <tr>
-    <td align="center" valign="top" width="50%">
-      <p><strong>Core capabilities</strong></p>
-      <video src="https://github.com/user-attachments/assets/df081939-f3ec-44fb-ba3f-13a68d9ce010" width="420" controls muted></video>
-    </td>
-    <td align="center" valign="top" width="50%">
-      <p><strong>Recoverable streams</strong></p>
-      <video src="https://github.com/user-attachments/assets/2eca82e8-ebeb-4bcb-b359-abd4bcb76b98" width="420" controls muted></video>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" width="50%">
-      <p><strong>Automated browser testing</strong></p>
-      <video src="https://github.com/user-attachments/assets/3d307aae-430f-4a4d-8659-d11ce6f7f050" width="420" controls muted></video>
-    </td>
-    <td align="center" valign="top" width="50%">
-      <p><strong>Durable workflows</strong></p>
-      <video src="https://github.com/user-attachments/assets/1a0d6756-facb-4094-a883-4422a742bee9" width="420" controls muted></video>
-    </td>
-  </tr>
-</table>
-
 ## Design highlights
 
 ### 1. Durable Agent Workflow on Serverless
