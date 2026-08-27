@@ -115,7 +115,7 @@ function FileTreeNode({
               className="px-2 py-0.5 text-[11px] text-zinc-400"
               style={{ paddingLeft: 18 + depth * 12 }}
             >
-              （空）
+              (empty)
             </li>
           ) : null}
         </ul>
@@ -284,16 +284,16 @@ export function WorkspaceFileExplorer({
               }
             }}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            title="从 sandbox 重新同步完整文件树"
+            title="Resync full file tree from sandbox"
           >
             <RefreshCw className="h-3 w-3" strokeWidth={2} />
-            刷新
+            Refresh
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto py-1">
           {rootLoading && tree.length === 0 ? (
-            <p className="px-3 py-2 text-[12px] text-zinc-400">加载中…</p>
+            <p className="px-3 py-2 text-[12px] text-zinc-400">Loading…</p>
           ) : rootError ? (
             <p className="px-3 py-2 text-[12px] text-red-500">{rootError}</p>
           ) : (
@@ -314,13 +314,13 @@ export function WorkspaceFileExplorer({
                 ))}
                 {!rootLoading && tree.length === 0 ? (
                   <li className="px-3 py-2 text-[12px] text-zinc-400">
-                    工作区为空
+                    Workspace is empty
                   </li>
                 ) : null}
               </ul>
               {treeTruncated ? (
                 <p className="px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
-                  文件树已截断（节点数或深度达到上限）
+                  File tree truncated (node or depth limit reached)
                 </p>
               ) : null}
             </>
@@ -334,11 +334,11 @@ export function WorkspaceFileExplorer({
             className="min-w-0 truncate font-mono text-[12px] text-zinc-700 dark:text-zinc-200"
             title={selectedPath ?? undefined}
           >
-            {selectedPath ?? "选择一个文件查看（只读）"}
+            {selectedPath ?? "Select a file to view (read-only)"}
           </p>
           {content && !content.binary && content.truncated ? (
             <span className="shrink-0 text-[11px] text-amber-700 dark:text-amber-300">
-              已截断 {content.shownLines}/{content.totalLines} 行
+              Truncated {content.shownLines}/{content.totalLines} lines
             </span>
           ) : null}
         </div>
@@ -346,12 +346,12 @@ export function WorkspaceFileExplorer({
         <div className="min-h-0 flex-1 overflow-auto">
           {!selectedPath ? (
             <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-400">
-              从左侧打开源码文件
+              Open a source file from the left
             </div>
           ) : contentLoading ? (
             <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-400">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
-              读取中…
+              Reading…
             </div>
           ) : contentError ? (
             <p className="px-4 py-3 text-sm text-red-600 dark:text-red-400">
@@ -359,7 +359,7 @@ export function WorkspaceFileExplorer({
             </p>
           ) : content?.binary ? (
             <p className="px-4 py-3 text-sm text-zinc-500">
-              二进制或非文本文件，暂不支持预览。
+              Binary or non-text file; preview is not supported.
             </p>
           ) : (
             <CodeHighlight

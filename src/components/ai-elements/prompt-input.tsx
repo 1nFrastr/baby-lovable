@@ -1242,12 +1242,12 @@ export const PromptInputSubmit = ({
     Icon = <Spinner />;
     ariaLabel = "Stopping";
     buttonVariant = "secondary";
-    tooltip = "正在停止…";
+    tooltip = "Stopping…";
   } else if (showStop) {
     Icon = <SquareIcon className="size-3.5 fill-current" />;
     ariaLabel = "Stop";
     buttonVariant = "destructive";
-    tooltip = "停止生成";
+    tooltip = "Stop generating";
   } else if (status === "submitted") {
     Icon = <Spinner />;
     ariaLabel = "Submitting";

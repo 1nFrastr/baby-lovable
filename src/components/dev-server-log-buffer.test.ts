@@ -74,7 +74,7 @@ describe("dev server log buffer", () => {
       "x".repeat(DEV_LOG_BUFFER_LIMIT + 100),
     );
     expect(state.truncated).toBe(true);
-    expect(state.text).toContain("较早日志已截断");
+    expect(state.text).toContain("Earlier logs truncated");
     expect(state.text.length).toBeLessThan(DEV_LOG_BUFFER_LIMIT + 100);
   });
 });

@@ -7,37 +7,37 @@ const LABELS: Record<
   { text: string; className: string }
 > = {
   idle: {
-    text: "未启用",
+    text: "Disabled",
     className:
       "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
   },
   preparing: {
-    text: "准备代码库…",
+    text: "Preparing repo…",
     className:
       "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
   },
   ready: {
-    text: "已就绪",
+    text: "Ready",
     className:
       "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
   },
   syncing: {
-    text: "正在保存…",
+    text: "Saving…",
     className:
       "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300",
   },
   synced: {
-    text: "已保存",
+    text: "Saved",
     className:
       "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
   },
   error: {
-    text: "保存失败",
+    text: "Save failed",
     className:
       "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   },
   conflict: {
-    text: "代码冲突",
+    text: "Conflict",
     className:
       "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   },
@@ -66,7 +66,7 @@ export function SourceControlStatusChip({
     github ? `GitHub ${github}` : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" - ");
 
   return (
     <span

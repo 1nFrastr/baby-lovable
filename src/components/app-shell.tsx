@@ -58,7 +58,7 @@ function GitHubIcon({ className }: { className?: string }) {
 }
 
 function SessionWorkspaceLoading({
-  label = "正在载入会话…",
+  label = "Loading session…",
   chatRatio,
   isDragging,
   onResize,
@@ -98,7 +98,7 @@ function SessionWorkspaceLoading({
                 Preview
               </p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                正在连接预览环境
+                Connecting to preview
               </p>
             </div>
             <div className="flex min-h-0 flex-1 items-center justify-center bg-zinc-100 dark:bg-zinc-950">
@@ -261,10 +261,10 @@ export function AppShell() {
     isNavPending ||
     (activeSessionId != null && !isSessionReady);
   const workspaceLoadingLabel = isCreating
-    ? "正在创建会话…"
+    ? "Creating session…"
     : isSwitchingSession || isNavPending
-      ? "正在切换会话…"
-      : "正在载入会话…";
+      ? "Switching session…"
+      : "Loading session…";
 
   const loadError =
     actionError ??
@@ -338,7 +338,7 @@ export function AppShell() {
               href={GITHUB_REPO_URL}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="在 GitHub 打开仓库"
+              aria-label="Open repository on GitHub"
               title="GitHub"
               className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-[10px] font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             >
@@ -378,14 +378,14 @@ export function AppShell() {
           />
         </div>
         <ResizeHandle
-          label="调整会话栏宽度"
+          label="Resize sessions sidebar"
           valueNow={expandedSidebarWidth}
           valueMin={SIDEBAR_MIN_WIDTH}
           valueMax={SIDEBAR_MAX_WIDTH}
           valueText={
             sidebarCollapsed
-              ? "会话栏已收起"
-              : `会话栏 ${expandedSidebarWidth} 像素`
+              ? "Sessions sidebar collapsed"
+              : `Sessions sidebar ${expandedSidebarWidth}px`
           }
           onDrag={resizeSidebar}
           onDragStart={beginDrag}
@@ -409,7 +409,7 @@ export function AppShell() {
                 onClick={() => router.push("/sessions")}
                 className="rounded-xl border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
-                返回会话列表
+                Back to sessions
               </button>
             </div>
           ) : showWorkspaceLoading || (activeSessionId != null && !activeSession) ? (
@@ -425,7 +425,7 @@ export function AppShell() {
           ) : !activeSessionId || !activeSession ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-lg text-zinc-700 dark:text-zinc-200">
-                创建第一个项目
+                Create your first project
               </p>
               <button
                 type="button"

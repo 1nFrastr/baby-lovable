@@ -24,7 +24,7 @@ export interface DevLogBufferState {
 
 export const DEV_LOG_BUFFER_LIMIT = 200_000;
 const TAIL_LIMIT = 4_096;
-const TRUNCATED_NOTICE = "[较早日志已截断]\n";
+const TRUNCATED_NOTICE = "[Earlier logs truncated]\n";
 
 export function emptyDevLogBuffer(): DevLogBufferState {
   return {

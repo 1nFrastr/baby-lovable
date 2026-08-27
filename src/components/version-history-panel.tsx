@@ -22,27 +22,27 @@ const STATUS_LABEL: Record<
   { text: string; className: string }
 > = {
   pending: {
-    text: "排队中",
+    text: "Queued",
     className: "text-amber-700 dark:text-amber-300",
   },
   syncing: {
-    text: "保存中",
+    text: "Saving",
     className: "text-sky-700 dark:text-sky-300",
   },
   synced: {
-    text: "已保存",
+    text: "Saved",
     className: "text-emerald-700 dark:text-emerald-300",
   },
   no_changes: {
-    text: "无变更",
+    text: "No changes",
     className: "text-zinc-500 dark:text-zinc-400",
   },
   error: {
-    text: "失败",
+    text: "Failed",
     className: "text-red-700 dark:text-red-300",
   },
   conflict: {
-    text: "冲突",
+    text: "Conflict",
     className: "text-red-700 dark:text-red-300",
   },
 };
@@ -97,7 +97,7 @@ export function VersionHistoryPanel({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
         <History className="h-5 w-5 opacity-50" strokeWidth={1.75} />
-        <p>版本历史仅在 Daytona 模式下可用</p>
+        <p>Version history is only available in Daytona mode</p>
       </div>
     );
   }
@@ -106,7 +106,7 @@ export function VersionHistoryPanel({
     <div className="flex h-full flex-col bg-white dark:bg-zinc-950">
       <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          每轮对话结束自动存档（只读）
+          Auto-archived after each chat turn (read-only)
         </p>
         <button
           type="button"
@@ -118,7 +118,7 @@ export function VersionHistoryPanel({
             className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
             strokeWidth={2}
           />
-          刷新
+          Refresh
         </button>
       </div>
 
@@ -129,13 +129,13 @@ export function VersionHistoryPanel({
       ) : loading && versions.length === 0 ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-zinc-500">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
-          加载中…
+          Loading…
         </div>
       ) : versions.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
           <History className="h-5 w-5 opacity-50" strokeWidth={1.75} />
-          <p>还没有版本记录</p>
-          <p className="text-xs">完成一轮对话后会出现在这里</p>
+          <p>No versions yet</p>
+          <p className="text-xs">Versions appear here after each chat turn</p>
         </div>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -149,7 +149,7 @@ export function VersionHistoryPanel({
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                      {item.commitMessage || "（无说明）"}
+                      {item.commitMessage || "(No message)"}
                     </p>
                     <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
                       {formatTime(item.createdAt)}

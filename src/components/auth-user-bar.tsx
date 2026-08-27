@@ -14,7 +14,7 @@ function formatUserLabel(user: User): string {
     return user.email;
   }
   if (user.is_anonymous) {
-    return `匿名 ${user.id.slice(0, 8)}`;
+    return `Anonymous ${user.id.slice(0, 8)}`;
   }
   return user.id.slice(0, 8);
 }
@@ -57,7 +57,7 @@ export function AuthUserBar({ className }: AuthUserBarProps) {
           href="/login"
           className="text-sm text-blue-600 hover:underline dark:text-blue-400"
         >
-          登录
+          Sign in
         </a>
       </div>
     );
@@ -73,7 +73,7 @@ export function AuthUserBar({ className }: AuthUserBarProps) {
           type="submit"
           className="text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
         >
-          退出
+          Sign out
         </button>
       </form>
     </div>

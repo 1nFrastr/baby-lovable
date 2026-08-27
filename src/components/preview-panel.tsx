@@ -638,27 +638,27 @@ export function PreviewPanel({
   const previewStatus =
     runtimeLoading && !projection
       ? {
-          title: "正在连接预览环境",
-          detail: "同步当前会话的运行状态…",
+          title: "Connecting to preview",
+          detail: "Syncing this session's runtime…",
         }
       : preview.status === "installing"
         ? {
-            title: "正在安装项目依赖",
-            detail: "首次启动可能需要一点时间，完成后会自动打开。",
+            title: "Installing dependencies",
+            detail: "First launch may take a moment; the preview will open when ready.",
           }
         : preview.status === "starting"
           ? {
-              title: "正在启动开发服务器",
-              detail: "远程环境已准备好，正在等待应用响应。",
+              title: "Starting the dev server",
+              detail: "Remote environment is ready; waiting for the app to respond.",
             }
           : preview.status === "ready" && !iframeLoaded
             ? {
-                title: "正在载入应用",
-                detail: "预览服务已就绪，正在渲染页面…",
+                title: "Loading the app",
+                detail: "Preview is ready; rendering the page…",
               }
             : {
-                title: "正在准备预览环境",
-                detail: "正在唤醒远程工作区…",
+                title: "Preparing preview",
+                detail: "Waking the remote workspace…",
               };
   const toolbarStatus =
     preview.status === "ready" && iframeLoaded
@@ -761,8 +761,8 @@ export function PreviewPanel({
               type="button"
               onClick={() => setFilesRefreshKey((key) => key + 1)}
               className={toolbarIconButtonClass}
-              title="同步文件列表"
-              aria-label="同步文件列表"
+              title="Sync file list"
+              aria-label="Sync file list"
             >
               <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
@@ -771,8 +771,8 @@ export function PreviewPanel({
               type="button"
               onClick={() => setVersionsRefreshKey((key) => key + 1)}
               className={toolbarIconButtonClass}
-              title="刷新版本历史"
-              aria-label="刷新版本历史"
+              title="Refresh version history"
+              aria-label="Refresh version history"
             >
               <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
@@ -786,10 +786,10 @@ export function PreviewPanel({
                 disabled={exporting}
                 title={
                   exporting
-                    ? "正在导出…"
-                    : "导出源码 zip（已同步版本，不含 .git）"
+                    ? "Exporting…"
+                    : "Export source zip (synced version, no .git)"
                 }
-                aria-label={exporting ? "正在导出" : "导出源码"}
+                aria-label={exporting ? "Exporting" : "Export source"}
                 className={toolbarIconButtonClass}
               >
                 {exporting ? (
@@ -814,10 +814,10 @@ export function PreviewPanel({
                 }}
                 disabled={previewAction !== null}
                 title={
-                  previewAction === "restart" ? "正在重启…" : "重启预览服务"
+                  previewAction === "restart" ? "Restarting…" : "Restart preview server"
                 }
                 aria-label={
-                  previewAction === "restart" ? "正在重启" : "重启预览"
+                  previewAction === "restart" ? "Restarting" : "Restart preview"
                 }
                 className={toolbarIconButtonClass}
               >
@@ -841,8 +841,8 @@ export function PreviewPanel({
               onClick={() => navigatePreview("back")}
               disabled={!canNavigateBack}
               className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              title="后退"
-              aria-label="后退"
+              title="Back"
+              aria-label="Back"
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
@@ -851,8 +851,8 @@ export function PreviewPanel({
               onClick={() => navigatePreview("forward")}
               disabled={!canNavigateForward}
               className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              title="前进"
-              aria-label="前进"
+              title="Forward"
+              aria-label="Forward"
             >
               <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
@@ -861,8 +861,8 @@ export function PreviewPanel({
               onClick={handlePreviewReload}
               disabled={!iframeLoaded || previewReloadSpinning}
               className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              title="刷新"
-              aria-label="刷新"
+              title="Refresh"
+              aria-label="Refresh"
               aria-busy={previewReloadSpinning || undefined}
             >
               <RotateCw
@@ -877,8 +877,8 @@ export function PreviewPanel({
               onClick={() => navigatePreview("home")}
               disabled={!iframeLoaded}
               className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              title="回到预览首页"
-              aria-label="回到预览首页"
+              title="Go to preview home"
+              aria-label="Go to preview home"
             >
               <House className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
@@ -959,14 +959,14 @@ export function PreviewPanel({
                     className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
                   >
                     <RefreshCw className="h-3 w-3" strokeWidth={2} />
-                    预览有更新 · 刷新
+                    Preview updated - Refresh
                   </button>
                   <button
                     type="button"
                     onClick={() => setPreviewRefreshPending(false)}
                     className="rounded-full px-2 py-1 text-[11px] text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                    aria-label="忽略预览刷新提示"
-                    title="忽略"
+                    aria-label="Dismiss preview refresh notice"
+                    title="Dismiss"
                   >
                     <X className="h-3 w-3" strokeWidth={2} />
                   </button>
@@ -993,22 +993,23 @@ export function PreviewPanel({
               {preview.status === "needs_install" ? (
                 <>
                   <p className="font-medium text-zinc-700 dark:text-zinc-200">
-                    项目尚未就绪
+                    Project not ready
                   </p>
-                  <p>缺少 package.json，无法启动预览。</p>
+                  <p>Missing package.json; cannot start preview.</p>
                 </>
               ) : displayError ? (
                 <>
                   <p className="font-medium text-red-600 dark:text-red-400">
-                    暂时无法打开预览
+                    Unable to open preview
                   </p>
                   <p className="max-w-md whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
                     {displayError}
                   </p>
-                  {displayError.includes("联系作者") ? (
+                  {/contact the author|\u8054\u7cfb\u4f5c\u8005/.test(displayError) ? (
                     <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
-                      这是平台侧 Daytona 资源限制，需要作者在控制台清理闲置
-                      Sandbox 或升级配额后，再点 Restart 重试。
+                      This is a platform Daytona resource limit. The author needs
+                      to clean up idle sandboxes or raise the quota in the
+                      console, then click Restart to retry.
                     </p>
                   ) : null}
                   <button
@@ -1023,7 +1024,7 @@ export function PreviewPanel({
                       }`}
                       strokeWidth={2}
                     />
-                    {previewAction ? "正在重试…" : "重试"}
+                    {previewAction ? "Retrying…" : "Retry"}
                   </button>
                 </>
               ) : (

@@ -169,13 +169,13 @@ export function GithubSyncPanel({
           | (GithubSyncStatusResponse & { error?: string })
           | null;
         if (!response.ok) {
-          throw new Error(data?.error ?? `加载失败 (${response.status})`);
+          throw new Error(data?.error ?? `Failed to load (${response.status})`);
         }
         const next = data as GithubSyncStatusResponse;
         setStatus(next);
         return next;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "加载状态失败");
+        setError(err instanceof Error ? err.message : "Failed to load status");
         return null;
       } finally {
         setLoading(false);
@@ -199,7 +199,7 @@ export function GithubSyncPanel({
           error?: string;
         } | null;
         if (!response.ok) {
-          throw new Error(data?.error ?? `加载仓库失败 (${response.status})`);
+          throw new Error(data?.error ?? `Failed to load repositories (${response.status})`);
         }
         const next = data?.repositories ?? [];
         setRepositories(next);
@@ -216,7 +216,7 @@ export function GithubSyncPanel({
       } catch (err) {
         setRepositories([]);
         setSelectedRepositoryId("");
-        setError(err instanceof Error ? err.message : "加载仓库失败");
+        setError(err instanceof Error ? err.message : "Failed to load repositories");
         void loadStatus(false, false);
       } finally {
         setRepositoriesLoading(false);
@@ -279,7 +279,7 @@ export function GithubSyncPanel({
     queueMicrotask(() => {
       setOpen(true);
       if (query.flag === "error") {
-        setError(query.error ?? "GitHub App 安装失败，请重试");
+        setError(query.error ?? "GitHub App installation failed; please try again");
       } else if (query.flag === "installed" || query.flag === "1") {
         setRepositories(null);
         void loadStatus(false);
@@ -341,7 +341,7 @@ export function GithubSyncPanel({
   const handleLink = async () => {
     const repositoryId = Number(selectedRepositoryId);
     if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
-      setError("请选择一个 GitHub 仓库");
+      setError("Please select a GitHub repository");
       return;
     }
     setBusyPhase("linking");
@@ -359,7 +359,7 @@ export function GithubSyncPanel({
         githubSyncStatus?: GithubSyncStatus;
       } | null;
       if (!response.ok) {
-        throw new Error(data?.error ?? `连接失败 (${response.status})`);
+        throw new Error(data?.error ?? `Failed to connect (${response.status})`);
       }
       setStatus((prev) =>
         applyStatusPatch(prev, {
@@ -372,7 +372,7 @@ export function GithubSyncPanel({
       setJustLinked(true);
       invalidateRuntime(sessionId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "连接失败");
+      setError(err instanceof Error ? err.message : "Failed to connect");
       void loadStatus(false, false);
     } finally {
       setBusyPhase("idle");
@@ -391,7 +391,7 @@ export function GithubSyncPanel({
         error?: string;
       } | null;
       if (!response.ok) {
-        throw new Error(data?.error ?? `断开失败 (${response.status})`);
+        throw new Error(data?.error ?? `Failed to disconnect (${response.status})`);
       }
       setStatus((prev) =>
         applyStatusPatch(prev, {
@@ -404,7 +404,7 @@ export function GithubSyncPanel({
       setRepositories(null);
       invalidateRuntime(sessionId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "断开失败");
+      setError(err instanceof Error ? err.message : "Failed to disconnect");
       void loadStatus(false, false);
     } finally {
       setBusyPhase("idle");
@@ -415,8 +415,8 @@ export function GithubSyncPanel({
     if (!status?.installUrl) {
       setError(
         status?.githubIdentityRequired
-          ? "请先退出当前账号，并使用 GitHub 登录"
-          : "GitHub App 尚未配置",
+          ? "Sign out of the current account and sign in with GitHub first"
+          : "GitHub App is not configured",
       );
       return;
     }
@@ -430,9 +430,9 @@ export function GithubSyncPanel({
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        aria-label={linked ? `GitHub：${linkedName}` : "连接到 GitHub"}
+        aria-label={linked ? `GitHub: ${linkedName}` : "Connect to GitHub"}
         onClick={() => setOpen((value) => !value)}
-        title={linked ? linkedName! : "连接到 GitHub"}
+        title={linked ? linkedName! : "Connect to GitHub"}
         className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
           hasError && !linked
             ? "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
@@ -472,7 +472,7 @@ export function GithubSyncPanel({
             </div>
             <button
               type="button"
-              aria-label="关闭"
+              aria-label="Close"
               onClick={() => setOpen(false)}
               className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
             >
@@ -483,13 +483,13 @@ export function GithubSyncPanel({
           {loading && !status ? (
             <p className="flex items-center gap-1.5 text-xs text-zinc-500">
               <Loader2 className="h-3 w-3 animate-spin" />
-              加载中…
+              Loading…
             </p>
           ) : null}
 
           {!freestyleReady && !linked ? (
             <p className="mb-2 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              代码库准备中，请稍后再选择 GitHub 仓库。
+              Repository is still preparing; choose a GitHub repo in a moment.
             </p>
           ) : null}
 
@@ -507,7 +507,7 @@ export function GithubSyncPanel({
                 </a>
                 <p className="mt-0.5 flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
                   {justLinked ? <Check className="h-3 w-3" /> : null}
-                  {justLinked ? "已连接" : "双向同步已开启"}
+                  {justLinked ? "Connected" : "Two-way sync enabled"}
                 </p>
               </div>
               {!status?.installed && status?.installUrl ? (
@@ -517,7 +517,7 @@ export function GithubSyncPanel({
                   onClick={startInstall}
                   className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                 >
-                  重新安装 GitHub App
+                  Reinstall GitHub App
                 </button>
               ) : null}
               <button
@@ -531,19 +531,19 @@ export function GithubSyncPanel({
                 ) : (
                   <Unlink className="h-3 w-3" />
                 )}
-                断开连接
+                Disconnect
               </button>
             </div>
           ) : status ? (
             <div className="space-y-2.5">
               {status.githubIdentityRequired ? (
                 <p className="text-xs text-zinc-600 dark:text-zinc-300">
-                  请使用 GitHub 登录，才能校验个人仓库 installation 的归属。
+                  Sign in with GitHub to verify ownership of personal repository installations.
                 </p>
               ) : !status.installed ? (
                 <>
                   <p className="text-xs text-zinc-600 dark:text-zinc-300">
-                    安装 GitHub App，并在 GitHub 中选择要开放的已有仓库。
+                    Install the GitHub App and choose which existing repositories to grant access.
                   </p>
                   <button
                     type="button"
@@ -556,13 +556,13 @@ export function GithubSyncPanel({
                     ) : (
                       <GitHubMark className="h-3 w-3" />
                     )}
-                    安装 GitHub App
+                    Install GitHub App
                   </button>
                 </>
               ) : (
                 <>
                   <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
-                    选择仓库
+                    Select repository
                     <select
                       value={selectedRepositoryId}
                       onChange={(event) =>
@@ -574,17 +574,17 @@ export function GithubSyncPanel({
                       className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 font-mono text-xs text-zinc-900 outline-none ring-sky-500 focus:ring-2 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                     >
                       {repositoriesLoading ? (
-                        <option value="">正在加载仓库…</option>
+                        <option value="">Loading repositories…</option>
                       ) : repositories?.length ? (
                         repositories.map((repo) => (
                           <option key={repo.id} value={repo.id}>
                             {repo.fullName}
-                            {repo.isLastLinked ? " · 上次关联" : ""}
-                            {repo.private ? " · private" : ""}
+                            {repo.isLastLinked ? " - Last linked" : ""}
+                            {repo.private ? " - private" : ""}
                           </option>
                         ))
                       ) : (
-                        <option value="">没有可连接的仓库</option>
+                        <option value="">No repositories available</option>
                       )}
                     </select>
                   </label>
@@ -592,7 +592,7 @@ export function GithubSyncPanel({
                   repositories !== null &&
                   repositories.length === 0 ? (
                     <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-                      请在 GitHub App 设置中授权仓库，然后刷新列表。
+                      Authorize repositories in GitHub App settings, then refresh the list.
                     </p>
                   ) : null}
                   <div className="flex items-center gap-3">
@@ -605,7 +605,7 @@ export function GithubSyncPanel({
                       <RefreshCw
                         className={`h-3 w-3 ${repositoriesLoading ? "animate-spin" : ""}`}
                       />
-                      刷新
+                      Refresh
                     </button>
                     <a
                       href={newGithubRepositoryUrl(sessionId)}
@@ -614,7 +614,7 @@ export function GithubSyncPanel({
                       className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 dark:text-zinc-400"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      新建仓库
+                      New repository
                     </a>
                   </div>
                   <button
@@ -631,7 +631,7 @@ export function GithubSyncPanel({
                     {busyPhase === "linking" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : null}
-                    连接所选仓库
+                    Connect selected repository
                   </button>
                 </>
               )}
