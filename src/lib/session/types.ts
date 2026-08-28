@@ -3,7 +3,7 @@ import type { UIMessage } from "ai";
 import type { SandboxMode } from "@/lib/sandbox/types";
 
 /** Current Supabase session row schema version. */
-export const SESSION_SCHEMA_VERSION = 3;
+export const SESSION_SCHEMA_VERSION = 4;
 
 /** Supabase `auth.users.id`; trusted server workflows may pass `null`. */
 export type UserId = string | null;
