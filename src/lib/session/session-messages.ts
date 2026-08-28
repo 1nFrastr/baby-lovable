@@ -151,7 +151,9 @@ export async function rpcReplaceSessionMessages(input: {
   return (data as SessionRow[] | null)?.[0] ?? null;
 }
 
-export async function hydrateSessionRow(row: SessionRow): Promise<SessionRow> {
+export async function hydrateSessionRow(
+  row: SessionRow,
+): Promise<SessionRow & { messages: UIMessage[] }> {
   const messages = await loadSessionMessages(row.id);
   return { ...row, messages };
 }

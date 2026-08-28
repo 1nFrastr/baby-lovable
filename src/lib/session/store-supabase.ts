@@ -32,7 +32,7 @@ function createSessionId(): string {
 }
 
 export function rowToSession(
-  row: SessionRow,
+  row: SessionRow & { messages?: UIMessage[] },
   messages: UIMessage[] = row.messages ?? [],
 ): Session {
   assertSandboxMode(row.sandbox_mode, row.id);
@@ -138,7 +138,6 @@ export async function createSessionSupabase(
 
   const { error } = await supabase.from("sessions").insert({
     ...sessionToRow(session),
-    messages: [],
     created_at: now,
   });
 

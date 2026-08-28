@@ -1,5 +1,3 @@
-import type { UIMessage } from "ai";
-
 import type { SessionRunStatus } from "./types";
 
 export interface SessionRow {
@@ -9,8 +7,6 @@ export interface SessionRow {
   title: string;
   created_at: string;
   updated_at: string;
-  /** Legacy column — application reads `session_messages` instead. */
-  messages?: UIMessage[];
   message_count: number;
   last_run_id: string | null;
   run_status: SessionRunStatus;

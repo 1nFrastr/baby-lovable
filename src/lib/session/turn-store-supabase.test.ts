@@ -353,7 +353,6 @@ function seedIdleSession() {
     title: "New Project",
     created_at: now,
     updated_at: now,
-    messages: [],
     message_count: 0,
     last_run_id: null,
     run_status: "idle",
