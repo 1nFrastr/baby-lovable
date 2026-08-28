@@ -41,7 +41,6 @@ import {
 } from "@/lib/chat/composer-lock";
 import {
   mergeDisplayMessages,
-  persistedMessagesLagChat,
 } from "@/lib/chat/merge-messages";
 import {
   isActiveRunStatus,
@@ -58,16 +57,12 @@ const CHAT_STREAM_THROTTLE_MS = 50;
 
 interface ChatProps {
   sessionId: string;
-  /** Completed messages from the Supabase session row. */
+  /** Authoritative messages from the Supabase session row. */
   messages: UIMessage[];
-  /** In-flight assistant from the Supabase draft row; null when idle. */
-  draft: UIMessage | null;
   runStatus?: SessionRunStatus;
   /** updatedAt of the winning live runStatus source (session or projection). */
   runUpdatedAt?: string;
   onSessionRefresh?: () => void;
-  /** Drop cached draft as soon as the user sends (before refetch). */
-  onClearDraft?: () => void;
   /** Live View URL / running state from streamed testPreview tool output. */
   onAppTestStatus?: (
     status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
@@ -77,11 +72,9 @@ interface ChatProps {
 export function Chat({
   sessionId,
   messages,
-  draft,
   runStatus = "idle",
   runUpdatedAt = "",
   onSessionRefresh,
-  onClearDraft,
   onAppTestStatus,
 }: ChatProps) {
   const transport = useMemo(
@@ -202,16 +195,13 @@ export function Chat({
       return;
     }
     observedActiveRunRef.current = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- unlock only after cancel is confirmed
     setStopping(false);
     setCancelSucceeded(false);
     setCancelledHint(true);
   }, [cancelSucceeded, runStatus]);
 
   // Mid-run refresh: transport remounts as ready while the server run continues.
-  // Lock + draft overlay + Stop until runStatus goes terminal. Do not use this
-  // latch after we already had a local stream (auto-finish must stay unlocked
-  // even if Realtime briefly lags on "running").
+  // Lock + authoritative message polling + Stop until runStatus goes terminal.
   const resumeActiveRun =
     isActiveRunStatus(runStatus) && !sawLocalTransportBusy;
 
@@ -232,7 +222,7 @@ export function Chat({
   });
 
   // Only poll while we still need a server signal (early unlock / cancel /
-  // mid-run draft refresh), not after the transport already finished.
+  // mid-run authoritative refresh), not after the transport already finished.
   useEffect(() => {
     if (!onSessionRefresh) {
       return;
@@ -258,19 +248,15 @@ export function Chat({
     stopping,
   ]);
 
-  const allowDraftOverlay = isActiveRunStatus(runStatus);
-
   const displayMessages = useMemo(
     () =>
       mergeDisplayMessages(
         messages,
         chatMessages,
-        draft,
         isLiveTurn,
         stopping,
-        allowDraftOverlay,
       ),
-    [messages, chatMessages, draft, isLiveTurn, stopping, allowDraftOverlay],
+    [messages, chatMessages, isLiveTurn, stopping],
   );
 
   useEffect(() => {
@@ -280,16 +266,10 @@ export function Chat({
     onAppTestStatus(extractAppTestStatusFromMessages(displayMessages));
   }, [displayMessages, onAppTestStatus]);
 
-  // useChat only reads `messages` on mount; sync completed history from disk
-  // between turns so the next POST includes prior assistant replies.
+  // useChat only reads `messages` on mount; sync authoritative history between
+  // turns so the next POST includes prior assistant replies.
   useEffect(() => {
     if (isLiveTurn) {
-      return;
-    }
-
-    // Runtime projection can mark the run idle before session detail refetch
-    // returns the committed assistant — never clobber the live thread with that.
-    if (persistedMessagesLagChat(messages, chatMessages)) {
       return;
     }
 
@@ -299,10 +279,8 @@ export function Chat({
     }
     lastSyncedPersistedRef.current = fingerprint;
 
-    // Persisted history is authoritative between turns; merging would keep a
-    // stale SSE assistant id alongside the saved draft id.
     setMessages(messages);
-  }, [chatMessages, isLiveTurn, messages, setMessages]);
+  }, [isLiveTurn, messages, setMessages]);
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
@@ -316,11 +294,10 @@ export function Chat({
       setStopError(null);
       setCancelSucceeded(false);
       setCancelledHint(false);
-      onClearDraft?.();
       void sendMessage({ text: trimmed });
       onSessionRefresh?.();
     },
-    [composerLocked, onClearDraft, onSessionRefresh, sendMessage],
+    [composerLocked, onSessionRefresh, sendMessage],
   );
 
   const handleRunAppTest = useCallback(() => {
@@ -332,10 +309,9 @@ export function Chat({
     setStopError(null);
     setCancelSucceeded(false);
     setCancelledHint(false);
-    onClearDraft?.();
     void sendMessage({ text: APP_TEST_USER_PROMPT });
     onSessionRefresh?.();
-  }, [composerLocked, onClearDraft, onSessionRefresh, sendMessage]);
+  }, [composerLocked, onSessionRefresh, sendMessage]);
 
   const handleStop = useCallback(() => {
     if (stopping || !showStop) {
@@ -348,7 +324,7 @@ export function Chat({
     setStopping(true);
 
     // Seal incomplete tools in the live thread immediately so "Editing…" cannot
-    // linger while cancel + draft persist catch up.
+    // linger while cancel + authoritative persist catch up.
     const sealedMessages = finalizeInterruptedMessages(chatMessages);
     setMessages(sealedMessages);
     const clientAssistant = pickCancelledAssistantSnapshot([

@@ -6,7 +6,6 @@ import type { Session } from "@/lib/session/types";
 const getSession = vi.fn();
 const replaceMessages = vi.fn();
 const updateSession = vi.fn();
-const readDraft = vi.fn();
 const deleteDraft = vi.fn();
 const checkpointSessionTurn = vi.fn();
 const getRun = vi.fn();
@@ -18,7 +17,6 @@ vi.mock("@/lib/session/store", () => ({
 }));
 
 vi.mock("@/lib/session/draft-store", () => ({
-  readDraft: (...args: unknown[]) => readDraft(...args),
   deleteDraft: (...args: unknown[]) => deleteDraft(...args),
 }));
 
@@ -43,6 +41,18 @@ function session(overrides: Partial<Session> = {}): Session {
         id: "u1",
         role: "user",
         parts: [{ type: "text", text: "build a todo app" }],
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-writeFile",
+            toolCallId: "call_1",
+            state: "input-available",
+            input: { path: "src/app/page.tsx" },
+          },
+        ],
       },
     ],
     lastRunId: "wrun_1",
@@ -69,24 +79,8 @@ describe("cancelSessionRun", () => {
     );
   });
 
-  it("persists a finalized draft and cancels the workflow run", async () => {
+  it("persists the authoritative assistant and cancels the workflow run", async () => {
     getSession.mockResolvedValue(session());
-    readDraft.mockResolvedValue({
-      runId: "wrun_1",
-      updatedAt: "2026-01-01T00:00:01.000Z",
-      message: {
-        id: "a-draft",
-        role: "assistant",
-        parts: [
-          {
-            type: "tool-writeFile",
-            toolCallId: "call_1",
-            state: "input-available",
-            input: { path: "src/app/page.tsx" },
-          },
-        ],
-      },
-    });
 
     const { cancelSessionRun } = await import("./cancel-session-run");
     const result = await cancelSessionRun("sess_1", { userId: "user_1" });
@@ -114,17 +108,23 @@ describe("cancelSessionRun", () => {
     expect(getRun).toHaveBeenCalledWith("wrun_1");
   });
 
-  it("uses the client SSE snapshot when the draft has not caught up yet", async () => {
-    getSession.mockResolvedValue(session());
-    readDraft.mockResolvedValue({
-      runId: "wrun_1",
-      updatedAt: "2026-01-01T00:00:01.000Z",
-      message: {
-        id: "a-draft",
-        role: "assistant",
-        parts: [],
-      },
-    });
+  it("merges the client SSE snapshot when it has unpersisted text", async () => {
+    getSession.mockResolvedValue(
+      session({
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            parts: [{ type: "text", text: "build a todo app" }],
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            parts: [],
+          },
+        ],
+      }),
+    );
 
     const { cancelSessionRun } = await import("./cancel-session-run");
     const result = await cancelSessionRun(
@@ -156,6 +156,7 @@ describe("cancelSessionRun", () => {
       persistedAssistant: true,
     });
     const persisted = replaceMessages.mock.calls[0]?.[1] as UIMessage[];
+    expect(persisted.at(-1)?.id).toBe("a1");
     expect(persisted.at(-1)?.parts[1]).toMatchObject({
       type: "tool-editFile",
       state: "output-error",

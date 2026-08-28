@@ -1,6 +1,6 @@
 import { generateId, type UIMessage } from "ai";
 
-import { readDraft } from "@/lib/session/draft-store";
+import { lastAssistantMessage } from "@/lib/chat/assistant-merge";
 import type { Session } from "@/lib/session/types";
 
 import { logger } from "./logger";
@@ -51,22 +51,17 @@ async function createSessionViaApi(baseUrl: string): Promise<Session> {
   return data.session;
 }
 
-async function fetchSessionWithDraft(
+async function fetchSession(
   baseUrl: string,
   sessionId: string,
-): Promise<{
-  session: Session;
-  draft: { runId: string; message: UIMessage } | null;
-}> {
+): Promise<Session> {
   const response = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch session ${sessionId}: ${response.status}`);
   }
 
-  return (await response.json()) as {
-    session: Session;
-    draft: { runId: string; message: UIMessage } | null;
-  };
+  const data = (await response.json()) as { session: Session };
+  return data.session;
 }
 
 async function startChatTurn(
@@ -110,20 +105,20 @@ async function startChatTurn(
   return runId;
 }
 
-async function waitForDraftWithContent(
+async function waitForAuthoritativeAssistantParts(
   baseUrl: string,
   sessionId: string,
   timeoutMs: number,
-): Promise<{ runId: string; message: UIMessage; partCount: number } | null> {
+): Promise<{ assistantId: string; partCount: number } | null> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const { draft } = await fetchSessionWithDraft(baseUrl, sessionId);
-    if (draft && draft.message.parts.length > 0) {
+    const session = await fetchSession(baseUrl, sessionId);
+    const assistant = lastAssistantMessage(session.messages);
+    if (assistant && assistant.parts.length > 0) {
       return {
-        runId: draft.runId,
-        message: draft.message,
-        partCount: draft.message.parts.length,
+        assistantId: assistant.id,
+        partCount: assistant.parts.length,
       };
     }
     await sleep(250);
@@ -140,7 +135,7 @@ async function waitForTerminalRun(
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const { session } = await fetchSessionWithDraft(baseUrl, sessionId);
+    const session = await fetchSession(baseUrl, sessionId);
     if (
       session.runStatus === "completed" ||
       session.runStatus === "failed" ||
@@ -159,8 +154,8 @@ function countTextParts(message: UIMessage): number {
 }
 
 /**
- * Headless draft-resume test — simulates refresh by reading the Supabase draft via API
- * while the workflow is still running (requires `npm run dev`).
+ * Headless refresh test — simulates refresh by reading authoritative
+ * sessions.messages via API while the workflow is still running.
  */
 export async function runResumeStreamTest(options?: {
   baseUrl?: string;
@@ -192,18 +187,17 @@ export async function runResumeStreamTest(options?: {
     `started chat run ${runId}, consumed stream ${PARTIAL_READ_MS}ms then aborted (simulated refresh)`,
   );
 
-  const midDraft = await waitForDraftWithContent(baseUrl, session.id, 15_000);
-  details.push(
-    midDraft
-      ? `mid-run draft via API: runId=${midDraft.runId}, parts=${midDraft.partCount}, textParts=${countTextParts(midDraft.message)}`
-      : "mid-run draft via API: none",
+  const midAssistant = await waitForAuthoritativeAssistantParts(
+    baseUrl,
+    session.id,
+    15_000,
   );
-
-  const onDiskDraft = await readDraft(session.id);
+  const midSession = await fetchSession(baseUrl, session.id);
+  const midMessage = lastAssistantMessage(midSession.messages);
   details.push(
-    onDiskDraft
-      ? `Supabase draft: parts=${onDiskDraft.message.parts.length}, runId=${onDiskDraft.runId}`
-      : "Supabase draft: missing",
+    midAssistant
+      ? `mid-run authoritative assistant via API: id=${midAssistant.assistantId}, parts=${midAssistant.partCount}, textParts=${midMessage ? countTextParts(midMessage) : 0}`
+      : "mid-run authoritative assistant via API: none",
   );
 
   const finished = await waitForTerminalRun(
@@ -215,31 +209,23 @@ export async function runResumeStreamTest(options?: {
     `workflow finished: runStatus=${finished.runStatus}, messages=${finished.messages.length}`,
   );
 
-  const afterComplete = await readDraft(session.id);
-  details.push(
-    afterComplete ? "FAIL: draft row still present after complete" : "draft row deleted after complete",
-  );
-
-  const assistant = finished.messages.find((message) => message.role === "assistant");
+  const assistant = lastAssistantMessage(finished.messages);
   const userCount = finished.messages.filter((message) => message.role === "user")
     .length;
 
   const ok =
-    Boolean(midDraft) &&
-    midDraft!.runId === runId &&
-    midDraft!.partCount > 0 &&
-    Boolean(onDiskDraft) &&
+    Boolean(midAssistant) &&
+    midAssistant!.partCount > 0 &&
     userCount === 1 &&
     Boolean(assistant) &&
-    finished.runStatus === "completed" &&
-    afterComplete == null;
+    finished.runStatus === "completed";
 
   if (!ok) {
     details.push(
-      `FAIL: midDraft=${Boolean(midDraft)}, user=${userCount}, assistant=${Boolean(assistant)}, draftCleared=${afterComplete == null}`,
+      `FAIL: midAssistant=${Boolean(midAssistant)}, user=${userCount}, assistant=${Boolean(assistant)}`,
     );
   } else {
-    details.push("PASS: draft materialized mid-run and cleared after persist");
+    details.push("PASS: authoritative assistant materialized mid-run and persisted after complete");
   }
 
   return {
@@ -257,12 +243,12 @@ export async function printResumeTestResult(result: ResumeTestResult): Promise<v
 
   if (result.ok) {
     logger.info(
-      `Draft resume test passed · session=${result.sessionId} · run=${result.runId}`,
+      `Authoritative resume test passed · session=${result.sessionId} · run=${result.runId}`,
     );
     return;
   }
 
   logger.error(
-    `Draft resume test failed · session=${result.sessionId} · run=${result.runId}`,
+    `Authoritative resume test failed · session=${result.sessionId} · run=${result.runId}`,
   );
 }

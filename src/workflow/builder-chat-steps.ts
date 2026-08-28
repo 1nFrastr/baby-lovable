@@ -3,6 +3,7 @@ import { generateId, type ModelMessage, type UIMessage } from "ai";
 export function modelMessagesToAssistantUIMessage(
   modelMessages: ModelMessage[],
   startIndex: number,
+  assistantId?: string,
 ): UIMessage | null {
   const newMessages = modelMessages.slice(startIndex);
   const parts: UIMessage["parts"] = [];
@@ -70,7 +71,7 @@ export function modelMessagesToAssistantUIMessage(
   }
 
   return {
-    id: generateId(),
+    id: assistantId ?? generateId(),
     role: "assistant",
     parts,
   };
@@ -97,7 +98,8 @@ export async function saveSessionMessagesStep(
 ) {
   "use step";
 
-  const { readDraft, deleteDraft } = await import("@/lib/session/draft-store");
+  const { lastAssistantMessage, mergeAssistantMonotonically, upsertAssistantInMessages } =
+    await import("@/lib/chat/assistant-merge");
   const { deriveSessionTitle, getSession, replaceMessages, updateSession } =
     await import("@/lib/session/store");
   const { isActiveRunStatus } = await import("@/lib/session/types");
@@ -107,31 +109,31 @@ export async function saveSessionMessagesStep(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  // User interrupt already persisted the draft and unlocked the composer.
+  // User interrupt already persisted the assistant and unlocked the composer.
   if (!isActiveRunStatus(session.runStatus)) {
     return { messageCount: session.messages.length, skipped: true };
   }
 
   const runId = session.lastRunId;
-  const draft = await readDraft(sessionId, session.userId);
-  const fromDraft =
-    draft && draft.runId === session.lastRunId ? draft.message : null;
+  const existingAssistant = lastAssistantMessage(session.messages);
+  const assistantId = existingAssistant?.id;
   const fromModel = modelMessagesToAssistantUIMessage(
     modelMessages,
     previousModelCount,
+    assistantId,
   );
-  // Draft writes are throttled and can miss the final streamed summary;
-  // pick the richer of draft vs model so completion does not drop it.
-  const { pickCancelledAssistantSnapshot } = await import(
-    "@/lib/chat/interrupt-assistant"
-  );
-  const picked = pickCancelledAssistantSnapshot([fromDraft, fromModel]);
-  const assistantMessage =
-    picked && fromDraft ? { ...picked, id: fromDraft.id } : picked;
 
-  const mergedMessages = assistantMessage
-    ? [...uiMessages, assistantMessage]
-    : uiMessages;
+  let mergedMessages = session.messages;
+  if (fromModel) {
+    const assistantMessage = existingAssistant
+      ? mergeAssistantMonotonically(existingAssistant, fromModel)
+      : fromModel;
+    mergedMessages = upsertAssistantInMessages(session.messages, assistantMessage);
+  } else if (existingAssistant) {
+    mergedMessages = session.messages;
+  } else {
+    mergedMessages = uiMessages;
+  }
 
   const title =
     session.title === "New Project"
@@ -148,7 +150,6 @@ export async function saveSessionMessagesStep(
     runStatus: "completed",
     lastRunId: null,
   });
-  await deleteDraft(sessionId, session.userId);
 
   const { checkpointSessionTurn } = await import(
     "@/lib/git/checkpoint-session-turn"
@@ -168,7 +169,6 @@ export async function saveSessionMessagesStep(
 export async function markSessionRunFailedStep(sessionId: string) {
   "use step";
 
-  const { deleteDraft } = await import("@/lib/session/draft-store");
   const { getSession, updateSession } = await import("@/lib/session/store");
   const { isActiveRunStatus } = await import("@/lib/session/types");
 
@@ -183,7 +183,6 @@ export async function markSessionRunFailedStep(sessionId: string) {
     runStatus: "failed",
     lastRunId: null,
   });
-  await deleteDraft(sessionId, session.userId);
 
   const { checkpointSessionTurn } = await import(
     "@/lib/git/checkpoint-session-turn"

@@ -20,47 +20,29 @@ function assistant(id: string, text: string): UIMessage {
 }
 
 describe("mergeDisplayMessages", () => {
-  it("does not append a stale previous-turn draft after a new user send", () => {
+  it("returns authoritative messages between turns", () => {
     const persisted = [user("u1", "hi"), assistant("a1", "hello")];
-    const chatMessages = [...persisted, user("u2", "again")];
-    const staleDraft = assistant("a-draft", "hello from last turn");
-
-    const merged = mergeDisplayMessages(
-      persisted,
-      chatMessages,
-      staleDraft,
-      true,
-      false,
-      false,
-    );
-
-    expect(merged.map((message) => message.id)).toEqual(["u1", "a1", "u2"]);
-  });
-
-  it("overlays draft after the user message while the run is active", () => {
-    const persisted = [user("u1", "hi")];
     const chatMessages = persisted;
-    const draft = assistant("a-draft", "streaming…");
 
-    const merged = mergeDisplayMessages(
-      persisted,
-      chatMessages,
-      draft,
-      true,
-      false,
-      true,
-    );
+    const merged = mergeDisplayMessages(persisted, chatMessages, false);
 
-    expect(merged.map((message) => message.id)).toEqual(["u1", "a-draft"]);
-    expect(merged.at(-1)?.parts).toEqual(draft.parts);
+    expect(merged.map((message) => message.id)).toEqual(["u1", "a1"]);
   });
 
-  it("keeps the live assistant when persisted is missing the final summary text", () => {
-    const chatAssistant = assistant(
-      "a-sse",
-      "Preview passed checkPreview; the app is ready to use.",
-    );
-    const persistedAssistant = assistant("a-draft", "");
+  it("overlays live text tail on the authoritative assistant during a live turn", () => {
+    const persisted = [user("u1", "hi"), assistant("a1", "partial")];
+    const chatMessages = [user("u1", "hi"), assistant("a-sse", "partial streamed more")];
+
+    const merged = mergeDisplayMessages(persisted, chatMessages, true);
+
+    expect(merged.map((message) => message.id)).toEqual(["u1", "a1"]);
+    expect(merged.at(-1)?.parts).toEqual([
+      { type: "text", text: "partial streamed more" },
+    ]);
+  });
+
+  it("keeps completed tools from the authoritative snapshot during live overlay", () => {
+    const persistedAssistant = assistant("a1", "");
     persistedAssistant.parts = [
       {
         type: "tool-checkPreview",
@@ -71,42 +53,45 @@ describe("mergeDisplayMessages", () => {
       },
     ];
 
+    const chatAssistant = assistant("a-sse", "Preview is ready.");
+    chatAssistant.parts = [
+      {
+        type: "tool-checkPreview",
+        toolCallId: "call_1",
+        state: "input-available",
+        input: {},
+      },
+      { type: "text", text: "Preview is ready." },
+    ];
+
     const persisted = [user("u1", "Build a todo app"), persistedAssistant];
     const chatMessages = [user("u1", "Build a todo app"), chatAssistant];
 
-    const merged = mergeDisplayMessages(
-      persisted,
-      chatMessages,
-      null,
-      false,
-      false,
-      false,
-    );
+    const merged = mergeDisplayMessages(persisted, chatMessages, true);
 
     const last = merged.at(-1);
-    expect(last?.id).toBe("a-sse");
+    expect(last?.id).toBe("a1");
+    expect(
+      last?.parts.some(
+        (part) =>
+          part.type === "tool-checkPreview" &&
+          part.state === "output-available",
+      ),
+    ).toBe(true);
     expect(
       last?.parts.some(
         (part) =>
           part.type === "text" &&
-          part.text.includes("the app is ready to use"),
+          part.text.includes("Preview is ready"),
       ),
     ).toBe(true);
   });
 
-  it("does not re-append a draft whose id is already in the thread", () => {
-    const staleDraft = assistant("a1", "hello from last turn");
-    const persisted = [user("u1", "hi"), assistant("a1", "hello from last turn")];
-    const chatMessages = [...persisted, user("u2", "ok nice")];
+  it("does not duplicate assistants when SSE uses a different id", () => {
+    const persisted = [user("u1", "hi"), assistant("a1", "hello")];
+    const chatMessages = [...persisted, user("u2", "again")];
 
-    const merged = mergeDisplayMessages(
-      persisted,
-      chatMessages,
-      staleDraft,
-      true,
-      false,
-      true,
-    );
+    const merged = mergeDisplayMessages(persisted, chatMessages, true);
 
     expect(merged.map((message) => message.id)).toEqual(["u1", "a1", "u2"]);
   });

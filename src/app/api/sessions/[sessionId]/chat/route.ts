@@ -1,15 +1,17 @@
 import { createModelCallToUIChunkTransform } from "@ai-sdk/workflow";
 import {
   createUIMessageStreamResponse,
+  generateId,
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
 import { after, NextResponse } from "next/server";
 import { start } from "workflow/api";
 
+import { createAssistantPlaceholder } from "@/lib/chat/assistant-merge";
 import { cancelWorkflowRun } from "@/lib/chat/cancel-session-run";
-import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
 import { mergeClientMessagesWithPersisted } from "@/lib/chat/merge-messages";
+import { materializeMessagesFromRun } from "@/lib/chat/message-materializer";
 import {
   awaitRuntimeDesired,
   kickRuntimeDesired,
@@ -19,11 +21,7 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import {
-  createEmptyDraft,
-  deleteDraft,
-  writeDraft,
-} from "@/lib/session/draft-store";
+import { deleteDraft } from "@/lib/session/draft-store";
 import {
   deriveSessionTitle,
   getSession,
@@ -87,31 +85,29 @@ export async function POST(
     const { messages: clientMessages }: { messages: UIMessage[] } =
       await request.json();
 
-    const messages = mergeClientMessagesWithPersisted(
+    const merged = mergeClientMessagesWithPersisted(
       session.messages,
       clientMessages,
     );
+
+    const assistantId = generateId();
+    const messages = [...merged, createAssistantPlaceholder(assistantId)];
 
     const title =
       session.title === "New Project"
         ? (deriveSessionTitle(messages) ?? session.title)
         : session.title;
 
-    // Persist the merged thread immediately so a refresh mid-turn still has
-    // the latest user message. Assistant output is merged when the workflow
-    // completes.
+    // Persist user turn + stable assistant placeholder immediately so refresh
+    // can restore authoritative in-flight progress from sessions.messages.
     await replaceMessages(sessionId, messages, auth);
     if (title !== session.title) {
       await updateSession(sessionId, { title }, auth);
     }
 
+    // Clean up legacy draft rows from prior turns.
     await deleteDraft(sessionId, auth.userId);
 
-    // Mid-run refresh used to unlock the composer and let a second POST start
-    // another builderChat while the first still held the Daytona sandbox and
-    // Freestyle checkpoint barrier — stacked runs then starve on writeFile.
-    // Cancel the previous workflow only (do not persist a cancelled assistant);
-    // this POST owns the new user turn.
     if (isActiveRunStatus(session.runStatus) && session.lastRunId) {
       const orphanRunId = session.lastRunId;
       try {
@@ -127,12 +123,9 @@ export async function POST(
       }
     }
 
-    // Claim the turn so a leftover `cancelled` from the previous stop cannot
-    // discard this new send, while a Stop during kick still wins.
     await updateSession(sessionId, { runStatus: "pending" }, auth);
     claimedPending = true;
 
-    // Prelude: upgrade to preview-ready without blocking the AI loop.
     await kickRuntimeDesired(sessionId, "preview-ready");
     after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
 
@@ -168,21 +161,17 @@ export async function POST(
     );
     claimedPending = false;
 
-    await writeDraft(
+    void materializeMessagesFromRun(
       sessionId,
-      createEmptyDraft(run.runId),
+      run.runId,
+      assistantId,
       auth.userId,
-    );
-
-    // Detached — survives client disconnect; updates the Supabase draft as chunks arrive.
-    void materializeDraftFromRun(sessionId, run.runId, auth.userId).catch(
-      (error) => {
-        console.error(
-          `[chat] draft materializer failed session=${sessionId} run=${run.runId}:`,
-          error,
-        );
-      },
-    );
+    ).catch((error) => {
+      console.error(
+        `[chat] message materializer failed session=${sessionId} run=${run.runId}:`,
+        error,
+      );
+    });
 
     return createUIMessageStreamResponse({
       stream: run.readable.pipeThrough(createModelCallToUIChunkTransform()),

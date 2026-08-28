@@ -1,5 +1,10 @@
 import type { UIMessage } from "ai";
 
+import {
+  lastAssistantMessage,
+  overlayLiveTextTail,
+  upsertAssistantInMessages,
+} from "./assistant-merge";
 import { finalizeInterruptedMessages } from "./interrupt-assistant";
 import { repairUiMessages } from "./repair-messages";
 
@@ -8,9 +13,8 @@ function lastMessage(messages: UIMessage[]): UIMessage | undefined {
 }
 
 /**
- * useChat keeps the SSE assistant id; the server persists the draft row's id after
- * the workflow completes. Skip the extra client-only assistant when persisted
- * already ended with an assistant for that turn.
+ * useChat keeps the SSE assistant id; the server persists a stable assistant id.
+ * Skip the extra client-only assistant when persisted already ended with one.
  */
 function shouldSkipStaleClientAssistant(
   ordered: UIMessage[],
@@ -21,7 +25,7 @@ function shouldSkipStaleClientAssistant(
   );
 }
 
-/** Remove back-to-back assistant rows (stale SSE id + saved draft id). */
+/** Remove back-to-back assistant rows (stale SSE id + saved stable id). */
 export function dedupeConsecutiveAssistants(
   messages: UIMessage[],
 ): UIMessage[] {
@@ -86,78 +90,26 @@ export function mergeClientMessagesWithPersisted(
   return sealThread(ordered);
 }
 
-/**
- * Session detail can lag the in-memory useChat thread when runStatus flips
- * idle via runtime Realtime before `invalidateSessionDetail` lands — or when
- * the persisted assistant is missing the final streamed text (stale draft).
- */
-export function persistedMessagesLagChat(
-  persisted: UIMessage[],
-  chatMessages: UIMessage[],
-): boolean {
-  if (chatMessages.length === 0) {
-    return false;
-  }
-
-  if (chatMessages.length > persisted.length) {
-    return true;
-  }
-
-  const lastPersisted = lastMessage(persisted);
-  const lastChat = lastMessage(chatMessages);
-  if (lastChat?.role === "assistant" && lastPersisted?.role !== "assistant") {
-    return true;
-  }
-
-  if (lastChat?.role === "assistant" && lastPersisted?.role === "assistant") {
-    return assistantTextLength(lastChat) > assistantTextLength(lastPersisted);
-  }
-
-  return false;
-}
-
-function assistantTextLength(message: UIMessage): number {
-  let length = 0;
-  for (const part of message.parts) {
-    if (
-      (part.type === "text" || part.type === "reasoning") &&
-      typeof part.text === "string"
-    ) {
-      length += part.text.length;
-    }
-  }
-  return length;
+function liveAssistantFromChat(chatMessages: UIMessage[]): UIMessage | null {
+  const last = lastMessage(chatMessages);
+  return last?.role === "assistant" ? last : null;
 }
 
 /**
- * Live-turn display: keep completed history from Supabase, overlay the
- * in-flight useChat thread, then fall back to the draft row when SSE has not
- * produced assistant parts yet (e.g. refresh mid-run).
- *
- * Only overlay `draft` when `allowDraftOverlay` is true (run still active).
- * Optimistic send (`awaitingRunStart`) sets isLiveTurn before runStatus flips —
- * applying a React Query–cached previous-turn draft there appends the old
- * assistant after the new user message and causes a one-frame flicker.
- *
- * When the turn is no longer live but persisted history has not caught up yet,
- * keep overlaying chatMessages so the assistant bubble does not vanish.
- *
- * Pass `sealInterrupted` while Stop is in flight (or after the turn ends) so
- * incomplete tools become "Interrupted by user" instead of stuck "Editing…".
+ * Authoritative read model: persisted messages are the source of truth.
+ * While connected to the live SSE stream, overlay only unpersisted text on the
+ * last assistant and append any optimistic client-only tail (e.g. a new user
+ * message before the server refetch lands).
  */
 export function mergeDisplayMessages(
   persisted: UIMessage[],
   chatMessages: UIMessage[],
-  draft: UIMessage | null,
   isLiveTurn: boolean,
   sealInterrupted = false,
-  allowDraftOverlay = true,
 ): UIMessage[] {
-  const treatAsLive =
-    isLiveTurn || persistedMessagesLagChat(persisted, chatMessages);
   const shouldSeal = sealInterrupted || !isLiveTurn;
 
-  if (!treatAsLive) {
+  if (!isLiveTurn) {
     return sealThread(persisted);
   }
 
@@ -166,19 +118,17 @@ export function mergeDisplayMessages(
 
   for (const message of chatMessages) {
     if (byId.has(message.id)) {
-      byId.set(message.id, message);
+      if (message.role !== "assistant") {
+        byId.set(message.id, message);
+      }
       continue;
     }
 
-    const lastId = orderedIds.at(-1);
-    const lastMessageInThread = lastId ? byId.get(lastId) : undefined;
+    const ordered = orderedIds
+      .map((id) => byId.get(id))
+      .filter((item): item is UIMessage => item != null);
 
-    if (
-      message.role === "assistant" &&
-      lastMessageInThread?.role === "assistant"
-    ) {
-      orderedIds[orderedIds.length - 1] = message.id;
-      byId.set(message.id, message);
+    if (shouldSkipStaleClientAssistant(ordered, message)) {
       continue;
     }
 
@@ -190,28 +140,17 @@ export function mergeDisplayMessages(
     .map((id) => byId.get(id))
     .filter((message): message is UIMessage => message != null);
 
-  const last = result[result.length - 1];
-  const liveHasAssistantParts =
-    last?.role === "assistant" && last.parts.length > 0;
+  const authoritativeAssistant = lastAssistantMessage(result);
+  const liveAssistant = liveAssistantFromChat(chatMessages);
 
-  /**
-   * Never overlay a draft whose id is already in the thread — that is almost
-   * always the previous turn's assistant re-appended after a new user message
-   * when React Query still holds a stale draft row.
-   */
-  if (
-    allowDraftOverlay &&
-    !liveHasAssistantParts &&
-    draft &&
-    draft.parts.length > 0 &&
-    !result.some((message) => message.id === draft.id)
-  ) {
-    if (last?.role === "assistant") {
-      result = [...result.slice(0, -1), draft];
-    } else if (last?.role === "user") {
-      // Mid-run resume: draft follows the in-flight user turn.
-      result = [...result, draft];
-    }
+  if (authoritativeAssistant) {
+    const displayAssistant = overlayLiveTextTail(
+      authoritativeAssistant,
+      liveAssistant,
+    );
+    result = upsertAssistantInMessages(result, displayAssistant);
+  } else if (liveAssistant) {
+    result = [...result, liveAssistant];
   }
 
   const deduped = dedupeConsecutiveAssistants(result);

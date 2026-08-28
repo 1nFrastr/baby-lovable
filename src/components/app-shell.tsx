@@ -11,7 +11,6 @@ import {
 } from "react";
 
 import {
-  useClearSessionDraft,
   useCreateSessionMutation,
   useInvalidateSessionDetail,
   useRefetchSessionOnActivate,
@@ -26,7 +25,6 @@ import {
   resolveLiveRunState,
 } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime, useSessionRuntime } from "@/lib/session/runtime-query";
-import { isActiveRunStatus } from "@/lib/session/types";
 import { cn } from "@/lib/utils";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -154,7 +152,6 @@ export function AppShell() {
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const activeSession = sessionQuery.data?.session ?? null;
-  const activeDraft = sessionQuery.data?.draft ?? null;
   const activeSummary = sessions.find((session) => session.id === activeSessionId);
   /** Prefer newer of runtime projection vs session row (publish is best-effort). */
   const liveRun = resolveLiveRunState(
@@ -168,24 +165,11 @@ export function AppShell() {
   );
   const liveRunStatus = liveRun.runStatus;
   const liveRunUpdatedAt = liveRun.updatedAt;
-  /** Only the draft for the current active run — never the previous turn's row. */
-  const activeRunId =
-    runtimeQuery.data?.projection.run?.runId ??
-    (isActiveRunStatus(liveRunStatus) ? activeSession?.lastRunId : null) ??
-    null;
-  const liveDraftMessage =
-    activeDraft &&
-    activeRunId &&
-    activeDraft.runId === activeRunId &&
-    isActiveRunStatus(liveRunStatus)
-      ? activeDraft.message
-      : null;
 
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
 
   const prevRuntimeRunStatus = useRef<string | undefined>(undefined);
-  const clearSessionDraft = useClearSessionDraft();
 
   useEffect(() => {
     setChatAppTest(null);
@@ -194,19 +178,17 @@ export function AppShell() {
   }, [activeSessionId]);
 
   // Runtime Realtime can flip run→done before onChatEnd's detail invalidate lands.
-  // Drop the cached draft immediately and refetch durable messages.
+  // Refetch durable authoritative messages immediately.
   useEffect(() => {
     const status = runtimeQuery.data?.projection.run?.status;
     const prev = prevRuntimeRunStatus.current;
     prevRuntimeRunStatus.current = status;
 
     if (activeSessionId && prev === "running" && status && isFinishedRuntimeRunStatus(status)) {
-      clearSessionDraft(activeSessionId);
       invalidateSessionDetail(activeSessionId);
     }
   }, [
     activeSessionId,
-    clearSessionDraft,
     invalidateSessionDetail,
     runtimeQuery.data?.projection.run?.status,
   ]);
@@ -461,12 +443,8 @@ export function AppShell() {
                   key={activeSessionId}
                   sessionId={activeSessionId}
                   messages={activeSession.messages}
-                  draft={liveDraftMessage}
                   runStatus={liveRunStatus}
                   runUpdatedAt={liveRunUpdatedAt}
-                  onClearDraft={() => {
-                    clearSessionDraft(activeSessionId);
-                  }}
                   onSessionRefresh={() => {
                     invalidateSessionDetail(activeSessionId);
                     invalidateRuntime(activeSessionId);

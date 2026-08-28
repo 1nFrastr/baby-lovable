@@ -2,8 +2,13 @@ import { getRun } from "workflow/api";
 import type { UIMessage } from "ai";
 
 import { checkpointSessionTurn } from "@/lib/git/checkpoint-session-turn";
+import {
+  lastAssistantMessage,
+  mergeAssistantMonotonically,
+  upsertAssistantInMessages,
+} from "@/lib/chat/assistant-merge";
 import type { SessionAuthContext } from "@/lib/session/auth-context";
-import { deleteDraft, readDraft } from "@/lib/session/draft-store";
+import { deleteDraft } from "@/lib/session/draft-store";
 import {
   getSession,
   replaceMessages,
@@ -18,7 +23,6 @@ import {
 import {
   assistantHasPersistedContent,
   finalizeInterruptedAssistant,
-  pickCancelledAssistantSnapshot,
 } from "./interrupt-assistant";
 
 export type CancelSessionRunResult = {
@@ -37,22 +41,25 @@ function mergeCancelledAssistant(
   messages: UIMessage[],
   assistant: UIMessage,
 ): UIMessage[] {
-  const last = messages[messages.length - 1];
-  if (last?.role === "assistant") {
-    return [...messages.slice(0, -1), assistant];
+  const existing = lastAssistantMessage(messages);
+  if (existing) {
+    const merged = finalizeInterruptedAssistant(
+      mergeAssistantMonotonically(existing, assistant),
+    );
+    return upsertAssistantInMessages(messages, merged);
   }
-  return [...messages, assistant];
+  return [...messages, finalizeInterruptedAssistant(assistant)];
 }
 
 /**
- * Persist the in-flight draft (and optional client SSE snapshot) as a cancelled
- * assistant turn and unlock the session. Caller cancels the Workflow run after.
+ * Persist the in-flight authoritative assistant (and optional client SSE
+ * snapshot) as a cancelled turn and unlock the session.
  */
 export async function persistCancelledSessionTurn(options: {
   session: Session;
   runId: string | null;
   auth?: SessionAuthContext;
-  /** Live useChat assistant — often ahead of the draft materializer. */
+  /** Live useChat assistant — may carry unpersisted streaming text. */
   clientAssistant?: UIMessage | null;
 }): Promise<{
   session: Session;
@@ -64,12 +71,19 @@ export async function persistCancelledSessionTurn(options: {
     auth = { userId: session.userId },
     clientAssistant = null,
   } = options;
-  const draft = runId ? await readDraft(session.id, auth.userId) : null;
-  const draftMatchesRun = Boolean(draft && draft.runId === runId);
-  const assistant = pickCancelledAssistantSnapshot([
-    draftMatchesRun ? draft?.message : null,
-    clientAssistant,
-  ]);
+
+  const authoritative = lastAssistantMessage(session.messages);
+  let assistant: UIMessage | null = authoritative ?? null;
+
+  if (clientAssistant && clientAssistant.role === "assistant") {
+    const finalizedClient = finalizeInterruptedAssistant(clientAssistant);
+    assistant = authoritative
+      ? mergeAssistantMonotonically(authoritative, finalizedClient)
+      : finalizedClient;
+  } else if (assistant) {
+    assistant = finalizeInterruptedAssistant(assistant);
+  }
+
   const persistedAssistant = Boolean(
     assistant && assistantHasPersistedContent(assistant),
   );
@@ -106,10 +120,6 @@ export async function persistCancelledSessionTurn(options: {
 
 /**
  * Stop an in-flight builder chat turn.
- *
- * If the workflow run id is already on the session, cancel that run and
- * persist the draft. If the POST /chat has not recorded lastRunId yet, mark
- * the session cancelled so the in-flight start path discards the new run.
  */
 export async function cancelSessionRun(
   sessionId: string,
@@ -154,9 +164,6 @@ export async function cancelSessionRun(
     };
   }
 
-  // Composer sent a message but POST /chat has not stored lastRunId yet
-  // (`pending` claim, or the previous turn's terminal status). Still seal a
-  // client snapshot when present so the next turn does not see "Editing…".
   if (options.clientAssistant) {
     const { persistedAssistant } = await persistCancelledSessionTurn({
       session,
