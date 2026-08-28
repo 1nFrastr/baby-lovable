@@ -1,7 +1,6 @@
 import {
   appTestFromLatest,
   emptyRuntimeProjection,
-  mapSessionRunStatus,
   mergeRuntimeProjection,
   previewFromAllStatus,
   shouldBumpRuntimeVersion,
@@ -46,8 +45,8 @@ export async function writeRuntimeProjectionStore(
 
 /**
  * Assemble projection once from domain stores and persist.
- * Subsequent reads hit the projection store, then reconcile run fields
- * against the session row when publish previously failed.
+ * Subsequent reads hit the projection store directly. Chat turn lifecycle
+ * lives only on the authoritative session row.
  *
  * Pass `sessionHint` from callers that already loaded the session to avoid
  * a second DB round-trip on GET /runtime.
@@ -57,15 +56,11 @@ export async function ensureRuntimeProjection(
   userId: string | null = null,
   sessionHint: Session | null = null,
 ): Promise<SessionRuntimeProjection> {
+  void sessionHint;
   const ownerId = await resolveUserId(sessionId, userId);
   const existing = await readRuntimeProjectionStore(sessionId, ownerId);
   if (existing) {
-    return reconcileProjectionRunWithSession(
-      existing,
-      sessionId,
-      ownerId,
-      sessionHint,
-    );
+    return existing;
   }
 
   const assembled = await assembleRuntimeProjection(sessionId);
@@ -79,50 +74,6 @@ export async function ensureRuntimeProjection(
   return initial;
 }
 
-/**
- * Session row is durable SoT for runStatus; projection publish is best-effort.
- * Repair a stale "running" (or mismatched runId) when the session is newer.
- */
-async function reconcileProjectionRunWithSession(
-  existing: SessionRuntimeProjection,
-  sessionId: string,
-  ownerId: string | null,
-  sessionHint: Session | null,
-): Promise<SessionRuntimeProjection> {
-  const session =
-    sessionHint ??
-    (await (await import("./store")).getSession(sessionId));
-  if (!session) {
-    return existing;
-  }
-
-  const expectedStatus = mapSessionRunStatus(session.runStatus);
-  const expectedRunId = session.lastRunId ?? undefined;
-  const sameStatus = existing.run.status === expectedStatus;
-  const sameRunId = (existing.run.runId ?? undefined) === expectedRunId;
-  if (sameStatus && sameRunId) {
-    return existing;
-  }
-
-  // Projection is ahead of a lagging session read — keep projection.
-  if (session.updatedAt < existing.run.updatedAt) {
-    return existing;
-  }
-
-  const repaired = await publishRuntimeUpdate(
-    sessionId,
-    {
-      run: {
-        status: expectedStatus,
-        runId: expectedRunId,
-        updatedAt: session.updatedAt,
-      },
-    },
-    ownerId,
-  );
-  return repaired ?? existing;
-}
-
 async function assembleRuntimeProjection(
   sessionId: string,
 ): Promise<SessionRuntimeProjection> {
@@ -131,14 +82,6 @@ async function assembleRuntimeProjection(
 
   const { getSession } = await import("./store");
   const session = await getSession(sessionId);
-
-  if (session) {
-    base.run = {
-      status: mapSessionRunStatus(session.runStatus),
-      runId: session.lastRunId,
-      updatedAt: session.updatedAt || now,
-    };
-  }
 
   try {
     // Side-effect free: never call peekAllStatus (it may kick background observe).

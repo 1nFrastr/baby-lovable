@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { UIMessage } from "ai";
 
 import type { Session } from "@/lib/session/types";
 
 const getSession = vi.fn();
 const replaceMessages = vi.fn();
 const updateSession = vi.fn();
-const readDraft = vi.fn();
-const deleteDraft = vi.fn();
+const beginSessionTurnCancellation = vi.fn();
+const finalizeSessionTurnCancellation = vi.fn();
 const checkpointSessionTurn = vi.fn();
+const cancelWorkflow = vi.fn();
 const getRun = vi.fn();
 
 vi.mock("@/lib/session/store", () => ({
@@ -17,13 +17,16 @@ vi.mock("@/lib/session/store", () => ({
   updateSession: (...args: unknown[]) => updateSession(...args),
 }));
 
-vi.mock("@/lib/session/draft-store", () => ({
-  readDraft: (...args: unknown[]) => readDraft(...args),
-  deleteDraft: (...args: unknown[]) => deleteDraft(...args),
+vi.mock("@/lib/session/turn-store", () => ({
+  beginSessionTurnCancellation: (...args: unknown[]) =>
+    beginSessionTurnCancellation(...args),
+  finalizeSessionTurnCancellation: (...args: unknown[]) =>
+    finalizeSessionTurnCancellation(...args),
 }));
 
 vi.mock("@/lib/git/checkpoint-session-turn", () => ({
-  checkpointSessionTurn: (...args: unknown[]) => checkpointSessionTurn(...args),
+  checkpointSessionTurn: (...args: unknown[]) =>
+    checkpointSessionTurn(...args),
 }));
 
 vi.mock("workflow/api", () => ({
@@ -32,7 +35,7 @@ vi.mock("workflow/api", () => ({
 
 function session(overrides: Partial<Session> = {}): Session {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "sess_1",
     userId: "user_1",
     title: "Todo app",
@@ -44,9 +47,19 @@ function session(overrides: Partial<Session> = {}): Session {
         role: "user",
         parts: [{ type: "text", text: "build a todo app" }],
       },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "Working" }],
+      },
     ],
     lastRunId: "wrun_1",
     runStatus: "running",
+    activeTurnId: "turn_1",
+    activeAssistantMessageId: "a1",
+    activeTurnStartedAt: "2026-01-01T00:00:00.000Z",
+    conversationRevision: 2,
+    turnCheckpoint: 0,
     sandboxMode: "daytona",
     ...overrides,
   };
@@ -55,158 +68,122 @@ function session(overrides: Partial<Session> = {}): Session {
 describe("cancelSessionRun", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    checkpointSessionTurn.mockResolvedValue({ ran: true });
-    deleteDraft.mockResolvedValue(undefined);
+    cancelWorkflow.mockResolvedValue(undefined);
     getRun.mockResolvedValue({
-      cancel: vi.fn().mockResolvedValue(undefined),
+      cancel: cancelWorkflow,
+      status: Promise.resolve("cancelled"),
     });
-    replaceMessages.mockImplementation(
-      async (_id: string, messages: UIMessage[]) =>
-        session({ messages, runStatus: "running" }),
-    );
-    updateSession.mockImplementation(async (_id: string, input: object) =>
-      session({ ...input, lastRunId: undefined, runStatus: "cancelled" }),
-    );
+    checkpointSessionTurn.mockResolvedValue({ ran: true });
+    beginSessionTurnCancellation.mockResolvedValue({
+      ok: true,
+      changed: true,
+      session: session({ runStatus: "cancelling" }),
+    });
+    finalizeSessionTurnCancellation.mockResolvedValue({
+      ok: true,
+      changed: true,
+      session: session({
+        runStatus: "cancelled",
+        lastRunId: undefined,
+        activeTurnId: undefined,
+        activeAssistantMessageId: undefined,
+      }),
+    });
   });
 
-  it("persists a finalized draft and cancels the workflow run", async () => {
+  it("cancels the matching workflow before sealing the turn", async () => {
     getSession.mockResolvedValue(session());
-    readDraft.mockResolvedValue({
-      runId: "wrun_1",
-      updatedAt: "2026-01-01T00:00:01.000Z",
-      message: {
-        id: "a-draft",
-        role: "assistant",
-        parts: [
-          {
-            type: "tool-writeFile",
-            toolCallId: "call_1",
-            state: "input-available",
-            input: { path: "src/app/page.tsx" },
-          },
-        ],
-      },
-    });
-
     const { cancelSessionRun } = await import("./cancel-session-run");
-    const result = await cancelSessionRun("sess_1", { userId: "user_1" });
+
+    const result = await cancelSessionRun(
+      "sess_1",
+      { userId: "user_1" },
+      { expectedTurnId: "turn_1" },
+    );
 
     expect(result).toMatchObject({
       ok: true,
       runStatus: "cancelled",
       cancelledRunId: "wrun_1",
-      persistedAssistant: true,
     });
-    expect(replaceMessages).toHaveBeenCalledOnce();
-    const persisted = replaceMessages.mock.calls[0]?.[1] as UIMessage[];
-    expect(persisted.at(-1)?.parts[0]).toMatchObject({
-      state: "output-error",
-      errorText: "Interrupted by user",
-    });
-    expect(updateSession).toHaveBeenCalledWith(
-      "sess_1",
-      { runStatus: "cancelled", lastRunId: null },
-      { userId: "user_1" },
+    expect(cancelWorkflow).toHaveBeenCalledOnce();
+    expect(
+      cancelWorkflow.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      finalizeSessionTurnCancellation.mock.invocationCallOrder[0]!,
     );
     expect(checkpointSessionTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "cancelled", runId: "wrun_1" }),
+      expect.objectContaining({
+        outcome: "cancelled",
+        runId: "wrun_1",
+      }),
     );
-    expect(getRun).toHaveBeenCalledWith("wrun_1");
   });
 
-  it("uses the client SSE snapshot when the draft has not caught up yet", async () => {
+  it("keeps the turn cancelling when workflow cancellation fails", async () => {
     getSession.mockResolvedValue(session());
-    readDraft.mockResolvedValue({
-      runId: "wrun_1",
-      updatedAt: "2026-01-01T00:00:01.000Z",
-      message: {
-        id: "a-draft",
-        role: "assistant",
-        parts: [],
-      },
+    cancelWorkflow.mockRejectedValue(new Error("runtime unavailable"));
+    getRun
+      .mockResolvedValueOnce({
+        cancel: cancelWorkflow,
+        status: Promise.resolve("running"),
+      })
+      .mockResolvedValueOnce({
+        cancel: cancelWorkflow,
+        status: Promise.resolve("running"),
+      });
+    const { cancelSessionRun } = await import("./cancel-session-run");
+
+    const result = await cancelSessionRun("sess_1", {
+      userId: "user_1",
     });
 
+    expect(result).toEqual({
+      ok: false,
+      error: "runtime unavailable",
+      status: 503,
+    });
+    expect(finalizeSessionTurnCancellation).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale expected turn token", async () => {
+    getSession.mockResolvedValue(session());
     const { cancelSessionRun } = await import("./cancel-session-run");
+
     const result = await cancelSessionRun(
       "sess_1",
       { userId: "user_1" },
-      {
-        clientAssistant: {
-          id: "a-sse",
-          role: "assistant",
-          parts: [
-            {
-              type: "reasoning",
-              text: "Thought for 1 second",
-              state: "done",
-            },
-            {
-              type: "tool-editFile",
-              toolCallId: "call_9",
-              state: "input-available",
-              input: { path: "src/components/todo/Todo.tsx" },
-            },
-          ],
-        },
-      },
+      { expectedTurnId: "turn_old" },
     );
 
-    expect(result).toMatchObject({
-      ok: true,
-      persistedAssistant: true,
+    expect(result).toEqual({
+      ok: false,
+      error: "The active turn changed before cancellation",
+      status: 409,
     });
-    const persisted = replaceMessages.mock.calls[0]?.[1] as UIMessage[];
-    expect(persisted.at(-1)?.parts[1]).toMatchObject({
-      type: "tool-editFile",
-      state: "output-error",
-      errorText: "Interrupted by user",
-    });
+    expect(beginSessionTurnCancellation).not.toHaveBeenCalled();
   });
 
-  it("marks cancelled without a run id so in-flight POST /chat can discard", async () => {
+  it("is idempotent after the turn is already cancelled", async () => {
     getSession.mockResolvedValue(
-      session({ lastRunId: undefined, runStatus: "pending" }),
+      session({
+        runStatus: "cancelled",
+        lastRunId: undefined,
+        activeTurnId: undefined,
+        activeAssistantMessageId: undefined,
+      }),
     );
-
     const { cancelSessionRun } = await import("./cancel-session-run");
-    const result = await cancelSessionRun("sess_1", { userId: "user_1" });
+
+    const result = await cancelSessionRun("sess_1", {
+      userId: "user_1",
+    });
 
     expect(result).toMatchObject({
       ok: true,
       runStatus: "cancelled",
       cancelledRunId: null,
-      persistedAssistant: false,
     });
-    expect(replaceMessages).not.toHaveBeenCalled();
-    expect(updateSession).toHaveBeenCalledWith(
-      "sess_1",
-      { runStatus: "cancelled", lastRunId: null },
-      { userId: "user_1" },
-    );
     expect(getRun).not.toHaveBeenCalled();
-  });
-
-  it("is a no-op persist when already cancelled", async () => {
-    getSession.mockResolvedValue(
-      session({ lastRunId: undefined, runStatus: "cancelled" }),
-    );
-
-    const { cancelSessionRun } = await import("./cancel-session-run");
-    const result = await cancelSessionRun("sess_1", { userId: "user_1" });
-
-    expect(result).toMatchObject({ ok: true, runStatus: "cancelled" });
-    expect(updateSession).not.toHaveBeenCalled();
-    expect(replaceMessages).not.toHaveBeenCalled();
-  });
-
-  it("returns 404 when the session is missing", async () => {
-    getSession.mockResolvedValue(null);
-    const { cancelSessionRun } = await import("./cancel-session-run");
-    const result = await cancelSessionRun("sess_missing", { userId: "user_1" });
-    expect(result).toEqual({
-      ok: false,
-      error: "Session not found",
-      status: 404,
-    });
   });
 });

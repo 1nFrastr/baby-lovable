@@ -2,9 +2,15 @@
 
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
-import type { UIMessage } from "ai";
+import { generateId, type UIMessage } from "ai";
 import { FlaskConical, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Conversation,
@@ -30,22 +36,9 @@ import { ChatActivityLabel } from "@/components/chat-activity-label";
 import { ChatMessageParts } from "@/components/chat-message-parts";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
-import {
-  finalizeInterruptedMessages,
-  pickCancelledAssistantSnapshot,
-} from "@/lib/chat/interrupt-assistant";
-import {
-  isComposerLocked,
-  shouldReleaseComposerAfterStop,
-  shouldShowStopControl,
-} from "@/lib/chat/composer-lock";
-import {
-  mergeDisplayMessages,
-  persistedMessagesLagChat,
-} from "@/lib/chat/merge-messages";
+import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import {
   isActiveRunStatus,
-  isTerminalRunStatus,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
@@ -58,16 +51,13 @@ const CHAT_STREAM_THROTTLE_MS = 50;
 
 interface ChatProps {
   sessionId: string;
-  /** Completed messages from the Supabase session row. */
+  /** Sole persisted conversation read model. */
   messages: UIMessage[];
-  /** In-flight assistant from the Supabase draft row; null when idle. */
-  draft: UIMessage | null;
+  conversationRevision: number;
+  activeTurnId?: string;
+  activeAssistantMessageId?: string;
   runStatus?: SessionRunStatus;
-  /** updatedAt of the winning live runStatus source (session or projection). */
-  runUpdatedAt?: string;
   onSessionRefresh?: () => void;
-  /** Drop cached draft as soon as the user sends (before refetch). */
-  onClearDraft?: () => void;
   /** Live View URL / running state from streamed testPreview tool output. */
   onAppTestStatus?: (
     status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
@@ -77,11 +67,11 @@ interface ChatProps {
 export function Chat({
   sessionId,
   messages,
-  draft,
+  conversationRevision,
+  activeTurnId,
+  activeAssistantMessageId,
   runStatus = "idle",
-  runUpdatedAt = "",
   onSessionRefresh,
-  onClearDraft,
   onAppTestStatus,
 }: ChatProps) {
   const transport = useMemo(
@@ -89,6 +79,8 @@ export function Chat({
       new WorkflowChatTransport({
         api: `/api/sessions/${sessionId}/chat`,
         maxConsecutiveErrors: 3,
+        // Automatic reconnect is only for this mounted request and resumes
+        // from its received chunk index. Fresh page mounts never call resume.
         onChatEnd: () => {
           onSessionRefresh?.();
         },
@@ -108,234 +100,135 @@ export function Chat({
     transport,
     messages,
     throttle: CHAT_STREAM_THROTTLE_MS,
-    onError: () => {
-      onSessionRefresh?.();
-    },
+    onError: onSessionRefresh,
   });
 
-  // After turn 1, runStatus stays "completed" until the next POST marks the
-  // run running. isLiveChatTurn intentionally unlocks on terminal+streaming
-  // (post-turn drain) — that same rule leaves the composer open for the whole
-  // weak-network gap before runStatus flips. Lock optimistically on send.
-  const [awaitingRunStart, setAwaitingRunStart] = useState(false);
+  /**
+   * When this page sends a turn, its one live useChat thread is the display.
+   * A refreshed page has no local owner and is updated directly from the
+   * authoritative session snapshots.
+   */
+  const [localUserMessageId, setLocalUserMessageId] = useState<string | null>(
+    null,
+  );
+  const [pendingUserMessageId, setPendingUserMessageId] = useState<
+    string | null
+  >(null);
   const [stopping, setStopping] = useState(false);
-  const [cancelSucceeded, setCancelSucceeded] = useState(false);
   const [cancelledHint, setCancelledHint] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
-  /** This mount observed submit/stream — distinguishes auto-finish from mid-run refresh. */
-  const [sawLocalTransportBusy, setSawLocalTransportBusy] = useState(false);
-  const leftReadyDuringAwaitRef = useRef(false);
-  const awaitingSinceRef = useRef("");
-  const lastSyncedPersistedRef = useRef("");
-  const observedActiveRunRef = useRef(false);
+  const lastSyncedRevisionRef = useRef(conversationRevision);
+
+  const serverTurnActive =
+    (Boolean(activeTurnId) && isActiveRunStatus(runStatus)) ||
+    (!activeTurnId && isActiveRunStatus(runStatus));
+  const serverHasLocalUser =
+    localUserMessageId != null &&
+    messages.some((message) => message.id === localUserMessageId);
 
   useEffect(() => {
-    if (status === "submitted" || status === "streaming") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- latch local stream for refresh vs auto-finish
-      setSawLocalTransportBusy(true);
-    }
-  }, [status]);
-
-  useEffect(() => {
-    if (!awaitingRunStart) {
-      leftReadyDuringAwaitRef.current = false;
-      awaitingSinceRef.current = "";
+    if (!pendingUserMessageId) {
       return;
     }
-
-    if (status === "submitted" || status === "streaming") {
-      leftReadyDuringAwaitRef.current = true;
-    }
-
-    if (isActiveRunStatus(runStatus) || status === "error") {
-      // Optimistic send lock: drop once the run projection or stream settles.
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync lock to session/run status
-      setAwaitingRunStart(false);
-      return;
-    }
-
-    // Server reported a fresh terminal after this send (Realtime may have
-    // skipped pending/running). Do not treat the previous turn's completed
-    // stamp as success — require updatedAt >= send time.
     if (
-      isTerminalRunStatus(runStatus) &&
-      runUpdatedAt &&
-      awaitingSinceRef.current &&
-      runUpdatedAt >= awaitingSinceRef.current
+      messages.some((message) => message.id === pendingUserMessageId) ||
+      status === "error"
     ) {
-      setAwaitingRunStart(false);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- server acknowledged or rejected this send
+      setPendingUserMessageId(null);
+    }
+  }, [messages, pendingUserMessageId, status]);
+
+  useEffect(() => {
+    if (localUserMessageId) {
+      const terminalSnapshotReady =
+        !serverTurnActive && serverHasLocalUser;
+      const rejectedBeforeClaim =
+        status === "error" && !serverTurnActive;
+      if (!terminalSnapshotReady && !rejectedBeforeClaim) {
+        return;
+      }
+
+      lastSyncedRevisionRef.current = conversationRevision;
+      setMessages(messages);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hand display ownership back to authoritative snapshot
+      setLocalUserMessageId(null);
+      setPendingUserMessageId(null);
       return;
     }
 
-    // Send failed or finished without ever projecting "running".
-    if (leftReadyDuringAwaitRef.current && status === "ready") {
-      setAwaitingRunStart(false);
-    }
-  }, [awaitingRunStart, runStatus, runUpdatedAt, status]);
-
-  // Safety net: never leave the composer permanently locked if POST/run
-  // projection never arrives (network error with status stuck on ready).
-  useEffect(() => {
-    if (!awaitingRunStart) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setAwaitingRunStart(false);
-    }, 30_000);
-    return () => window.clearTimeout(timer);
-  }, [awaitingRunStart]);
-
-  useEffect(() => {
-    if (stopping && isActiveRunStatus(runStatus)) {
-      observedActiveRunRef.current = true;
-    }
-  }, [runStatus, stopping]);
-
-  useEffect(() => {
     if (
-      !shouldReleaseComposerAfterStop({
-        cancelSucceeded,
-        runStatus,
-        observedActiveRun: observedActiveRunRef.current,
-      })
+      conversationRevision === lastSyncedRevisionRef.current
     ) {
       return;
     }
-    observedActiveRunRef.current = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- unlock only after cancel is confirmed
-    setStopping(false);
-    setCancelSucceeded(false);
-    setCancelledHint(true);
-  }, [cancelSucceeded, runStatus]);
-
-  // Mid-run refresh: transport remounts as ready while the server run continues.
-  // Lock + draft overlay + Stop until runStatus goes terminal. Do not use this
-  // latch after we already had a local stream (auto-finish must stay unlocked
-  // even if Realtime briefly lags on "running").
-  const resumeActiveRun =
-    isActiveRunStatus(runStatus) && !sawLocalTransportBusy;
-
-  const composerLocked = isComposerLocked({
-    stopping,
-    awaitingRunStart,
-    chatStatus: status,
-    runStatus,
-    resumeActiveRun,
-  });
-  // Draft recovery after refresh needs treatAsLive even before lock settles.
-  const isLiveTurn = composerLocked || resumeActiveRun;
-  const showStop = shouldShowStopControl({
-    stopping,
-    chatStatus: status,
-    runStatus,
-    resumeActiveRun,
-  });
-
-  // Only poll while we still need a server signal (early unlock / cancel /
-  // mid-run draft refresh), not after the transport already finished.
-  useEffect(() => {
-    if (!onSessionRefresh) {
-      return;
-    }
-    const needsReconcile =
-      stopping ||
-      resumeActiveRun ||
-      (showStop && isActiveRunStatus(runStatus)) ||
-      (awaitingRunStart && !isActiveRunStatus(runStatus));
-    if (!needsReconcile) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      onSessionRefresh();
-    }, 2500);
-    return () => window.clearInterval(timer);
+    lastSyncedRevisionRef.current = conversationRevision;
+    setMessages(messages);
   }, [
-    awaitingRunStart,
-    onSessionRefresh,
-    resumeActiveRun,
-    runStatus,
-    showStop,
-    stopping,
+    conversationRevision,
+    localUserMessageId,
+    messages,
+    serverHasLocalUser,
+    serverTurnActive,
+    setMessages,
+    status,
   ]);
 
-  const allowDraftOverlay = isActiveRunStatus(runStatus);
-
-  const displayMessages = useMemo(
-    () =>
-      mergeDisplayMessages(
-        messages,
-        chatMessages,
-        draft,
-        isLiveTurn,
-        stopping,
-        allowDraftOverlay,
-      ),
-    [messages, chatMessages, draft, isLiveTurn, stopping, allowDraftOverlay],
-  );
+  const composerLocked =
+    stopping || Boolean(pendingUserMessageId) || serverTurnActive;
+  const showStop =
+    !stopping &&
+    runStatus !== "cancelling" &&
+    (serverTurnActive ||
+      (localUserMessageId != null && status === "streaming"));
+  const localStreamAnimating =
+    localUserMessageId != null && status === "streaming";
 
   useEffect(() => {
     if (!onAppTestStatus) {
       return;
     }
-    onAppTestStatus(extractAppTestStatusFromMessages(displayMessages));
-  }, [displayMessages, onAppTestStatus]);
+    onAppTestStatus(extractAppTestStatusFromMessages(chatMessages));
+  }, [chatMessages, onAppTestStatus]);
 
-  // useChat only reads `messages` on mount; sync completed history from disk
-  // between turns so the next POST includes prior assistant replies.
-  useEffect(() => {
-    if (isLiveTurn) {
-      return;
-    }
+  const sendUserText = useCallback(
+    (text: string) => {
+      if (composerLocked) {
+        return;
+      }
 
-    // Runtime projection can mark the run idle before session detail refetch
-    // returns the committed assistant — never clobber the live thread with that.
-    if (persistedMessagesLagChat(messages, chatMessages)) {
-      return;
-    }
+      const userMessageId = generateId();
+      setLocalUserMessageId(userMessageId);
+      setPendingUserMessageId(userMessageId);
+      setStopError(null);
+      setCancelledHint(false);
 
-    const fingerprint = messages.map((message) => message.id).join("|");
-    if (fingerprint === lastSyncedPersistedRef.current) {
-      return;
-    }
-    lastSyncedPersistedRef.current = fingerprint;
-
-    // Persisted history is authoritative between turns; merging would keep a
-    // stale SSE assistant id alongside the saved draft id.
-    setMessages(messages);
-  }, [chatMessages, isLiveTurn, messages, setMessages]);
+      void sendMessage({
+        id: userMessageId,
+        role: "user",
+        parts: [{ type: "text", text }],
+      }).finally(() => {
+        onSessionRefresh?.();
+      });
+      onSessionRefresh?.();
+    },
+    [composerLocked, onSessionRefresh, sendMessage],
+  );
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
       const trimmed = message.text.trim();
-      if (!trimmed || composerLocked) {
+      if (!trimmed) {
         return;
       }
-
-      setAwaitingRunStart(true);
-      awaitingSinceRef.current = new Date().toISOString();
-      setStopError(null);
-      setCancelSucceeded(false);
-      setCancelledHint(false);
-      onClearDraft?.();
-      void sendMessage({ text: trimmed });
-      onSessionRefresh?.();
+      sendUserText(trimmed);
     },
-    [composerLocked, onClearDraft, onSessionRefresh, sendMessage],
+    [sendUserText],
   );
 
   const handleRunAppTest = useCallback(() => {
-    if (composerLocked) {
-      return;
-    }
-    setAwaitingRunStart(true);
-    awaitingSinceRef.current = new Date().toISOString();
-    setStopError(null);
-    setCancelSucceeded(false);
-    setCancelledHint(false);
-    onClearDraft?.();
-    void sendMessage({ text: APP_TEST_USER_PROMPT });
-    onSessionRefresh?.();
-  }, [composerLocked, onClearDraft, onSessionRefresh, sendMessage]);
+    sendUserText(APP_TEST_USER_PROMPT);
+  }, [sendUserText]);
 
   const handleStop = useCallback(() => {
     if (stopping || !showStop) {
@@ -343,17 +236,18 @@ export function Chat({
     }
 
     setStopError(null);
-    setCancelSucceeded(false);
-    observedActiveRunRef.current = isActiveRunStatus(runStatus);
     setStopping(true);
 
-    // Seal incomplete tools in the live thread immediately so "Editing…" cannot
-    // linger while cancel + draft persist catch up.
     const sealedMessages = finalizeInterruptedMessages(chatMessages);
     setMessages(sealedMessages);
-    const clientAssistant = pickCancelledAssistantSnapshot([
-      sealedMessages.at(-1),
-    ]);
+    const lastAssistant = [...sealedMessages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === "assistant" &&
+          (!activeAssistantMessageId ||
+            message.id === activeAssistantMessageId),
+      );
 
     stop();
 
@@ -364,30 +258,35 @@ export function Chat({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ assistant: clientAssistant }),
+            body: JSON.stringify({
+              assistant: lastAssistant ?? null,
+            }),
           },
         );
         if (!response.ok) {
           const data = (await response.json().catch(() => null)) as {
             error?: string;
           } | null;
-          throw new Error(data?.error ?? `Stop failed (${response.status})`);
+          throw new Error(
+            data?.error ?? `Stop failed (${response.status})`,
+          );
         }
-        setCancelSucceeded(true);
-        setAwaitingRunStart(false);
+
+        setPendingUserMessageId(null);
+        setCancelledHint(true);
         onSessionRefresh?.();
       } catch (cause) {
-        setStopping(false);
-        setCancelSucceeded(false);
         setStopError(
           cause instanceof Error ? cause.message : "Stop failed",
         );
+      } finally {
+        setStopping(false);
       }
     })();
   }, [
+    activeAssistantMessageId,
     chatMessages,
     onSessionRefresh,
-    runStatus,
     sessionId,
     setMessages,
     showStop,
@@ -395,41 +294,34 @@ export function Chat({
     stopping,
   ]);
 
-  // Cursor-style idle feedback inside the message column (same gap as tools).
   const activityLabel = resolveChatActivityLabel({
-    live: isLiveTurn && !stopping,
-    lastMessage: displayMessages[displayMessages.length - 1],
+    live: (serverTurnActive || Boolean(pendingUserMessageId)) && !stopping,
+    lastMessage: chatMessages[chatMessages.length - 1],
   });
-  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
+  const lastDisplayMessage = chatMessages[chatMessages.length - 1];
   const showStandaloneActivity =
     Boolean(activityLabel) &&
     (!lastDisplayMessage || lastDisplayMessage.role === "user");
 
-  // After the first completed turn only; hide while a turn is in flight.
   const showAppTestButton =
     !composerLocked &&
-    displayMessages.some((message) => message.role === "assistant");
+    chatMessages.some((message) => message.role === "assistant");
 
-  const isStreaming = showStop;
-  // Stop button only while generating; awaiting-send keeps textarea locked
-  // without forcing a destructive Stop affordance.
-  const submitStatus = stopping
+  const submitStatus = stopping || showStop
     ? "streaming"
-    : showStop
-      ? "streaming"
-      : status === "error"
-        ? "error"
-        : awaitingRunStart
-          ? "submitted"
-          : "ready";
+    : status === "error"
+      ? "error"
+      : pendingUserMessageId
+        ? "submitted"
+        : "ready";
   const composerPlaceholder = stopping
     ? "Stopping… you can send again after cancel succeeds"
     : "Describe the app you want to build…";
-  const sessionStatusHint = stopping
+  const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop
       ? " - Generating…"
-      : awaitingRunStart
+      : pendingUserMessageId
         ? " - Sending…"
         : cancelledHint
           ? " - Stopped"
@@ -451,17 +343,19 @@ export function Chat({
 
       <Conversation className="min-h-0">
         <ConversationContent className="gap-4 px-6 py-4">
-          {displayMessages.length === 0 ? (
+          {chatMessages.length === 0 ? (
             <ConversationEmptyState
               icon={<MessageSquare className="size-10" />}
               title="Describe the app you want to build"
               description=""
             />
           ) : (
-            displayMessages.map((message, index) => {
-              const isLast = index === displayMessages.length - 1;
+            chatMessages.map((message, index) => {
+              const isLast = index === chatMessages.length - 1;
               const messageActivityLabel =
-                isLast && message.role === "assistant" ? activityLabel : null;
+                isLast && message.role === "assistant"
+                  ? activityLabel
+                  : null;
 
               return (
                 <Message from={message.role} key={message.id}>
@@ -469,7 +363,7 @@ export function Chat({
                     <ChatMessageParts
                       activityLabel={messageActivityLabel}
                       isLastMessage={isLast}
-                      isStreaming={isStreaming}
+                      isStreaming={localStreamAnimating}
                       message={message}
                     />
                   </MessageContent>
@@ -518,7 +412,7 @@ export function Chat({
             <PromptInputTools>
               {showAppTestButton ? (
                 <PromptInputButton
-                  disabled={isLiveTurn}
+                  disabled={composerLocked}
                   onClick={handleRunAppTest}
                   tooltip="Send a message asking the agent to run a happy-path UI test"
                 >

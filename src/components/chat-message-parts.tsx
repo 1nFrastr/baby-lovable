@@ -19,6 +19,7 @@ import {
   formatToolPartLabel,
   formatToolPartOutput,
 } from "@/lib/chat/format-tool-label";
+import { joinReasoningText } from "@/lib/chat/turn-progress";
 import {
   isToolUIPart,
   type DynamicToolUIPart,
@@ -79,7 +80,7 @@ function ReasoningBlock({
   parts: Extract<UIMessage["parts"][number], { type: "reasoning" }>[];
   isStreaming: boolean;
 }) {
-  const reasoningText = parts.map((part) => part.text).join("\n\n");
+  const reasoningText = joinReasoningText(parts);
 
   return (
     <Reasoning defaultOpen={false} isStreaming={isStreaming}>
@@ -154,7 +155,10 @@ export function ChatMessageParts({
 
     if (isToolUIPart(part)) {
       nodes.push(
-        <BuilderToolPart key={`${message.id}-${index}`} part={part} />,
+        <BuilderToolPart
+          key={`${message.id}-tool-${part.toolCallId}`}
+          part={part}
+        />,
       );
     }
   });

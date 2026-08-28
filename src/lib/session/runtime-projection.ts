@@ -2,23 +2,6 @@ import type { AppTestLatestStatus, AppTestRunStatus } from "@/lib/browser-run/ty
 import type { SourceControlProjection } from "@/lib/git/types";
 import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 
-import type { SessionRunStatus } from "./types";
-
-/** UI-facing run status (simplified from SessionRunStatus). */
-export type RuntimeRunStatus =
-  | "idle"
-  | "running"
-  | "done"
-  | "error"
-  | "cancelled";
-
-/** True when the projection left an in-flight agent turn. */
-export function isFinishedRuntimeRunStatus(
-  status: RuntimeRunStatus,
-): boolean {
-  return status !== "running";
-}
-
 export type RuntimeAppServerStatus =
   | "stopped"
   | "installing"
@@ -31,11 +14,6 @@ export interface SessionRuntimeProjection {
   sessionId: string;
   /** Monotonic; clients only accept version > local. */
   version: number;
-  run: {
-    status: RuntimeRunStatus;
-    runId?: string;
-    updatedAt: string;
-  };
   preview: {
     generation: number;
     sandbox: SandboxStatus;
@@ -56,115 +34,10 @@ export interface SessionRuntimeProjection {
 }
 
 export type RuntimeProjectionPatch = {
-  run?: Partial<SessionRuntimeProjection["run"]>;
   preview?: Partial<SessionRuntimeProjection["preview"]>;
   appTest?: Partial<SessionRuntimeProjection["appTest"]>;
   sourceControl?: Partial<SourceControlProjection>;
 };
-
-export function mapSessionRunStatus(
-  status: SessionRunStatus,
-): RuntimeRunStatus {
-  switch (status) {
-    case "pending":
-    case "running":
-      return "running";
-    case "completed":
-      return "done";
-    case "failed":
-      return "error";
-    case "cancelled":
-      return "cancelled";
-    case "idle":
-    default:
-      return "idle";
-  }
-}
-
-/** Map projection run status back to SessionRunStatus for legacy UI helpers. */
-export function toSessionRunStatus(
-  status: RuntimeRunStatus,
-): SessionRunStatus {
-  switch (status) {
-    case "running":
-      return "running";
-    case "done":
-      return "completed";
-    case "error":
-      return "failed";
-    case "cancelled":
-      return "cancelled";
-    case "idle":
-    default:
-      return "idle";
-  }
-}
-
-/**
- * Pick the live runStatus for composer lock / chat UI.
- *
- * Runtime Realtime is the fast path, but `publishRuntimeUpdate` is best-effort.
- * When the session row and projection disagree, prefer the newer `updatedAt`
- * so a failed publish cannot leave the composer locked on a stale `running`.
- */
-export function resolveLiveRunStatus(
-  projectionRun:
-    | { status: RuntimeRunStatus; updatedAt: string }
-    | null
-    | undefined,
-  session:
-    | { runStatus: SessionRunStatus; updatedAt: string }
-    | null
-    | undefined,
-): SessionRunStatus {
-  return resolveLiveRunState(projectionRun, session).runStatus;
-}
-
-export function resolveLiveRunState(
-  projectionRun:
-    | { status: RuntimeRunStatus; updatedAt: string }
-    | null
-    | undefined,
-  session:
-    | { runStatus: SessionRunStatus; updatedAt: string }
-    | null
-    | undefined,
-): { runStatus: SessionRunStatus; updatedAt: string } {
-  if (!projectionRun) {
-    return {
-      runStatus: session?.runStatus ?? "idle",
-      updatedAt: session?.updatedAt ?? "",
-    };
-  }
-  if (!session) {
-    return {
-      runStatus: toSessionRunStatus(projectionRun.status),
-      updatedAt: projectionRun.updatedAt,
-    };
-  }
-
-  const fromProjection = toSessionRunStatus(projectionRun.status);
-  if (fromProjection === session.runStatus) {
-    // Same status — prefer the newer stamp so awaitingRunStart can detect
-    // a fresh terminal after send.
-    const updatedAt =
-      session.updatedAt >= projectionRun.updatedAt
-        ? session.updatedAt
-        : projectionRun.updatedAt;
-    return { runStatus: fromProjection, updatedAt };
-  }
-
-  if (session.updatedAt >= projectionRun.updatedAt) {
-    return {
-      runStatus: session.runStatus,
-      updatedAt: session.updatedAt,
-    };
-  }
-  return {
-    runStatus: fromProjection,
-    updatedAt: projectionRun.updatedAt,
-  };
-}
 
 export function previewFromAllStatus(
   all: AllStatus,
@@ -208,7 +81,6 @@ export function emptyRuntimeProjection(
   return {
     sessionId,
     version: 0,
-    run: { status: "idle", updatedAt },
     preview: {
       generation: 0,
       sandbox: "missing",
@@ -231,7 +103,6 @@ export function mergeRuntimeProjection(
   return {
     sessionId: current.sessionId,
     version: current.version,
-    run: patch.run ? { ...current.run, ...patch.run } : current.run,
     preview: patch.preview
       ? { ...current.preview, ...patch.preview }
       : current.preview,
@@ -250,10 +121,6 @@ export function runtimeUiSignature(
 ): string {
   const sourceControl = projection.sourceControl ?? { status: "idle" };
   return JSON.stringify({
-    run: {
-      status: projection.run.status,
-      runId: projection.run.runId ?? null,
-    },
     preview: {
       generation: projection.preview.generation,
       sandbox: projection.preview.sandbox,

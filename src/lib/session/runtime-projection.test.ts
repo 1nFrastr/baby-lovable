@@ -2,13 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   emptyRuntimeProjection,
-  isFinishedRuntimeRunStatus,
-  mapSessionRunStatus,
   mergeRuntimeProjection,
-  resolveLiveRunState,
-  resolveLiveRunStatus,
   shouldBumpRuntimeVersion,
-  toSessionRunStatus,
 } from "./runtime-projection";
 
 describe("runtime projection merge / bump", () => {
@@ -17,22 +12,18 @@ describe("runtime projection merge / bump", () => {
     base.version = 3;
     const merged = mergeRuntimeProjection(base, {
       preview: { appServerStatus: "ready", url: "http://localhost:3200" },
-      run: { status: "running", runId: "run_1" },
     });
 
     expect(merged.version).toBe(3);
     expect(merged.preview.appServerStatus).toBe("ready");
     expect(merged.preview.url).toBe("http://localhost:3200");
     expect(merged.preview.sandbox).toBe("missing");
-    expect(merged.run.status).toBe("running");
-    expect(merged.run.runId).toBe("run_1");
   });
 
   it("does not bump when only updatedAt changes", () => {
     const before = emptyRuntimeProjection("sess_1", "2026-01-01T00:00:00.000Z");
     const after = mergeRuntimeProjection(before, {
       preview: { updatedAt: "2026-01-02T00:00:00.000Z" },
-      run: { updatedAt: "2026-01-02T00:00:00.000Z" },
       appTest: { updatedAt: "2026-01-02T00:00:00.000Z" },
     });
 
@@ -78,63 +69,5 @@ describe("runtime projection merge / bump", () => {
 
     expect(shouldBumpRuntimeVersion(before, after)).toBe(true);
     expect(after.sourceControl.status).toBe("syncing");
-  });
-});
-
-describe("session run status mapping", () => {
-  it("maps cancelled to a distinct runtime status so the composer can unlock", () => {
-    expect(mapSessionRunStatus("cancelled")).toBe("cancelled");
-    expect(toSessionRunStatus("cancelled")).toBe("cancelled");
-    expect(isFinishedRuntimeRunStatus("cancelled")).toBe(true);
-    expect(isFinishedRuntimeRunStatus("running")).toBe(false);
-  });
-});
-
-describe("resolveLiveRunStatus", () => {
-  it("prefers a newer terminal session over a stale running projection", () => {
-    expect(
-      resolveLiveRunStatus(
-        { status: "running", updatedAt: "2026-01-01T00:00:00.000Z" },
-        {
-          runStatus: "completed",
-          updatedAt: "2026-01-01T00:00:01.000Z",
-        },
-      ),
-    ).toBe("completed");
-  });
-
-  it("keeps a newer running projection when session detail still lags", () => {
-    expect(
-      resolveLiveRunStatus(
-        { status: "running", updatedAt: "2026-01-01T00:00:02.000Z" },
-        {
-          runStatus: "completed",
-          updatedAt: "2026-01-01T00:00:01.000Z",
-        },
-      ),
-    ).toBe("running");
-  });
-
-  it("falls back to session when projection is missing", () => {
-    expect(
-      resolveLiveRunStatus(null, {
-        runStatus: "failed",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      }),
-    ).toBe("failed");
-  });
-
-  it("exposes the newer updatedAt via resolveLiveRunState", () => {
-    const state = resolveLiveRunState(
-      { status: "done", updatedAt: "2026-01-01T00:00:02.000Z" },
-      {
-        runStatus: "completed",
-        updatedAt: "2026-01-01T00:00:01.000Z",
-      },
-    );
-    expect(state).toEqual({
-      runStatus: "completed",
-      updatedAt: "2026-01-01T00:00:02.000Z",
-    });
   });
 });

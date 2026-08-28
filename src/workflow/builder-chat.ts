@@ -7,17 +7,29 @@ import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
+import {
+  appendRecordedStep,
+  createTurnAssistantMessage,
+  type ToolCompletion,
+} from "@/lib/chat/turn-progress";
 import { createBuilderAgent } from "./builder-agent";
 
 import {
   closeAgentWritableStep,
   getSessionStep,
-  markSessionRunFailedStep,
-  modelMessagesToAssistantUIMessage,
-  saveSessionMessagesStep,
 } from "./builder-chat-steps";
+import {
+  failTurnStep,
+  finishTurnStep,
+  persistStepSnapshotStep,
+} from "./chat-turn-steps";
 
-export async function builderChat(sessionId: string, messages: UIMessage[]) {
+export async function builderChat(
+  sessionId: string,
+  messages: UIMessage[],
+  turnId: string,
+  assistantMessageId: string,
+) {
   "use workflow";
 
   await getSessionStep(sessionId);
@@ -40,8 +52,10 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
     ignoreIncompleteToolCalls: true,
   });
 
-  const previousModelCount = modelMessages.length;
-  const { agent, toolsContext, runtimeContext } = createBuilderAgent(sessionId);
+  const { agent, toolsContext, runtimeContext } = createBuilderAgent(
+    sessionId,
+    { turnId, assistantMessageId },
+  );
 
   const maxSteps = 30;
   const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
@@ -53,6 +67,9 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
   });
   const startedAt = Date.now();
   const writable = getWritable<ModelCallStreamPart>();
+  const toolCompletions = new Map<string, ToolCompletion>();
+  let assistant = createTurnAssistantMessage(assistantMessageId);
+  let checkpoint = -1;
 
   let result;
   try {
@@ -80,9 +97,13 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
           ),
         );
       },
-      streamOnce: async ({ messages, preventClose, sendFinish }) => {
+      streamOnce: async ({
+        messages: passMessages,
+        preventClose,
+        sendFinish,
+      }) => {
         return agent.stream({
-          messages,
+          messages: passMessages,
           writable,
           stopWhen: isStepCount(maxSteps),
           runtimeContext,
@@ -90,34 +111,56 @@ export async function builderChat(sessionId: string, messages: UIMessage[]) {
           preventClose,
           sendFinish,
           ...trace.hooks,
+          onToolExecutionEnd: async (event) => {
+            await trace.hooks.onToolExecutionEnd(event);
+            toolCompletions.set(
+              event.toolCall.toolCallId,
+              event.success
+                ? { success: true, output: event.output }
+                : {
+                    success: false,
+                    errorText:
+                      event.error instanceof Error
+                        ? event.error.message
+                        : String(event.error),
+                  },
+            );
+          },
+          onStepEnd: async (step) => {
+            await trace.hooks.onStepEnd(step);
+            assistant = appendRecordedStep(
+              assistant,
+              {
+                content: step.content,
+                reasoning: step.reasoning.flatMap((part) =>
+                  "text" in part ? [{ text: part.text }] : [],
+                ),
+                text: step.text,
+              },
+              toolCompletions,
+            );
+            checkpoint += 1;
+            await persistStepSnapshotStep(
+              sessionId,
+              turnId,
+              checkpoint,
+              assistant,
+            );
+          },
         });
       },
     });
   } catch (error) {
-    if (result) {
-      await saveSessionMessagesStep(
-        sessionId,
-        repairedMessages,
-        result.messages,
-        previousModelCount,
-      );
-    } else {
-      await markSessionRunFailedStep(sessionId);
-    }
+    await failTurnStep(sessionId, turnId);
     throw error;
   }
 
-  const assistantMessage = modelMessagesToAssistantUIMessage(
-    result.messages,
-    previousModelCount,
-  );
-  trace.finalizeTurn(result, startedAt, assistantMessage);
-
-  await saveSessionMessagesStep(
+  trace.finalizeTurn(result, startedAt, assistant);
+  await finishTurnStep(
     sessionId,
-    repairedMessages,
-    result.messages,
-    previousModelCount,
+    turnId,
+    checkpoint,
+    assistant,
   );
 
   return { messages: result.messages };

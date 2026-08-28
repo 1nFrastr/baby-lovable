@@ -5,13 +5,11 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { readDraft } from "@/lib/session/draft-store";
 import { resolveSessionRunState } from "@/lib/session/run-status";
 import { getSession } from "@/lib/session/store";
-import { isActiveRunStatus } from "@/lib/session/types";
 
 /**
- * Session history + run/draft only.
+ * Authoritative session conversation + turn lifecycle.
  * Preview status lives on GET/POST `/preview` (PreviewPanel) — never block chat load on Daytona observe.
  */
 export async function GET(
@@ -37,16 +35,9 @@ export async function GET(
     }
 
     const resolved = await resolveSessionRunState(session);
-    const rawDraft =
-      isActiveRunStatus(resolved.runStatus) && resolved.lastRunId
-        ? await readDraft(sessionId, auth.userId)
-        : null;
-    const draft =
-      rawDraft && rawDraft.runId === resolved.lastRunId ? rawDraft : null;
 
     return NextResponse.json({
       session: resolved,
-      draft,
     });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {

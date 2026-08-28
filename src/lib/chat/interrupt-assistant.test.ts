@@ -6,7 +6,6 @@ import {
   assistantHasPersistedContent,
   finalizeInterruptedAssistant,
   finalizeInterruptedMessages,
-  pickCancelledAssistantSnapshot,
 } from "./interrupt-assistant";
 
 function assistant(parts: UIMessage["parts"]): UIMessage {
@@ -112,79 +111,6 @@ describe("finalizeInterruptedMessages", () => {
       errorText: INTERRUPTED_BY_USER,
     });
     expect(finalizeInterruptedMessages(sealed)).toBe(sealed);
-  });
-});
-
-describe("pickCancelledAssistantSnapshot", () => {
-  it("prefers the richer client snapshot when draft lagged", () => {
-    const draft: UIMessage = {
-      id: "a-draft",
-      role: "assistant",
-      parts: [{ type: "reasoning", text: "thinking", state: "done" }],
-    };
-    const client: UIMessage = {
-      id: "a-sse",
-      role: "assistant",
-      parts: [
-        { type: "reasoning", text: "thinking", state: "done" },
-        {
-          type: "tool-editFile",
-          toolCallId: "call_1",
-          state: "input-available",
-          input: { path: "src/components/todo/Todo.tsx" },
-        },
-      ],
-    };
-
-    const picked = pickCancelledAssistantSnapshot([draft, client]);
-    expect(picked?.parts).toHaveLength(2);
-    expect(picked?.parts[1]).toMatchObject({
-      state: "output-error",
-      errorText: INTERRUPTED_BY_USER,
-    });
-  });
-
-  it("prefers the snapshot with the final summary text over a tool-heavy lagging draft", () => {
-    const draft: UIMessage = {
-      id: "a-draft",
-      role: "assistant",
-      parts: [
-        {
-          type: "tool-checkPreview",
-          toolCallId: "call_1",
-          state: "output-available",
-          input: {},
-          output: { ok: true },
-        },
-      ],
-    };
-    const fromModel: UIMessage = {
-      id: "a-model",
-      role: "assistant",
-      parts: [
-        {
-          type: "tool-checkPreview",
-          toolCallId: "call_1",
-          state: "output-available",
-          input: {},
-          output: { ok: true },
-        },
-        {
-          type: "text",
-          text: "Preview is ready; you can start using the todo app.",
-        },
-      ],
-    };
-
-    const picked = pickCancelledAssistantSnapshot([draft, fromModel]);
-    expect(picked?.parts.some((part) => part.type === "text")).toBe(true);
-    expect(
-      picked?.parts.find((part) => part.type === "text") &&
-        "text" in (picked?.parts.find((part) => part.type === "text") ?? {})
-        ? (picked!.parts.find((part) => part.type === "text") as { text: string })
-            .text
-        : "",
-    ).toContain("Preview is ready");
   });
 });
 

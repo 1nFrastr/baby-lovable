@@ -15,10 +15,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import {
-  isFinishedRuntimeRunStatus,
   type SessionRuntimeProjection,
 } from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime } from "@/lib/session/runtime-query";
+import {
+  isActiveRunStatus,
+  type SessionRunStatus,
+} from "@/lib/session/types";
 
 import { DevServerLogsPanel } from "./dev-server-logs-panel";
 import { GithubSyncPanel } from "./github-sync-panel";
@@ -45,6 +48,7 @@ interface AppTestLatestStatus {
 
 interface PreviewPanelProps {
   sessionId: string;
+  runStatus?: SessionRunStatus;
   /** From AppShell useSessionRuntime — sole page-level runtime subscription. */
   runtimeProjection?: SessionRuntimeProjection | null;
   runtimeLoading?: boolean;
@@ -182,6 +186,7 @@ function appTestFromProjection(
 
 export function PreviewPanel({
   sessionId,
+  runStatus = "idle",
   runtimeProjection = null,
   runtimeLoading = false,
   runtimeError = null,
@@ -198,7 +203,6 @@ export function PreviewPanel({
     ? appTestFromProjection(projection.appTest)
     : { status: "idle" as const };
   const previewGeneration = projection?.preview.generation ?? 0;
-  const runStatus = projection?.run.status ?? "idle";
   const readyPreviewUrl =
     preview.status === "ready" ? preview.url : undefined;
 
@@ -231,9 +235,7 @@ export function PreviewPanel({
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
-  const prevAgentRunStatusRef = useRef<
-    SessionRuntimeProjection["run"]["status"] | null
-  >(null);
+  const prevAgentRunStatusRef = useRef<SessionRunStatus | null>(null);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -347,7 +349,9 @@ export function PreviewPanel({
     prevAgentRunStatusRef.current = runStatus;
 
     const turnFinished =
-      previous === "running" && isFinishedRuntimeRunStatus(runStatus);
+      previous != null &&
+      isActiveRunStatus(previous) &&
+      !isActiveRunStatus(runStatus);
     if (!turnFinished) {
       return;
     }

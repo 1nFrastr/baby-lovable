@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getRun } from "workflow/api";
 
+import { bindAssistantMessageId } from "@/lib/chat/stable-message-stream";
 import {
   requireSessionAuth,
   SessionAccessDeniedError,
@@ -47,9 +48,19 @@ export async function GET(
     const run = await getRun(runId);
     const rawReadable = run.getReadable({ startIndex });
     const tailIndex = await rawReadable.getTailIndex();
-    const stream = rawReadable.pipeThrough(
+    const assistantMessageId =
+      session.activeAssistantMessageId ??
+      [...session.messages]
+        .reverse()
+        .find((message) => message.role === "assistant")?.id;
+    let stream = rawReadable.pipeThrough(
       createModelCallToUIChunkTransform(),
     );
+    if (assistantMessageId) {
+      stream = stream.pipeThrough(
+        bindAssistantMessageId(assistantMessageId),
+      );
+    }
 
     // Must use createUIMessageStreamResponse — raw Response(stream) sends JSON
     // objects instead of SSE and crashes with ERR_INVALID_ARG_TYPE.

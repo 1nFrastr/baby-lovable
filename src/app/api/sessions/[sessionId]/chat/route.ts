@@ -1,15 +1,18 @@
 import { createModelCallToUIChunkTransform } from "@ai-sdk/workflow";
 import {
   createUIMessageStreamResponse,
+  generateId,
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
 import { after, NextResponse } from "next/server";
 import { start } from "workflow/api";
 
-import { cancelWorkflowRun } from "@/lib/chat/cancel-session-run";
-import { materializeDraftFromRun } from "@/lib/chat/draft-materializer";
-import { mergeClientMessagesWithPersisted } from "@/lib/chat/merge-messages";
+import {
+  cancelSessionRun,
+  cancelWorkflowRun,
+} from "@/lib/chat/cancel-session-run";
+import { bindAssistantMessageId } from "@/lib/chat/stable-message-stream";
 import {
   awaitRuntimeDesired,
   kickRuntimeDesired,
@@ -19,22 +22,19 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
+import { getSession } from "@/lib/session/store";
 import {
-  createEmptyDraft,
-  deleteDraft,
-  writeDraft,
-} from "@/lib/session/draft-store";
-import {
-  deriveSessionTitle,
-  getSession,
-  replaceMessages,
-  updateSession,
-} from "@/lib/session/store";
+  attachSessionRun,
+  claimSessionTurn,
+  failSessionTurn,
+} from "@/lib/session/turn-store";
 import { isActiveRunStatus } from "@/lib/session/types";
 import { builderChat } from "@/workflow/builder-chat";
 
 /** Preview warm under after() must outlive the chat response headers. */
 export const maxDuration = 300;
+
+const MAX_CLAIM_ATTEMPTS = 4;
 
 function emptyUiMessageStream() {
   return new ReadableStream<UIMessageChunk>({
@@ -44,21 +44,27 @@ function emptyUiMessageStream() {
   });
 }
 
-async function discardStartedRun(sessionId: string, runId: string) {
-  try {
-    await cancelWorkflowRun(runId);
-  } catch (error) {
-    console.error(
-      `[chat] cancel unstarted run failed session=${sessionId} run=${runId}:`,
-      error,
-    );
-  }
+function emptyRunResponse(
+  runId: string,
+  assistantMessageId: string,
+) {
   return createUIMessageStreamResponse({
     stream: emptyUiMessageStream(),
     headers: {
       "x-workflow-run-id": runId,
+      "x-assistant-message-id": assistantMessageId,
     },
   });
+}
+
+function latestUserMessage(messages: UIMessage[]): UIMessage | null {
+  const message = [...messages]
+    .reverse()
+    .find((candidate) => candidate.role === "user");
+  if (!message || !message.id || message.parts.length === 0) {
+    return null;
+  }
+  return message;
 }
 
 export async function POST(
@@ -76,130 +82,147 @@ export async function POST(
     throw error;
   }
 
-  let claimedPending = false;
+  let claimedTurnId: string | null = null;
+  let assistantMessageId: string | null = null;
+  let startedRunId: string | null = null;
+
   try {
-    const session = await getSession(sessionId, auth);
-
-    if (!session) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    const body = (await request.json()) as { messages?: UIMessage[] };
+    const userMessage = latestUserMessage(body.messages ?? []);
+    if (!userMessage) {
+      return NextResponse.json(
+        { error: "A non-empty user message is required" },
+        { status: 400 },
+      );
     }
 
-    const { messages: clientMessages }: { messages: UIMessage[] } =
-      await request.json();
+    let claimedSession = null as Awaited<
+      ReturnType<typeof getSession>
+    >;
 
-    const messages = mergeClientMessagesWithPersisted(
-      session.messages,
-      clientMessages,
-    );
-
-    const title =
-      session.title === "New Project"
-        ? (deriveSessionTitle(messages) ?? session.title)
-        : session.title;
-
-    // Persist the merged thread immediately so a refresh mid-turn still has
-    // the latest user message. Assistant output is merged when the workflow
-    // completes.
-    await replaceMessages(sessionId, messages, auth);
-    if (title !== session.title) {
-      await updateSession(sessionId, { title }, auth);
-    }
-
-    await deleteDraft(sessionId, auth.userId);
-
-    // Mid-run refresh used to unlock the composer and let a second POST start
-    // another builderChat while the first still held the Daytona sandbox and
-    // Freestyle checkpoint barrier — stacked runs then starve on writeFile.
-    // Cancel the previous workflow only (do not persist a cancelled assistant);
-    // this POST owns the new user turn.
-    if (isActiveRunStatus(session.runStatus) && session.lastRunId) {
-      const orphanRunId = session.lastRunId;
-      try {
-        await cancelWorkflowRun(orphanRunId);
-        console.warn(
-          `[chat] cancelled orphan run before new turn session=${sessionId} run=${orphanRunId}`,
-        );
-      } catch (error) {
-        console.error(
-          `[chat] cancel orphan run failed session=${sessionId} run=${orphanRunId}:`,
-          error,
+    for (
+      let attempt = 0;
+      attempt < MAX_CLAIM_ATTEMPTS;
+      attempt += 1
+    ) {
+      const current = await getSession(sessionId, auth);
+      if (!current) {
+        return NextResponse.json(
+          { error: "Session not found" },
+          { status: 404 },
         );
       }
+
+      if (current.activeTurnId || isActiveRunStatus(current.runStatus)) {
+        const cancelled = await cancelSessionRun(sessionId, auth, {
+          expectedTurnId: current.activeTurnId,
+        });
+        if (!cancelled.ok) {
+          return NextResponse.json(
+            { error: cancelled.error },
+            { status: cancelled.status },
+          );
+        }
+        continue;
+      }
+
+      const turnId = `turn_${generateId()}`;
+      const stableAssistantId = generateId();
+      const claim = await claimSessionTurn(
+        {
+          sessionId,
+          turnId,
+          assistantMessageId: stableAssistantId,
+          userMessage,
+        },
+        auth,
+      );
+      if (!claim.ok) {
+        if (claim.reason === "active_turn") {
+          continue;
+        }
+        if (claim.reason === "duplicate_user_message") {
+          return NextResponse.json(
+            { error: "This user message was already submitted" },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(
+          { error: "Session not found" },
+          { status: 404 },
+        );
+      }
+
+      claimedTurnId = turnId;
+      assistantMessageId = stableAssistantId;
+      claimedSession = claim.session;
+      break;
     }
 
-    // Claim the turn so a leftover `cancelled` from the previous stop cannot
-    // discard this new send, while a Stop during kick still wins.
-    await updateSession(sessionId, { runStatus: "pending" }, auth);
-    claimedPending = true;
+    if (!claimedTurnId || !assistantMessageId || !claimedSession) {
+      return NextResponse.json(
+        { error: "Could not acquire the session turn lease" },
+        { status: 409 },
+      );
+    }
 
     // Prelude: upgrade to preview-ready without blocking the AI loop.
     await kickRuntimeDesired(sessionId, "preview-ready");
     after(() => awaitRuntimeDesired(sessionId, "preview-ready"));
 
-    const preStart = await getSession(sessionId, auth);
-    if (request.signal.aborted || preStart?.runStatus === "cancelled") {
-      if (preStart?.runStatus !== "cancelled") {
-        await updateSession(sessionId, { runStatus: "cancelled" }, auth);
-      }
-      claimedPending = false;
-      return createUIMessageStreamResponse({
-        stream: emptyUiMessageStream(),
+    if (request.signal.aborted) {
+      await cancelSessionRun(sessionId, auth, {
+        expectedTurnId: claimedTurnId,
       });
+      return new Response(null, { status: 499 });
     }
 
-    const run = await start(builderChat, [sessionId, messages]);
-
-    const latest = await getSession(sessionId, auth);
-    if (request.signal.aborted || latest?.runStatus === "cancelled") {
-      claimedPending = false;
-      if (latest?.runStatus !== "cancelled") {
-        await updateSession(sessionId, { runStatus: "cancelled" }, auth);
-      }
-      return discardStartedRun(sessionId, run.runId);
-    }
-
-    await updateSession(
+    // The persisted placeholder is the final row; the model prompt ends at
+    // the user message immediately before it.
+    const workflowMessages = claimedSession.messages.slice(0, -1);
+    const run = await start(builderChat, [
       sessionId,
-      {
-        lastRunId: run.runId,
-        runStatus: "running",
-      },
+      workflowMessages,
+      claimedTurnId,
+      assistantMessageId,
+    ]);
+    startedRunId = run.runId;
+
+    const attached = await attachSessionRun(
+      sessionId,
+      claimedTurnId,
+      run.runId,
       auth,
     );
-    claimedPending = false;
+    if (
+      !attached.ok ||
+      attached.session.runStatus === "cancelling" ||
+      request.signal.aborted
+    ) {
+      await cancelWorkflowRun(run.runId).catch(() => {});
+      await cancelSessionRun(sessionId, auth, {
+        expectedTurnId: claimedTurnId,
+      });
+      return emptyRunResponse(run.runId, assistantMessageId);
+    }
 
-    await writeDraft(
-      sessionId,
-      createEmptyDraft(run.runId),
-      auth.userId,
-    );
-
-    // Detached — survives client disconnect; updates the Supabase draft as chunks arrive.
-    void materializeDraftFromRun(sessionId, run.runId, auth.userId).catch(
-      (error) => {
-        console.error(
-          `[chat] draft materializer failed session=${sessionId} run=${run.runId}:`,
-          error,
-        );
-      },
-    );
+    const stream = run.readable
+      .pipeThrough(createModelCallToUIChunkTransform())
+      .pipeThrough(bindAssistantMessageId(assistantMessageId));
 
     return createUIMessageStreamResponse({
-      stream: run.readable.pipeThrough(createModelCallToUIChunkTransform()),
+      stream,
       headers: {
         "x-workflow-run-id": run.runId,
+        "x-assistant-message-id": assistantMessageId,
       },
     });
   } catch (error) {
-    if (claimedPending) {
-      try {
-        const latest = await getSession(sessionId, auth);
-        if (latest?.runStatus === "pending" && !latest.lastRunId) {
-          await updateSession(sessionId, { runStatus: "idle" }, auth);
-        }
-      } catch {
-        // Best-effort unlock if the turn claim never reached a workflow run.
-      }
+    if (startedRunId) {
+      await cancelWorkflowRun(startedRunId).catch(() => {});
+    }
+    if (claimedTurnId) {
+      await failSessionTurn(sessionId, claimedTurnId).catch(() => {});
     }
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

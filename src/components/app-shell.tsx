@@ -5,13 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   useTransition,
 } from "react";
 
 import {
-  useClearSessionDraft,
   useCreateSessionMutation,
   useInvalidateSessionDetail,
   useRefetchSessionOnActivate,
@@ -21,12 +19,7 @@ import {
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
-import {
-  isFinishedRuntimeRunStatus,
-  resolveLiveRunState,
-} from "@/lib/session/runtime-projection";
 import { useInvalidateSessionRuntime, useSessionRuntime } from "@/lib/session/runtime-query";
-import { isActiveRunStatus } from "@/lib/session/types";
 import { cn } from "@/lib/utils";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -124,6 +117,13 @@ export function AppShell() {
   const createSessionMutation = useCreateSessionMutation();
   const invalidateSessionDetail = useInvalidateSessionDetail();
   const invalidateRuntime = useInvalidateSessionRuntime();
+  const handleSessionRefresh = useCallback(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    invalidateSessionDetail(activeSessionId);
+    invalidateRuntime(activeSessionId);
+  }, [activeSessionId, invalidateSessionDetail, invalidateRuntime]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActivatingSession, setIsActivatingSession] = useState(false);
   /** Optimistic target while router/API lag (weak network). */
@@ -154,62 +154,15 @@ export function AppShell() {
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const activeSession = sessionQuery.data?.session ?? null;
-  const activeDraft = sessionQuery.data?.draft ?? null;
   const activeSummary = sessions.find((session) => session.id === activeSessionId);
-  /** Prefer newer of runtime projection vs session row (publish is best-effort). */
-  const liveRun = resolveLiveRunState(
-    runtimeQuery.data?.projection.run,
-    activeSession
-      ? {
-          runStatus: activeSession.runStatus,
-          updatedAt: activeSession.updatedAt,
-        }
-      : null,
-  );
-  const liveRunStatus = liveRun.runStatus;
-  const liveRunUpdatedAt = liveRun.updatedAt;
-  /** Only the draft for the current active run — never the previous turn's row. */
-  const activeRunId =
-    runtimeQuery.data?.projection.run?.runId ??
-    (isActiveRunStatus(liveRunStatus) ? activeSession?.lastRunId : null) ??
-    null;
-  const liveDraftMessage =
-    activeDraft &&
-    activeRunId &&
-    activeDraft.runId === activeRunId &&
-    isActiveRunStatus(liveRunStatus)
-      ? activeDraft.message
-      : null;
 
   useRefetchSessionOnActivate(activeSessionId);
   useSyncSessionSummary(activeSession);
 
-  const prevRuntimeRunStatus = useRef<string | undefined>(undefined);
-  const clearSessionDraft = useClearSessionDraft();
-
   useEffect(() => {
     setChatAppTest(null);
     setChatAppTestReady(false);
-    prevRuntimeRunStatus.current = undefined;
   }, [activeSessionId]);
-
-  // Runtime Realtime can flip run→done before onChatEnd's detail invalidate lands.
-  // Drop the cached draft immediately and refetch durable messages.
-  useEffect(() => {
-    const status = runtimeQuery.data?.projection.run?.status;
-    const prev = prevRuntimeRunStatus.current;
-    prevRuntimeRunStatus.current = status;
-
-    if (activeSessionId && prev === "running" && status && isFinishedRuntimeRunStatus(status)) {
-      clearSessionDraft(activeSessionId);
-      invalidateSessionDetail(activeSessionId);
-    }
-  }, [
-    activeSessionId,
-    clearSessionDraft,
-    invalidateSessionDetail,
-    runtimeQuery.data?.projection.run?.status,
-  ]);
 
   const handleAppTestStatus = useCallback(
     (status: AppTestLatestStatus | null) => {
@@ -461,16 +414,13 @@ export function AppShell() {
                   key={activeSessionId}
                   sessionId={activeSessionId}
                   messages={activeSession.messages}
-                  draft={liveDraftMessage}
-                  runStatus={liveRunStatus}
-                  runUpdatedAt={liveRunUpdatedAt}
-                  onClearDraft={() => {
-                    clearSessionDraft(activeSessionId);
-                  }}
-                  onSessionRefresh={() => {
-                    invalidateSessionDetail(activeSessionId);
-                    invalidateRuntime(activeSessionId);
-                  }}
+                  conversationRevision={activeSession.conversationRevision}
+                  activeTurnId={activeSession.activeTurnId}
+                  activeAssistantMessageId={
+                    activeSession.activeAssistantMessageId
+                  }
+                  runStatus={activeSession.runStatus}
+                  onSessionRefresh={handleSessionRefresh}
                   onAppTestStatus={handleAppTestStatus}
                 />
               }
@@ -478,6 +428,7 @@ export function AppShell() {
                 <PreviewPanel
                   key={activeSessionId}
                   sessionId={activeSessionId}
+                  runStatus={activeSession.runStatus}
                   runtimeProjection={runtimeQuery.data?.projection ?? null}
                   runtimeLoading={
                     runtimeQuery.isPending ||

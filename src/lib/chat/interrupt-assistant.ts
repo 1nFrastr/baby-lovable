@@ -4,19 +4,6 @@ import { isEmptyUiMessage, isToolPartIncomplete } from "./repair-messages";
 
 export const INTERRUPTED_BY_USER = "Interrupted by user";
 
-function textContentLength(message: UIMessage): number {
-  let length = 0;
-  for (const part of message.parts) {
-    if (
-      (part.type === "text" || part.type === "reasoning") &&
-      typeof part.text === "string"
-    ) {
-      length += part.text.length;
-    }
-  }
-  return length;
-}
-
 function finalizePart(
   part: UIMessage["parts"][number],
 ): UIMessage["parts"][number] {
@@ -98,42 +85,6 @@ export function finalizeInterruptedMessages(
     return finalized;
   });
   return changed ? next : messages;
-}
-
-/**
- * Prefer the richer in-flight snapshot when draft materialization lagged the
- * SSE / model thread (common when Stop hits mid-tool, or when the final
- * summary text arrived on the HTTP stream after the last draft write).
- *
- * Text length is weighted highest so a lagging draft with the same tool
- * parts cannot overwrite a complete closing summary.
- */
-export function pickCancelledAssistantSnapshot(
-  candidates: Array<UIMessage | null | undefined>,
-): UIMessage | null {
-  let best: UIMessage | null = null;
-  let bestScore = -1;
-
-  for (const candidate of candidates) {
-    if (!candidate || candidate.role !== "assistant") {
-      continue;
-    }
-    const finalized = finalizeInterruptedAssistant(candidate);
-    if (!assistantHasPersistedContent(finalized)) {
-      continue;
-    }
-    const score =
-      textContentLength(finalized) * 1000 +
-      finalized.parts.length * 100 +
-      finalized.parts.filter((part) => isToolUIPart(part)).length * 10 +
-      (assistantHasInFlightParts(candidate) ? 1 : 0);
-    if (score > bestScore) {
-      best = finalized;
-      bestScore = score;
-    }
-  }
-
-  return best;
 }
 
 export function assistantHasPersistedContent(message: UIMessage): boolean {

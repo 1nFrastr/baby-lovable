@@ -1,5 +1,10 @@
-import { tool } from "ai";
+import { tool, type ModelMessage } from "ai";
 import { z } from "zod";
+
+import type { OrderedToolCall } from "@/lib/chat/turn-progress";
+import {
+  persistToolProgressStep,
+} from "@/workflow/chat-turn-steps";
 
 import {
   checkPreviewStep,
@@ -17,6 +22,8 @@ import {
 
 export const toolContextSchema = z.object({
   sessionId: z.string(),
+  turnId: z.string().optional(),
+  assistantMessageId: z.string().optional(),
 });
 
 export type ToolContext = z.infer<typeof toolContextSchema>;
@@ -61,8 +68,11 @@ export const appTestActionSchema = z.object({
     .describe("Continue the script if this step fails."),
 });
 
-export function createToolsContext(sessionId: string) {
-  const context: ToolContext = { sessionId };
+export function createToolsContext(
+  sessionId: string,
+  turn?: { turnId: string; assistantMessageId: string },
+) {
+  const context: ToolContext = { sessionId, ...turn };
 
   return {
     readFile: context,
@@ -79,6 +89,112 @@ export function createToolsContext(sessionId: string) {
   };
 }
 
+interface ToolExecuteOptions {
+  toolCallId: string;
+  messages: ModelMessage[];
+  context: ToolContext;
+}
+
+function orderedToolCalls(
+  messages: ModelMessage[],
+  current: OrderedToolCall,
+): OrderedToolCall[] {
+  const assistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (!assistant || !Array.isArray(assistant.content)) {
+    return [current];
+  }
+
+  const calls = assistant.content.flatMap((part) => {
+    if (
+      typeof part !== "object" ||
+      part === null ||
+      part.type !== "tool-call"
+    ) {
+      return [];
+    }
+    return [
+      {
+        toolCallId: part.toolCallId,
+        toolName: part.toolName,
+        input: part.input,
+      },
+    ];
+  });
+
+  return calls.some((call) => call.toolCallId === current.toolCallId)
+    ? calls
+    : [...calls, current];
+}
+
+function withTurnProgress<TInput, TOutput>(
+  toolName: string,
+  execute: (
+    input: TInput,
+    options: { context: { sessionId: string } },
+  ) => Promise<TOutput>,
+) {
+  return async (
+    input: TInput,
+    options: ToolExecuteOptions,
+  ): Promise<TOutput> => {
+    const { turnId, assistantMessageId } = options.context;
+    if (!turnId || !assistantMessageId) {
+      return execute(input, options);
+    }
+
+    const current: OrderedToolCall = {
+      toolCallId: options.toolCallId,
+      toolName,
+      input,
+    };
+    const calls = orderedToolCalls(options.messages, current);
+    const started = await persistToolProgressStep(
+      options.context.sessionId,
+      turnId,
+      assistantMessageId,
+      { calls },
+    );
+    if (!started.ok) {
+      throw new Error(`Turn superseded before ${toolName}`);
+    }
+
+    let output: TOutput;
+    try {
+      output = await execute(input, options);
+    } catch (error) {
+      await persistToolProgressStep(
+        options.context.sessionId,
+        turnId,
+        assistantMessageId,
+        {
+          calls,
+          completedCallId: options.toolCallId,
+          completion: {
+            success: false,
+            errorText:
+              error instanceof Error ? error.message : String(error),
+          },
+        },
+      );
+      throw error;
+    }
+
+    await persistToolProgressStep(
+      options.context.sessionId,
+      turnId,
+      assistantMessageId,
+      {
+        calls,
+        completedCallId: options.toolCallId,
+        completion: { success: true, output },
+      },
+    );
+    return output;
+  };
+}
+
 export const builderTools = {
   readFile: tool({
     description:
@@ -87,7 +203,7 @@ export const builderTools = {
       path: z.string().describe("Relative path inside the workspace"),
     }),
     contextSchema: toolContextSchema,
-    execute: readFileStep,
+    execute: withTurnProgress("readFile", readFileStep),
   }),
   writeFile: tool({
     description:
@@ -97,7 +213,7 @@ export const builderTools = {
       content: z.string().describe("Full file contents to write"),
     }),
     contextSchema: toolContextSchema,
-    execute: writeFileStep,
+    execute: withTurnProgress("writeFile", writeFileStep),
   }),
   editFile: tool({
     description:
@@ -114,7 +230,7 @@ export const builderTools = {
         .describe("Replace every occurrence. Defaults to false and requires a unique oldString."),
     }),
     contextSchema: toolContextSchema,
-    execute: editFileStep,
+    execute: withTurnProgress("editFile", editFileStep),
   }),
   listFiles: tool({
     description:
@@ -126,7 +242,7 @@ export const builderTools = {
         .describe("Relative directory path, defaults to workspace root"),
     }),
     contextSchema: toolContextSchema,
-    execute: listFilesStep,
+    execute: withTurnProgress("listFiles", listFilesStep),
   }),
   searchFiles: tool({
     description:
@@ -141,7 +257,7 @@ export const builderTools = {
         .describe("Glob pattern such as *.tsx or src/**/*.ts"),
     }),
     contextSchema: toolContextSchema,
-    execute: searchFilesStep,
+    execute: withTurnProgress("searchFiles", searchFilesStep),
   }),
   installPackage: tool({
     description:
@@ -161,14 +277,17 @@ export const builderTools = {
         .describe("Remove packages instead of adding them"),
     }),
     contextSchema: toolContextSchema,
-    execute: installPackageStep,
+    execute: withTurnProgress("installPackage", installPackageStep),
   }),
   installDependencies: tool({
     description:
       "Install workspace dependencies via the platform package manager after you change package.json or the lockfile.",
     inputSchema: z.object({}),
     contextSchema: toolContextSchema,
-    execute: installDependenciesStep,
+    execute: withTurnProgress(
+      "installDependencies",
+      installDependenciesStep,
+    ),
   }),
   runCommand: tool({
     description:
@@ -187,7 +306,7 @@ export const builderTools = {
         .describe("Timeout in seconds, defaults to 120"),
     }),
     contextSchema: toolContextSchema,
-    execute: runCommandStep,
+    execute: withTurnProgress("runCommand", runCommandStep),
   }),
   checkPreview: tool({
     description:
@@ -201,7 +320,7 @@ export const builderTools = {
         ),
     }),
     contextSchema: toolContextSchema,
-    execute: checkPreviewStep,
+    execute: withTurnProgress("checkPreview", checkPreviewStep),
   }),
   testPreview: tool({
     description:
@@ -222,7 +341,7 @@ export const builderTools = {
         ),
     }),
     contextSchema: toolContextSchema,
-    execute: testPreviewStep,
+    execute: withTurnProgress("testPreview", testPreviewStep),
   }),
   deleteFile: tool({
     description:
@@ -235,6 +354,6 @@ export const builderTools = {
         .describe("Recursively delete directories"),
     }),
     contextSchema: toolContextSchema,
-    execute: deleteFileStep,
+    execute: withTurnProgress("deleteFile", deleteFileStep),
   }),
 };

@@ -26,6 +26,8 @@ export function makeSession(sessionId: string): Session {
     updatedAt: now,
     messages: [],
     runStatus: "idle",
+    conversationRevision: 0,
+    turnCheckpoint: -1,
     sandboxMode: "daytona",
   };
 }
