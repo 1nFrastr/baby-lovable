@@ -7,10 +7,15 @@ import {
   assertSessionOwner,
   type SessionAuthContext,
 } from "./auth-context";
+import {
+  hydrateSessionRow,
+  loadSessionMessages,
+  rpcReplaceSessionMessages,
+} from "./session-messages";
+import type { SessionRow } from "./session-row";
 import type {
   CreateSessionInput,
   Session,
-  SessionRunStatus,
   SessionSummary,
   UpdateSessionInput,
 } from "./types";
@@ -26,26 +31,10 @@ function createSessionId(): string {
   return `sess_${timestamp}${random}`;
 }
 
-export interface SessionRow {
-  id: string;
-  user_id: string;
-  schema_version: number;
-  title: string;
-  created_at: string;
-  updated_at: string;
-  messages: UIMessage[];
-  last_run_id: string | null;
-  run_status: SessionRunStatus;
-  active_turn_id: string | null;
-  active_assistant_message_id: string | null;
-  conversation_revision: number;
-  turn_checkpoint: number;
-  active_turn_started_at: string | null;
-  sandbox_mode: unknown;
-  deleted_at: string | null;
-}
-
-export function rowToSession(row: SessionRow): Session {
+export function rowToSession(
+  row: SessionRow,
+  messages: UIMessage[] = row.messages ?? [],
+): Session {
   assertSandboxMode(row.sandbox_mode, row.id);
   const session: Session = {
     schemaVersion: row.schema_version,
@@ -54,7 +43,7 @@ export function rowToSession(row: SessionRow): Session {
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messages: row.messages ?? [],
+    messages,
     runStatus: row.run_status,
     conversationRevision: row.conversation_revision ?? 0,
     turnCheckpoint: row.turn_checkpoint ?? -1,
@@ -78,16 +67,16 @@ export function rowToSession(row: SessionRow): Session {
   return session;
 }
 
-function toSummary(session: Session): SessionSummary {
+function toSummary(row: SessionRow): SessionSummary {
   return {
-    id: session.id,
-    userId: session.userId,
-    title: session.title,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    lastRunId: session.lastRunId,
-    runStatus: session.runStatus,
-    messageCount: session.messages.length,
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastRunId: row.last_run_id ?? undefined,
+    runStatus: row.run_status,
+    messageCount: row.message_count ?? 0,
   };
 }
 
@@ -100,7 +89,7 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     schema_version: session.schemaVersion,
     title: session.title,
     updated_at: session.updatedAt,
-    messages: session.messages,
+    message_count: session.messages.length,
     last_run_id: session.lastRunId ?? null,
     run_status: session.runStatus,
     active_turn_id: session.activeTurnId ?? null,
@@ -149,6 +138,7 @@ export async function createSessionSupabase(
 
   const { error } = await supabase.from("sessions").insert({
     ...sessionToRow(session),
+    messages: [],
     created_at: now,
   });
 
@@ -179,7 +169,8 @@ export async function getSessionSupabase(
     return null;
   }
 
-  const session = rowToSession(data as SessionRow);
+  const hydrated = await hydrateSessionRow(data as SessionRow);
+  const session = rowToSession(hydrated);
   assertSessionOwner(session.userId, auth);
   return session;
 }
@@ -192,7 +183,9 @@ export async function listSessionsSupabase(
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("sessions")
-    .select("*")
+    .select(
+      "id, user_id, title, created_at, updated_at, last_run_id, run_status, message_count",
+    )
     .eq("user_id", userId)
     .eq("sandbox_mode", "daytona")
     .is("deleted_at", null)
@@ -202,7 +195,7 @@ export async function listSessionsSupabase(
     throw new Error(`Failed to list sessions: ${error.message}`);
   }
 
-  return (data as SessionRow[]).map((row) => toSummary(rowToSession(row)));
+  return (data as SessionRow[]).map((row) => toSummary(row));
 }
 
 export async function updateSessionSupabase(
@@ -215,7 +208,7 @@ export async function updateSessionSupabase(
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const { lastRunId, ...rest } = input;
+  const { lastRunId, messages, ...rest } = input;
 
   const updated: Session = {
     ...existing,
@@ -230,17 +223,16 @@ export async function updateSessionSupabase(
     updated.lastRunId = lastRunId;
   }
 
-  // Patch only fields present in the input — never rewrite messages/title/etc.
-  // on a runStatus reconcile (GET detail). Full-row updates were large enough to
-  // hit intermittent UND_ERR_SOCKET under refresh storms and 500 the page.
+  if (messages !== undefined) {
+    updated.messages = messages;
+  }
+
   const patch: Record<string, unknown> = {
     updated_at: updated.updatedAt,
+    schema_version: SESSION_SCHEMA_VERSION,
   };
   if (input.title !== undefined) {
     patch.title = updated.title;
-  }
-  if (input.messages !== undefined) {
-    patch.messages = updated.messages;
   }
   if (input.runStatus !== undefined) {
     patch.run_status = updated.runStatus;
@@ -253,6 +245,30 @@ export async function updateSessionSupabase(
   }
 
   const supabase = getSupabaseAdminClient();
+
+  if (messages !== undefined) {
+    const row = await rpcReplaceSessionMessages({
+      sessionId,
+      expectedRevision: existing.conversationRevision,
+      messages,
+    });
+    if (!row) {
+      throw new Error(
+        `Failed to replace session messages during update: ${sessionId}`,
+      );
+    }
+    if (Object.keys(patch).length > 2) {
+      const { error } = await supabase
+        .from("sessions")
+        .update(patch)
+        .eq("id", sessionId);
+      if (error) {
+        throw new Error(`Failed to update session: ${error.message}`);
+      }
+    }
+    return getSessionSupabase(sessionId, auth) as Promise<Session>;
+  }
+
   const { error } = await supabase
     .from("sessions")
     .update(patch)
@@ -276,25 +292,16 @@ export async function replaceMessagesSupabase(
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    const supabase = getSupabaseAdminClient();
-    const { data, error } = await supabase
-      .from("sessions")
-      .update({
-        messages,
-        schema_version: SESSION_SCHEMA_VERSION,
-        conversation_revision: existing.conversationRevision + 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", sessionId)
-      .eq("conversation_revision", existing.conversationRevision)
-      .select("*")
-      .maybeSingle();
+    const row = await rpcReplaceSessionMessages({
+      sessionId,
+      expectedRevision: existing.conversationRevision,
+      messages,
+    });
 
-    if (error) {
-      throw new Error(`Failed to replace messages: ${error.message}`);
-    }
-    if (data) {
-      return rowToSession(data as SessionRow);
+    if (row) {
+      return rowToSession(
+        await hydrateSessionRow(row as SessionRow),
+      );
     }
   }
 
@@ -302,3 +309,11 @@ export async function replaceMessagesSupabase(
     `Failed to replace messages after optimistic concurrency retries: ${sessionId}`,
   );
 }
+
+export async function loadSessionMessagesForRow(
+  sessionId: string,
+): Promise<UIMessage[]> {
+  return loadSessionMessages(sessionId);
+}
+
+export type { SessionRow } from "./session-row";

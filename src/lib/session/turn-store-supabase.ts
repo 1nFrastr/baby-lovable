@@ -16,6 +16,13 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import type { SessionAuthContext } from "./auth-context";
 import {
+  hydrateSessionRow,
+  rpcClaimSessionTurn,
+  rpcTerminalSessionTurn,
+  rpcUpdateAssistantMessage,
+  sessionMessageExists,
+} from "./session-messages";
+import {
   getSessionSupabase,
   rowToSession,
   type SessionRow,
@@ -60,6 +67,10 @@ function titleFromFirstUser(messages: UIMessage[]): string | null {
   return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed;
 }
 
+async function sessionFromRow(row: SessionRow): Promise<Session> {
+  return rowToSession(await hydrateSessionRow(row));
+}
+
 async function casSessionRow(options: {
   current: Session;
   patch: CasPatch;
@@ -89,30 +100,20 @@ async function casSessionRow(options: {
   if (error) {
     throw new Error(`Failed to update session turn: ${error.message}`);
   }
-  return data ? rowToSession(data as SessionRow) : null;
+  return data ? sessionFromRow(data as SessionRow) : null;
 }
 
-function terminalPatch(
-  status: Extract<SessionRunStatus, "completed" | "failed" | "cancelled">,
+function terminalAssistantMessage(
   messages: UIMessage[],
-  checkpoint: number,
-): CasPatch {
-  return {
-    messages,
-    run_status: status,
-    last_run_id: null,
-    active_turn_id: null,
-    active_assistant_message_id: null,
-    active_turn_started_at: null,
-    turn_checkpoint: checkpoint,
-  };
-}
-
-function removeAssistantMessage(
-  messages: UIMessage[],
-  assistantMessageId: string,
-): UIMessage[] {
-  return messages.filter((message) => message.id !== assistantMessageId);
+  snapshot: UIMessage,
+): UIMessage | null {
+  if (!assistantHasPersistedContent(snapshot)) {
+    return null;
+  }
+  return getTurnAssistant(
+    applyAssistantSnapshot(messages, snapshot),
+    snapshot.id,
+  );
 }
 
 function sameMessages(left: UIMessage[], right: UIMessage[]): boolean {
@@ -142,11 +143,7 @@ export async function claimSessionTurnSupabase(
       };
     }
 
-    if (
-      current.messages.some(
-        (message) => message.id === input.userMessage.id,
-      )
-    ) {
+    if (await sessionMessageExists(input.sessionId, input.userMessage.id)) {
       return {
         ok: false,
         reason: "duplicate_user_message",
@@ -154,32 +151,31 @@ export async function claimSessionTurnSupabase(
       };
     }
 
-    const messages = [
-      ...current.messages,
-      input.userMessage,
-      createTurnAssistantMessage(input.assistantMessageId),
-    ];
     const title =
       current.title === "New Project"
-        ? (titleFromFirstUser(messages) ?? current.title)
+        ? (titleFromFirstUser([...current.messages, input.userMessage]) ??
+          current.title)
         : current.title;
     const startedAt = new Date().toISOString();
-    const updated = await casSessionRow({
-      current,
-      expectedTurnId: null,
-      patch: {
-        messages,
-        title,
-        run_status: "pending",
-        last_run_id: null,
-        active_turn_id: input.turnId,
-        active_assistant_message_id: input.assistantMessageId,
-        active_turn_started_at: startedAt,
-        turn_checkpoint: -1,
-      },
+    const assistantMessage = createTurnAssistantMessage(
+      input.assistantMessageId,
+    );
+    const row = await rpcClaimSessionTurn({
+      sessionId: input.sessionId,
+      expectedRevision: current.conversationRevision,
+      turnId: input.turnId,
+      assistantMessageId: input.assistantMessageId,
+      userMessage: input.userMessage,
+      assistantMessage,
+      title,
+      startedAt,
     });
-    if (updated) {
-      return { ok: true, claimed: true, session: updated };
+    if (row) {
+      return {
+        ok: true,
+        claimed: true,
+        session: await sessionFromRow(row as SessionRow),
+      };
     }
   }
 
@@ -268,13 +264,21 @@ export async function persistSessionToolProgressSupabase(
     if (sameMessages(messages, current.messages)) {
       return { ok: true, session: current, changed: false };
     }
-    const updated = await casSessionRow({
-      current,
-      expectedTurnId: turnId,
-      patch: { messages },
+    const updatedAssistant = getTurnAssistant(messages, assistantMessageId);
+
+    const row = await rpcUpdateAssistantMessage({
+      sessionId,
+      expectedRevision: current.conversationRevision,
+      turnId,
+      assistantMessageId,
+      message: updatedAssistant,
     });
-    if (updated) {
-      return { ok: true, session: updated, changed: true };
+    if (row) {
+      return {
+        ok: true,
+        session: await sessionFromRow(row as SessionRow),
+        changed: true,
+      };
     }
   }
 
@@ -315,23 +319,46 @@ export async function persistSessionStepSnapshotSupabase(
       return { ok: true, session: current, changed: false };
     }
 
-    const messages = applyAssistantSnapshot(current.messages, snapshot);
-    const updated = await casSessionRow({
-      current,
-      expectedTurnId: turnId,
-      patch: {
-        messages,
-        turn_checkpoint: checkpoint,
-      },
+    const row = await rpcUpdateAssistantMessage({
+      sessionId,
+      expectedRevision: current.conversationRevision,
+      turnId,
+      assistantMessageId: snapshot.id,
+      message: snapshot,
+      turnCheckpoint: checkpoint,
     });
-    if (updated) {
-      return { ok: true, session: updated, changed: true };
+    if (row) {
+      return {
+        ok: true,
+        session: await sessionFromRow(row as SessionRow),
+        changed: true,
+      };
     }
   }
 
   throw new Error(
     `Failed to persist step snapshot after ${MAX_CAS_ATTEMPTS} CAS attempts`,
   );
+}
+
+async function terminalSessionTurn(
+  current: Session,
+  turnId: string,
+  assistantMessageId: string,
+  message: UIMessage | null,
+  checkpoint: number,
+  status: Extract<SessionRunStatus, "completed" | "failed" | "cancelled">,
+): Promise<Session | null> {
+  const row = await rpcTerminalSessionTurn({
+    sessionId: current.id,
+    expectedRevision: current.conversationRevision,
+    turnId,
+    assistantMessageId,
+    message,
+    checkpoint,
+    status,
+  });
+  return row ? sessionFromRow(row as SessionRow) : null;
 }
 
 export async function finishSessionTurnSupabase(
@@ -363,14 +390,15 @@ export async function finishSessionTurnSupabase(
       };
     }
 
-    const messages = assistantHasPersistedContent(snapshot)
-      ? applyAssistantSnapshot(current.messages, snapshot)
-      : removeAssistantMessage(current.messages, snapshot.id);
-    const updated = await casSessionRow({
+    const message = terminalAssistantMessage(current.messages, snapshot);
+    const updated = await terminalSessionTurn(
       current,
-      expectedTurnId: turnId,
-      patch: terminalPatch("completed", messages, checkpoint),
-    });
+      turnId,
+      snapshot.id,
+      message,
+      checkpoint,
+      "completed",
+    );
     if (updated) {
       return { ok: true, session: updated, changed: true };
     }
@@ -454,21 +482,20 @@ export async function finalizeSessionTurnCancellationSupabase(
       authoritative,
       clientSnapshot,
     );
-    const messages = assistantHasPersistedContent(assistant)
-      ? applyAssistantSnapshot(current.messages, assistant)
-      : removeAssistantMessage(
-          current.messages,
+    const message = assistantHasPersistedContent(assistant)
+      ? getTurnAssistant(
+          applyAssistantSnapshot(current.messages, assistant),
           current.activeAssistantMessageId,
-        );
-    const updated = await casSessionRow({
+        )
+      : null;
+    const updated = await terminalSessionTurn(
       current,
-      expectedTurnId: turnId,
-      patch: terminalPatch(
-        "cancelled",
-        messages,
-        current.turnCheckpoint,
-      ),
-    });
+      turnId,
+      current.activeAssistantMessageId,
+      message,
+      current.turnCheckpoint,
+      "cancelled",
+    );
     if (updated) {
       return { ok: true, session: updated, changed: true };
     }
@@ -512,17 +539,20 @@ export async function failSessionTurnSupabase(
         current.activeAssistantMessageId,
       ),
     );
-    const messages = assistantHasPersistedContent(assistant)
-      ? applyAssistantSnapshot(current.messages, assistant)
-      : removeAssistantMessage(
-          current.messages,
+    const message = assistantHasPersistedContent(assistant)
+      ? getTurnAssistant(
+          applyAssistantSnapshot(current.messages, assistant),
           current.activeAssistantMessageId,
-        );
-    const updated = await casSessionRow({
+        )
+      : null;
+    const updated = await terminalSessionTurn(
       current,
-      expectedTurnId: turnId,
-      patch: terminalPatch("failed", messages, current.turnCheckpoint),
-    });
+      turnId,
+      current.activeAssistantMessageId,
+      message,
+      current.turnCheckpoint,
+      "failed",
+    );
     if (updated) {
       return { ok: true, session: updated, changed: true };
     }

@@ -3,9 +3,86 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionRow } from "./store-supabase";
 
-const { memory } = vi.hoisted(() => ({
+interface MessageRow {
+  session_id: string;
+  message_id: string;
+  position: number;
+  role: string;
+  message: UIMessage;
+  created_at: string;
+  updated_at: string;
+}
+
+const { memory, messageMemory } = vi.hoisted(() => ({
   memory: new Map<string, SessionRow>(),
+  messageMemory: new Map<string, MessageRow[]>(),
 }));
+
+function sortedMessages(sessionId: string): MessageRow[] {
+  return [...(messageMemory.get(sessionId) ?? [])].sort(
+    (left, right) => left.position - right.position,
+  );
+}
+
+function loadMessages(sessionId: string): UIMessage[] {
+  return sortedMessages(sessionId).map((row) => structuredClone(row.message));
+}
+
+function upsertMessage(
+  sessionId: string,
+  position: number,
+  message: UIMessage,
+) {
+  const rows = messageMemory.get(sessionId) ?? [];
+  const existingIndex = rows.findIndex(
+    (row) => row.message_id === message.id,
+  );
+  const next: MessageRow = {
+    session_id: sessionId,
+    message_id: message.id,
+    position,
+    role: message.role,
+    message: structuredClone(message),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (existingIndex >= 0) {
+    rows[existingIndex] = next;
+  } else {
+    rows.push(next);
+  }
+  messageMemory.set(sessionId, rows);
+}
+
+function replaceAllMessages(sessionId: string, messages: UIMessage[]) {
+  messageMemory.set(
+    sessionId,
+    messages.map((message, position) => ({
+      session_id: sessionId,
+      message_id: message.id,
+      position,
+      role: message.role,
+      message: structuredClone(message),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })),
+  );
+  const row = memory.get(sessionId);
+  if (row) {
+    row.message_count = messages.length;
+  }
+}
+
+function deleteMessage(sessionId: string, messageId: string) {
+  const rows = (messageMemory.get(sessionId) ?? []).filter(
+    (row) => row.message_id !== messageId,
+  );
+  messageMemory.set(sessionId, rows);
+  const row = memory.get(sessionId);
+  if (row) {
+    row.message_count = rows.length;
+  }
+}
 
 function createSessionsQuery(rows: Map<string, SessionRow>) {
   const filters: Array<(row: SessionRow) => boolean> = [];
@@ -57,13 +134,188 @@ function createSessionsQuery(rows: Map<string, SessionRow>) {
   return query;
 }
 
+function createSessionMessagesQuery(sessionIdFilter?: string) {
+  const filters: Array<(row: MessageRow) => boolean> = [];
+  if (sessionIdFilter) {
+    filters.push((row) => row.session_id === sessionIdFilter);
+  }
+
+  const query = {
+    select() {
+      return query;
+    },
+    eq(column: string, value: unknown) {
+      filters.push(
+        (row) => (row as unknown as Record<string, unknown>)[column] === value,
+      );
+      return query;
+    },
+    order(column: string, options: { ascending: boolean }) {
+      void column;
+      void options;
+      return query;
+    },
+    async maybeSingle() {
+      const matches = [...messageMemory.values()]
+        .flat()
+        .filter((row) => filters.every((match) => match(row)));
+      return {
+        data: matches[0] ? structuredClone(matches[0]) : null,
+        error: null,
+      };
+    },
+    then(
+      resolve: (value: { data: MessageRow[] | null; error: null }) => void,
+    ) {
+      const matches = [...messageMemory.values()]
+        .flat()
+        .filter((row) => filters.every((match) => match(row)))
+        .sort((left, right) => left.position - right.position);
+      resolve({ data: matches.map((row) => structuredClone(row)), error: null });
+    },
+  };
+
+  return query;
+}
+
+function handleRpc(
+  fn: string,
+  params: Record<string, unknown>,
+): SessionRow[] | null {
+  const sessionId = String(params.p_session_id);
+  const current = memory.get(sessionId);
+  if (!current) {
+    return null;
+  }
+
+  if (fn === "cas_claim_session_turn") {
+    if (
+      current.conversation_revision !== params.p_expected_revision ||
+      current.active_turn_id != null ||
+      ["pending", "running", "cancelling"].includes(current.run_status)
+    ) {
+      return null;
+    }
+    const userMessage = params.p_user_message as UIMessage;
+    const assistantMessage = params.p_assistant_message as UIMessage;
+    const nextPosition = sortedMessages(sessionId).length;
+    upsertMessage(sessionId, nextPosition, userMessage);
+    upsertMessage(sessionId, nextPosition + 1, assistantMessage);
+    const next: SessionRow = {
+      ...current,
+      title: String(params.p_title),
+      run_status: "pending",
+      last_run_id: null,
+      active_turn_id: String(params.p_turn_id),
+      active_assistant_message_id: String(params.p_assistant_message_id),
+      active_turn_started_at: String(params.p_started_at),
+      turn_checkpoint: -1,
+      conversation_revision: current.conversation_revision + 1,
+      message_count: nextPosition + 2,
+      updated_at: new Date().toISOString(),
+    };
+    memory.set(sessionId, next);
+    return [structuredClone(next)];
+  }
+
+  if (fn === "cas_update_assistant_message") {
+    if (
+      current.conversation_revision !== params.p_expected_revision ||
+      current.active_turn_id !== params.p_expected_turn_id ||
+      current.active_assistant_message_id !== params.p_assistant_message_id ||
+      !["pending", "running", "cancelling"].includes(current.run_status)
+    ) {
+      return null;
+    }
+    const message = params.p_message as UIMessage;
+    upsertMessage(
+      sessionId,
+      sortedMessages(sessionId).find(
+        (row) => row.message_id === message.id,
+      )?.position ?? sortedMessages(sessionId).length,
+      message,
+    );
+    const next: SessionRow = {
+      ...current,
+      conversation_revision: current.conversation_revision + 1,
+      turn_checkpoint:
+        params.p_turn_checkpoint == null
+          ? current.turn_checkpoint
+          : Number(params.p_turn_checkpoint),
+      updated_at: new Date().toISOString(),
+    };
+    memory.set(sessionId, next);
+    return [structuredClone(next)];
+  }
+
+  if (fn === "cas_terminal_session_turn") {
+    if (
+      current.conversation_revision !== params.p_expected_revision ||
+      current.active_turn_id !== params.p_expected_turn_id ||
+      current.active_assistant_message_id !== params.p_assistant_message_id
+    ) {
+      return null;
+    }
+    const assistantMessageId = String(params.p_assistant_message_id);
+    if (params.p_message == null) {
+      deleteMessage(sessionId, assistantMessageId);
+    } else {
+      upsertMessage(
+        sessionId,
+        sortedMessages(sessionId).find(
+          (row) => row.message_id === assistantMessageId,
+        )?.position ?? sortedMessages(sessionId).length,
+        params.p_message as UIMessage,
+      );
+    }
+    const next: SessionRow = {
+      ...current,
+      run_status: params.p_status as SessionRow["run_status"],
+      last_run_id: null,
+      active_turn_id: null,
+      active_assistant_message_id: null,
+      active_turn_started_at: null,
+      turn_checkpoint: Number(params.p_checkpoint),
+      conversation_revision: current.conversation_revision + 1,
+      message_count: sortedMessages(sessionId).length,
+      updated_at: new Date().toISOString(),
+    };
+    memory.set(sessionId, next);
+    return [structuredClone(next)];
+  }
+
+  if (fn === "cas_replace_session_messages") {
+    if (current.conversation_revision !== params.p_expected_revision) {
+      return null;
+    }
+    const messages = (params.p_messages as UIMessage[]) ?? [];
+    replaceAllMessages(sessionId, messages);
+    const next: SessionRow = {
+      ...current,
+      conversation_revision: current.conversation_revision + 1,
+      message_count: messages.length,
+      updated_at: new Date().toISOString(),
+    };
+    memory.set(sessionId, next);
+    return [structuredClone(next)];
+  }
+
+  throw new Error(`unexpected rpc ${fn}`);
+}
+
 vi.mock("@/lib/supabase/admin", () => ({
   getSupabaseAdminClient: () => ({
     from(table: string) {
-      if (table !== "sessions") {
-        throw new Error(`unexpected table ${table}`);
+      if (table === "sessions") {
+        return createSessionsQuery(memory);
       }
-      return createSessionsQuery(memory);
+      if (table === "session_messages") {
+        return createSessionMessagesQuery();
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+    rpc(fn: string, params: Record<string, unknown>) {
+      return Promise.resolve({ data: handleRpc(fn, params), error: null });
     },
   }),
 }));
@@ -97,11 +349,12 @@ function seedIdleSession() {
   memory.set("sess_1", {
     id: "sess_1",
     user_id: "user_1",
-    schema_version: 3,
+    schema_version: 4,
     title: "New Project",
     created_at: now,
     updated_at: now,
     messages: [],
+    message_count: 0,
     last_run_id: null,
     run_status: "idle",
     active_turn_id: null,
@@ -112,6 +365,7 @@ function seedIdleSession() {
     sandbox_mode: "daytona",
     deleted_at: null,
   });
+  messageMemory.set("sess_1", []);
 }
 
 async function claimTurn(turnId = "turn_1", assistantId = "assistant-1") {
@@ -131,6 +385,7 @@ async function claimTurn(turnId = "turn_1", assistantId = "assistant-1") {
 describe("session turn store CAS", () => {
   beforeEach(() => {
     memory.clear();
+    messageMemory.clear();
     seedIdleSession();
   });
 
@@ -158,7 +413,7 @@ describe("session turn store CAS", () => {
       reason: "active_turn",
     });
     expect(memory.get("sess_1")?.active_turn_id).toBe("turn_1");
-    expect(memory.get("sess_1")?.messages).toHaveLength(2);
+    expect(loadMessages("sess_1")).toHaveLength(2);
   });
 
   it("rejects a duplicate user message id", async () => {
@@ -223,7 +478,7 @@ describe("session turn store CAS", () => {
     expect(replayed).toMatchObject({ ok: true, changed: false });
     expect(memory.get("sess_1")?.conversation_revision).toBe(revision);
 
-    const tool = memory.get("sess_1")!.messages.at(-1)!.parts[1];
+    const tool = loadMessages("sess_1").at(-1)!.parts[1];
     expect(tool).toMatchObject({
       toolCallId: "call-list",
       state: "output-available",
@@ -302,7 +557,7 @@ describe("session turn store CAS", () => {
       },
     );
     expect(older).toMatchObject({ ok: true, changed: false });
-    expect(memory.get("sess_1")?.messages.at(-1)?.parts[0]).toMatchObject({
+    expect(loadMessages("sess_1").at(-1)?.parts[0]).toMatchObject({
       text: "step 1",
     });
   });
