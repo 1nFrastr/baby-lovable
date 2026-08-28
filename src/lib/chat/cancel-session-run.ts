@@ -8,7 +8,6 @@ import {
   upsertAssistantInMessages,
 } from "@/lib/chat/assistant-merge";
 import type { SessionAuthContext } from "@/lib/session/auth-context";
-import { deleteDraft } from "@/lib/session/draft-store";
 import {
   getSession,
   replaceMessages,
@@ -104,7 +103,6 @@ export async function persistCancelledSessionTurn(options: {
     },
     auth,
   );
-  await deleteDraft(session.id, auth.userId);
 
   await checkpointSessionTurn({
     sessionId: session.id,

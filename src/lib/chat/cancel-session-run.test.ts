@@ -6,7 +6,6 @@ import type { Session } from "@/lib/session/types";
 const getSession = vi.fn();
 const replaceMessages = vi.fn();
 const updateSession = vi.fn();
-const deleteDraft = vi.fn();
 const checkpointSessionTurn = vi.fn();
 const getRun = vi.fn();
 
@@ -14,10 +13,6 @@ vi.mock("@/lib/session/store", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
   replaceMessages: (...args: unknown[]) => replaceMessages(...args),
   updateSession: (...args: unknown[]) => updateSession(...args),
-}));
-
-vi.mock("@/lib/session/draft-store", () => ({
-  deleteDraft: (...args: unknown[]) => deleteDraft(...args),
 }));
 
 vi.mock("@/lib/git/checkpoint-session-turn", () => ({
@@ -66,7 +61,6 @@ describe("cancelSessionRun", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     checkpointSessionTurn.mockResolvedValue({ ran: true });
-    deleteDraft.mockResolvedValue(undefined);
     getRun.mockResolvedValue({
       cancel: vi.fn().mockResolvedValue(undefined),
     });

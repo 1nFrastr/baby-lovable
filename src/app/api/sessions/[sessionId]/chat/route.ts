@@ -21,7 +21,6 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { deleteDraft } from "@/lib/session/draft-store";
 import {
   deriveSessionTitle,
   getSession,
@@ -104,9 +103,6 @@ export async function POST(
     if (title !== session.title) {
       await updateSession(sessionId, { title }, auth);
     }
-
-    // Clean up legacy draft rows from prior turns.
-    await deleteDraft(sessionId, auth.userId);
 
     if (isActiveRunStatus(session.runStatus) && session.lastRunId) {
       const orphanRunId = session.lastRunId;
