@@ -20,7 +20,6 @@ function isProjection(
   if (
     typeof obj.sessionId !== "string" ||
     typeof obj.version !== "number" ||
-    obj.run == null ||
     obj.preview == null ||
     obj.appTest == null
   ) {
@@ -32,6 +31,9 @@ function isProjection(
       updatedAt: new Date().toISOString(),
     };
   }
+  // Older rows mirrored chat lifecycle here. It is no longer part of the
+  // runtime projection or returned to clients.
+  delete (obj as unknown as Record<string, unknown>).run;
   return true;
 }
 

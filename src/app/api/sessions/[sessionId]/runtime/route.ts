@@ -19,7 +19,7 @@ async function resolveAuth(request: Request) {
   }
 }
 
-/** Sole UI read snapshot for run / preview / appTest. Reads durable projection only. */
+/** Infrastructure-only snapshot for preview, app tests, and source control. */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },

@@ -189,12 +189,14 @@ export const ReasoningContent = memo(
     return (
       <div
         className={cn(
-          "mt-1 overflow-hidden pl-0.5 text-muted-foreground text-sm outline-none",
+          "mt-1 w-full min-w-0 overflow-hidden pl-0.5 text-muted-foreground text-sm outline-none",
           className,
         )}
         {...props}
       >
-        <Streamdown mode="static">{children}</Streamdown>
+        <Streamdown className="w-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0" mode="static">
+          {children}
+        </Streamdown>
       </div>
     );
   },

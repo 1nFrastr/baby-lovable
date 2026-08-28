@@ -32,7 +32,7 @@ export async function POST(
       clientAssistant = body.assistant;
     }
   } catch {
-    // Empty body is fine — draft-only cancel still works.
+    // Empty body is fine — the authoritative server snapshot is sufficient.
   }
 
   try {

@@ -5,10 +5,13 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 
-import type { SessionDraft } from "@/lib/session/draft-store";
-import type { Session, SessionSummary } from "@/lib/session/types";
+import {
+  isActiveRunStatus,
+  type Session,
+  type SessionSummary,
+} from "@/lib/session/types";
 
 export const sessionKeys = {
   all: ["sessions"] as const,
@@ -19,7 +22,6 @@ export const sessionKeys = {
 
 export interface SessionDetailData {
   session: Session;
-  draft: SessionDraft | null;
 }
 
 export interface SessionsListData {
@@ -94,6 +96,14 @@ export function useSessionQuery(sessionId: string | null) {
     // runStatus is no longer polled here — use useSessionRuntime instead.
     staleTime: 0,
     refetchOnMount: "always",
+    refetchInterval: (query) => {
+      const current = query.state.data as SessionDetailData | undefined;
+      return current &&
+        (current.session.activeTurnId ||
+          isActiveRunStatus(current.session.runStatus))
+        ? 750
+        : false;
+    },
   });
 }
 
@@ -135,7 +145,6 @@ export function useCreateSessionMutation() {
     onSuccess: ({ session }) => {
       queryClient.setQueryData<SessionDetailData>(sessionKeys.detail(session.id), {
         session,
-        draft: null,
       });
       queryClient.setQueryData<SessionsListData>(sessionKeys.lists(), (current) => {
         if (!current) {
@@ -160,22 +169,6 @@ export function useInvalidateSessionDetail() {
       queryKey: sessionKeys.detail(sessionId),
     });
   };
-}
-
-/**
- * Drop a cached in-flight draft immediately (e.g. when the run leaves
- * "running"). Avoids mergeDisplayMessages briefly overlaying a stale
- * previous-turn assistant after the next send.
- */
-export function useClearSessionDraft() {
-  const queryClient = useQueryClient();
-
-  return useCallback((sessionId: string) => {
-    queryClient.setQueryData<SessionDetailData>(
-      sessionKeys.detail(sessionId),
-      (current) => (current ? { ...current, draft: null } : current),
-    );
-  }, [queryClient]);
 }
 
 /** Keep sidebar summaries in sync when session detail refetches. */

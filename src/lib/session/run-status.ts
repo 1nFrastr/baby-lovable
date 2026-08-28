@@ -1,68 +1,107 @@
 import { getRun } from "workflow/api";
 
-import type { Session, SessionRunStatus } from "./types";
+import type { Session } from "./types";
 import { isActiveRunStatus } from "./types";
-import { updateSession } from "./store";
 
-const TERMINAL_STATUSES = new Set<SessionRunStatus>([
-  "completed",
-  "failed",
-  "cancelled",
-]);
+const PENDING_START_TIMEOUT_MS = 60_000;
+
+function pendingLeaseExpired(session: Session): boolean {
+  if (!session.activeTurnStartedAt) {
+    return false;
+  }
+  return (
+    Date.now() - Date.parse(session.activeTurnStartedAt) >
+    PENDING_START_TIMEOUT_MS
+  );
+}
 
 /**
- * Reconcile persisted `runStatus` with the Workflow DevKit runtime so page
- * refresh sees an accurate in-flight vs finished state.
+ * Repair lifecycle only through the authoritative session turn token.
  *
- * Persistence failures must not 500 GET /session — return an in-memory
- * reconciled view and best-effort write.
+ * A transient Workflow API failure never unlocks the composer. Terminal
+ * runtime state can seal the matching turn, but cannot mutate a newer turn.
  */
 export async function resolveSessionRunState(
   session: Session,
 ): Promise<Session> {
-  if (!session.lastRunId || !isActiveRunStatus(session.runStatus)) {
+  if (!isActiveRunStatus(session.runStatus)) {
     return session;
   }
 
-  let patch: {
-    runStatus: SessionRunStatus;
-    lastRunId?: string | null;
-  };
+  // Compatibility for rows created before active turn fencing existed.
+  if (!session.activeTurnId) {
+    if (!session.lastRunId) {
+      return session;
+    }
+    try {
+      const run = await getRun(session.lastRunId);
+      const liveStatus = await run.status;
+      if (liveStatus === "pending" || liveStatus === "running") {
+        return session;
+      }
+      const { updateSession } = await import("./store");
+      return updateSession(session.id, {
+        runStatus:
+          liveStatus === "cancelled"
+            ? "cancelled"
+            : liveStatus === "completed"
+              ? "completed"
+              : "failed",
+        lastRunId: null,
+      });
+    } catch {
+      return session;
+    }
+  }
+
+  if (!session.lastRunId) {
+    if (
+      session.runStatus === "pending" &&
+      pendingLeaseExpired(session)
+    ) {
+      const { failSessionTurn } = await import("./turn-store");
+      const failed = await failSessionTurn(
+        session.id,
+        session.activeTurnId,
+      );
+      return failed.session ?? session;
+    }
+    return session;
+  }
 
   try {
     const run = await getRun(session.lastRunId);
     const liveStatus = await run.status;
-
-    if (liveStatus === session.runStatus) {
+    if (liveStatus === "pending" || liveStatus === "running") {
       return session;
     }
 
-    patch = { runStatus: liveStatus };
-    if (TERMINAL_STATUSES.has(liveStatus)) {
-      patch.lastRunId = null;
+    if (liveStatus === "cancelled") {
+      const { finalizeSessionTurnCancellation } = await import(
+        "./turn-store"
+      );
+      const cancelled = await finalizeSessionTurnCancellation(
+        session.id,
+        session.activeTurnId,
+        null,
+        { userId: session.userId },
+      );
+      return cancelled.session ?? session;
     }
-  } catch {
-    // Missing / unreachable run (common after local workflow restart).
-    patch = { runStatus: "idle", lastRunId: null };
-  }
 
-  try {
-    return await updateSession(session.id, patch);
+    // A completed runtime whose workflow finalization did not commit its
+    // authoritative snapshot is not a successful chat turn.
+    const { failSessionTurn } = await import("./turn-store");
+    const failed = await failSessionTurn(
+      session.id,
+      session.activeTurnId,
+    );
+    return failed.session ?? session;
   } catch (error) {
     console.warn(
-      `[run-status] reconcile persist failed session=${session.id}:`,
+      `[run-status] workflow lookup unavailable; keeping turn locked session=${session.id}:`,
       error instanceof Error ? error.message : error,
     );
-    const fallback: Session = {
-      ...session,
-      runStatus: patch.runStatus,
-      updatedAt: new Date().toISOString(),
-    };
-    if (patch.lastRunId === null) {
-      delete fallback.lastRunId;
-    } else if (patch.lastRunId !== undefined) {
-      fallback.lastRunId = patch.lastRunId;
-    }
-    return fallback;
+    return session;
   }
 }

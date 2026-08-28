@@ -56,6 +56,11 @@ export interface BuilderAgentBundle {
   runtimeContext: BuilderAgentContext;
 }
 
+export interface BuilderTurnIdentity {
+  turnId: string;
+  assistantMessageId: string;
+}
+
 /**
  * Build a WorkflowAgent configured for the app builder. Shared by the web
  * workflow (`builderChat`) and the CLI runner so both exercise the exact
@@ -63,10 +68,12 @@ export interface BuilderAgentBundle {
  */
 export function createBuilderAgent(
   sessionId: string,
+  turn?: BuilderTurnIdentity,
 ): BuilderAgentBundle {
-  const toolsContext = createToolsContext(sessionId);
+  const toolsContext = createToolsContext(sessionId, turn);
   const runtimeContext: BuilderAgentContext = {
     sessionId,
+    ...turn,
   };
   const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
 

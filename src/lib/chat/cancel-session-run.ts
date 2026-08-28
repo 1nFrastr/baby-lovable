@@ -3,22 +3,19 @@ import type { UIMessage } from "ai";
 
 import { checkpointSessionTurn } from "@/lib/git/checkpoint-session-turn";
 import type { SessionAuthContext } from "@/lib/session/auth-context";
-import { deleteDraft, readDraft } from "@/lib/session/draft-store";
+import { getSession, replaceMessages, updateSession } from "@/lib/session/store";
 import {
-  getSession,
-  replaceMessages,
-  updateSession,
-} from "@/lib/session/store";
+  beginSessionTurnCancellation,
+  finalizeSessionTurnCancellation,
+} from "@/lib/session/turn-store";
 import {
   isActiveRunStatus,
-  type Session,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
 import {
   assistantHasPersistedContent,
   finalizeInterruptedAssistant,
-  pickCancelledAssistantSnapshot,
 } from "./interrupt-assistant";
 
 export type CancelSessionRunResult = {
@@ -33,145 +30,64 @@ export async function cancelWorkflowRun(runId: string): Promise<void> {
   await run.cancel();
 }
 
-function mergeCancelledAssistant(
-  messages: UIMessage[],
-  assistant: UIMessage,
-): UIMessage[] {
-  const last = messages[messages.length - 1];
-  if (last?.role === "assistant") {
-    return [...messages.slice(0, -1), assistant];
+async function workflowIsAlreadyTerminal(runId: string): Promise<boolean> {
+  try {
+    const run = await getRun(runId);
+    const status = await run.status;
+    return (
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled"
+    );
+  } catch {
+    return false;
   }
-  return [...messages, assistant];
 }
 
-/**
- * Persist the in-flight draft (and optional client SSE snapshot) as a cancelled
- * assistant turn and unlock the session. Caller cancels the Workflow run after.
- */
-export async function persistCancelledSessionTurn(options: {
-  session: Session;
-  runId: string | null;
-  auth?: SessionAuthContext;
-  /** Live useChat assistant — often ahead of the draft materializer. */
-  clientAssistant?: UIMessage | null;
-}): Promise<{
-  session: Session;
-  persistedAssistant: boolean;
-}> {
-  const {
-    session,
-    runId,
-    auth = { userId: session.userId },
-    clientAssistant = null,
-  } = options;
-  const draft = runId ? await readDraft(session.id, auth.userId) : null;
-  const draftMatchesRun = Boolean(draft && draft.runId === runId);
-  const assistant = pickCancelledAssistantSnapshot([
-    draftMatchesRun ? draft?.message : null,
-    clientAssistant,
-  ]);
-  const persistedAssistant = Boolean(
-    assistant && assistantHasPersistedContent(assistant),
-  );
-  const messages =
-    persistedAssistant && assistant
-      ? mergeCancelledAssistant(session.messages, assistant)
-      : session.messages;
-
-  if (persistedAssistant) {
-    await replaceMessages(session.id, messages, auth);
-  }
-
-  const updated = await updateSession(
-    session.id,
-    {
-      runStatus: "cancelled",
-      lastRunId: null,
-    },
-    auth,
-  );
-  await deleteDraft(session.id, auth.userId);
-
-  await checkpointSessionTurn({
-    sessionId: session.id,
-    messages,
-    outcome: "cancelled",
-    runId,
-    userId: auth.userId ?? session.userId,
-    sessionTitle: session.title,
-  });
-
-  return { session: updated, persistedAssistant };
-}
-
-/**
- * Stop an in-flight builder chat turn.
- *
- * If the workflow run id is already on the session, cancel that run and
- * persist the draft. If the POST /chat has not recorded lastRunId yet, mark
- * the session cancelled so the in-flight start path discards the new run.
- */
-export async function cancelSessionRun(
+async function cancelLegacySessionRun(
   sessionId: string,
   auth: SessionAuthContext,
-  options: { clientAssistant?: UIMessage | null } = {},
-): Promise<CancelSessionRunResult | { ok: false; error: string; status: number }> {
+): Promise<
+  CancelSessionRunResult | { ok: false; error: string; status: number }
+> {
   const session = await getSession(sessionId, auth);
   if (!session) {
     return { ok: false, error: "Session not found", status: 404 };
   }
 
-  if (isActiveRunStatus(session.runStatus) && session.lastRunId) {
-    const runId = session.lastRunId;
-    const { persistedAssistant } = await persistCancelledSessionTurn({
-      session,
-      runId,
-      auth,
-      clientAssistant: options.clientAssistant,
-    });
+  const runId = session.lastRunId ?? null;
+  if (runId) {
     try {
       await cancelWorkflowRun(runId);
     } catch (error) {
-      console.error(
-        `[chat] cancel workflow failed session=${sessionId} run=${runId}:`,
-        error,
-      );
+      if (!(await workflowIsAlreadyTerminal(runId))) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to cancel workflow",
+          status: 503,
+        };
+      }
     }
-    return {
-      ok: true,
-      runStatus: "cancelled",
-      cancelledRunId: runId,
-      persistedAssistant,
-    };
   }
 
-  if (session.runStatus === "cancelled") {
-    return {
-      ok: true,
-      runStatus: "cancelled",
-      cancelledRunId: session.lastRunId ?? null,
-      persistedAssistant: false,
-    };
+  const last = session.messages.at(-1);
+  const assistant =
+    last?.role === "assistant"
+      ? finalizeInterruptedAssistant(last)
+      : null;
+  const persistedAssistant = Boolean(
+    assistant && assistantHasPersistedContent(assistant),
+  );
+  const messages =
+    assistant && persistedAssistant
+      ? [...session.messages.slice(0, -1), assistant]
+      : session.messages;
+  if (messages !== session.messages) {
+    await replaceMessages(sessionId, messages, auth);
   }
-
-  // Composer sent a message but POST /chat has not stored lastRunId yet
-  // (`pending` claim, or the previous turn's terminal status). Still seal a
-  // client snapshot when present so the next turn does not see "Editing…".
-  if (options.clientAssistant) {
-    const { persistedAssistant } = await persistCancelledSessionTurn({
-      session,
-      runId: session.lastRunId ?? null,
-      auth,
-      clientAssistant: options.clientAssistant,
-    });
-    return {
-      ok: true,
-      runStatus: "cancelled",
-      cancelledRunId: null,
-      persistedAssistant,
-    };
-  }
-
   await updateSession(
     sessionId,
     { runStatus: "cancelled", lastRunId: null },
@@ -180,7 +96,145 @@ export async function cancelSessionRun(
   return {
     ok: true,
     runStatus: "cancelled",
-    cancelledRunId: null,
-    persistedAssistant: false,
+    cancelledRunId: runId,
+    persistedAssistant,
+  };
+}
+
+/**
+ * Stop the active turn under its fencing token. The composer remains locked in
+ * `cancelling` until the durable run is cancelled and the authoritative
+ * assistant snapshot is atomically sealed.
+ */
+export async function cancelSessionRun(
+  sessionId: string,
+  auth: SessionAuthContext,
+  options: {
+    clientAssistant?: UIMessage | null;
+    expectedTurnId?: string;
+  } = {},
+): Promise<
+  CancelSessionRunResult | { ok: false; error: string; status: number }
+> {
+  const initial = await getSession(sessionId, auth);
+  if (!initial) {
+    return { ok: false, error: "Session not found", status: 404 };
+  }
+
+  if (!initial.activeTurnId) {
+    if (isActiveRunStatus(initial.runStatus)) {
+      return cancelLegacySessionRun(sessionId, auth);
+    }
+    if (initial.runStatus === "cancelled") {
+      return {
+        ok: true,
+        runStatus: "cancelled",
+        cancelledRunId: null,
+        persistedAssistant: false,
+      };
+    }
+    return {
+      ok: false,
+      error: "No active turn to cancel",
+      status: 409,
+    };
+  }
+
+  const turnId = initial.activeTurnId;
+  if (options.expectedTurnId && options.expectedTurnId !== turnId) {
+    return {
+      ok: false,
+      error: "The active turn changed before cancellation",
+      status: 409,
+    };
+  }
+
+  const begun = await beginSessionTurnCancellation(
+    sessionId,
+    auth,
+    turnId,
+  );
+  if (!begun.ok) {
+    if (begun.reason === "not_found") {
+      return { ok: false, error: "Session not found", status: 404 };
+    }
+    if (begun.session?.runStatus === "cancelled") {
+      return {
+        ok: true,
+        runStatus: "cancelled",
+        cancelledRunId: null,
+        persistedAssistant: false,
+      };
+    }
+    return {
+      ok: false,
+      error: "The active turn changed before cancellation",
+      status: 409,
+    };
+  }
+
+  const runId = begun.session.lastRunId ?? null;
+  if (runId) {
+    try {
+      await cancelWorkflowRun(runId);
+    } catch (error) {
+      if (!(await workflowIsAlreadyTerminal(runId))) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to cancel workflow",
+          status: 503,
+        };
+      }
+    }
+  }
+
+  const finalized = await finalizeSessionTurnCancellation(
+    sessionId,
+    turnId,
+    options.clientAssistant ?? null,
+    auth,
+  );
+  if (!finalized.ok) {
+    if (finalized.session?.runStatus === "completed") {
+      return {
+        ok: true,
+        runStatus: "completed",
+        cancelledRunId: runId,
+        persistedAssistant: true,
+      };
+    }
+    return {
+      ok: false,
+      error: "The turn changed while cancellation was being finalized",
+      status: 409,
+    };
+  }
+
+  const assistant = finalized.session.messages.at(-1);
+  const persistedAssistant = Boolean(
+    assistant &&
+      assistant.role === "assistant" &&
+      assistantHasPersistedContent(assistant),
+  );
+
+  if (finalized.changed) {
+    await checkpointSessionTurn({
+      sessionId,
+      messages: finalized.session.messages,
+      outcome: "cancelled",
+      runId: runId ?? turnId,
+      userId: finalized.session.userId,
+      sessionTitle: finalized.session.title,
+    });
+  }
+
+  return {
+    ok: true,
+    runStatus: "cancelled",
+    cancelledRunId: runId,
+    persistedAssistant,
   };
 }

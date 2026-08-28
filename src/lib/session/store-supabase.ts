@@ -26,7 +26,7 @@ function createSessionId(): string {
   return `sess_${timestamp}${random}`;
 }
 
-interface SessionRow {
+export interface SessionRow {
   id: string;
   user_id: string;
   schema_version: number;
@@ -36,11 +36,16 @@ interface SessionRow {
   messages: UIMessage[];
   last_run_id: string | null;
   run_status: SessionRunStatus;
+  active_turn_id: string | null;
+  active_assistant_message_id: string | null;
+  conversation_revision: number;
+  turn_checkpoint: number;
+  active_turn_started_at: string | null;
   sandbox_mode: unknown;
   deleted_at: string | null;
 }
 
-function rowToSession(row: SessionRow): Session {
+export function rowToSession(row: SessionRow): Session {
   assertSandboxMode(row.sandbox_mode, row.id);
   const session: Session = {
     schemaVersion: row.schema_version,
@@ -51,12 +56,23 @@ function rowToSession(row: SessionRow): Session {
     updatedAt: row.updated_at,
     messages: row.messages ?? [],
     runStatus: row.run_status,
+    conversationRevision: row.conversation_revision ?? 0,
+    turnCheckpoint: row.turn_checkpoint ?? -1,
     sandboxMode: row.sandbox_mode,
     deletedAt: row.deleted_at,
   };
 
   if (row.last_run_id) {
     session.lastRunId = row.last_run_id;
+  }
+  if (row.active_turn_id) {
+    session.activeTurnId = row.active_turn_id;
+  }
+  if (row.active_assistant_message_id) {
+    session.activeAssistantMessageId = row.active_assistant_message_id;
+  }
+  if (row.active_turn_started_at) {
+    session.activeTurnStartedAt = row.active_turn_started_at;
   }
 
   return session;
@@ -87,6 +103,11 @@ function sessionToRow(session: Session): Omit<SessionRow, "created_at"> & {
     messages: session.messages,
     last_run_id: session.lastRunId ?? null,
     run_status: session.runStatus,
+    active_turn_id: session.activeTurnId ?? null,
+    active_assistant_message_id: session.activeAssistantMessageId ?? null,
+    conversation_revision: session.conversationRevision,
+    turn_checkpoint: session.turnCheckpoint,
+    active_turn_started_at: session.activeTurnStartedAt ?? null,
     sandbox_mode: session.sandboxMode,
     deleted_at: session.deletedAt ?? null,
   };
@@ -120,6 +141,8 @@ export async function createSessionSupabase(
     updatedAt: now,
     messages: [],
     runStatus: "idle",
+    conversationRevision: 0,
+    turnCheckpoint: -1,
     sandboxMode: getDefaultSandboxMode(),
     deletedAt: null,
   };
@@ -247,5 +270,35 @@ export async function replaceMessagesSupabase(
   messages: UIMessage[],
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session> {
-  return updateSessionSupabase(sessionId, { messages }, auth);
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const existing = await getSessionSupabase(sessionId, auth);
+    if (!existing) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase
+      .from("sessions")
+      .update({
+        messages,
+        schema_version: SESSION_SCHEMA_VERSION,
+        conversation_revision: existing.conversationRevision + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", sessionId)
+      .eq("conversation_revision", existing.conversationRevision)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to replace messages: ${error.message}`);
+    }
+    if (data) {
+      return rowToSession(data as SessionRow);
+    }
+  }
+
+  throw new Error(
+    `Failed to replace messages after optimistic concurrency retries: ${sessionId}`,
+  );
 }
