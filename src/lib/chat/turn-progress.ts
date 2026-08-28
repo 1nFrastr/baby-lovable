@@ -249,7 +249,7 @@ export function applyAssistantSnapshot(
 export function joinReasoningText(
   parts: Array<{ text?: string } | string>,
 ): string {
-  return parts.reduce((joined, part) => {
+  return parts.reduce<string>((joined, part) => {
     const next = typeof part === "string" ? part : (part.text ?? "");
     if (!next) {
       return joined;
