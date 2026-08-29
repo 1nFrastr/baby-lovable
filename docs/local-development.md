@@ -20,6 +20,17 @@ npm run dev
 
 Supabase is the only metadata backend; local Host no longer provides a JSON-file fallback. `BABY_LOVABLE_DEV_USER_ID` must be a real `auth.users.id` in the current Supabase project. The Agent workspace always runs on Daytona; source always uses Freestyle `main` as the source of truth.
 
+### Local Supabase (recommended for DB debugging)
+
+Prefer a Docker local stack + Studio so you do not mutate the linked remote project while iterating. See **[Local Supabase + Studio](./local-supabase.md)** (`supabase start`, Studio at http://127.0.0.1:54323, one-click env switch, migrations, seed user).
+
+```bash
+supabase start
+npm run supabase:use-local    # snapshot remote keys, point .env.local at local
+# … debug …
+npm run supabase:use-remote   # point back at hosted project
+```
+
 ## CLI (recommended for verification)
 
 CLI and Web use the same Builder Agent, Daytona reconciler, and Freestyle checkpoint:

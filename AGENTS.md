@@ -32,7 +32,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 ```
 
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
-- **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks).
+- **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks). For isolated local DB debugging (Studio + migrations, no remote foot-guns), see `docs/local-supabase.md`.
 - **Daytona + Freestyle** — Freestyle `main` is the durable source of truth; the Daytona working tree is a projection. There is no local sandbox mode. See `docs/freestyle-git.md`.
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
@@ -157,7 +157,7 @@ See `.env.example`:
 
 - `AI_GATEWAY_API_KEY` — Vercel AI Gateway (or `VERCEL_OIDC_TOKEN`)
 - `AI_MODEL` — default `deepseek/deepseek-v4-flash`
-- `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend
-- `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs
+- `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend (local stack: `supabase start` + `docs/local-supabase.md`; switch with `npm run supabase:use-local` / `supabase:use-remote`)
+- `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs (local seed: `11111111-1111-1111-1111-111111111111`)
 - `DAYTONA_API_KEY` — required remote workspace
 - `FREESTYLE_API_KEY` — required durable Git source of truth
