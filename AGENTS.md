@@ -19,6 +19,19 @@ Stack: Vercel AI SDK v7 + WorkflowAgent + Workflow DevKit — `ai@7`, `@ai-sdk/w
 
 **Before writing agent/workflow code**, read `.cursor/skills/ai-sdk-v7-workflow-agent/SKILL.md`.
 
+## Language
+
+Write **repository artifacts in English** by default. Chat replies to the human may follow the user's language; do not put that language into the repo unless they explicitly ask.
+
+English by default:
+
+- Source: identifiers, comments, log/error strings, and UI copy (unless a file is already localized)
+- Git: commit messages and branch names
+- GitHub: PR titles/bodies, issue titles/bodies, and review comments
+- Docs in this repo (`README`, `AGENTS.md`, `docs/`, etc.)
+
+Quote existing non-English product copy when editing it; do not translate the whole UI unless asked.
+
 ## `.baby-lovable/` — local debug artifacts (gitignored)
 
 Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
