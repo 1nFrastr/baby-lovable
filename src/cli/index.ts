@@ -1,11 +1,6 @@
+import "@/lib/load-host-env";
+
 import { createInterface } from "node:readline/promises";
-
-import { config as loadEnv } from "dotenv";
-
-// Load environment before importing anything that reads process.env at module
-// scope (e.g. the AI Gateway credentials). `.env.local` wins over `.env`.
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
 
 import { generateId, type UIMessage } from "ai";
 

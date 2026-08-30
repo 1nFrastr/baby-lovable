@@ -1,7 +1,4 @@
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import "@/lib/load-host-env";
 
 import { checkDaytonaAppServer } from "@/lib/sandbox/daytona/app-server";
 import { ensureDesiredState } from "@/lib/sandbox/daytona/runtime-reconciler";

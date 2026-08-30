@@ -10,10 +10,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import "@/lib/load-host-env";
 
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";

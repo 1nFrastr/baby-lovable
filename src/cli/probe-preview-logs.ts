@@ -11,10 +11,7 @@
  *   npx tsx src/cli/probe-preview-logs.ts -s sess_xxx --follow-ms 15000
  *   npx tsx src/cli/probe-preview-logs.ts -s sess_xxx --sse http://localhost:3000 --follow-ms 15000
  */
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import "@/lib/load-host-env";
 
 import { Daytona } from "@daytona/sdk";
 
