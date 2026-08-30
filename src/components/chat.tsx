@@ -36,6 +36,10 @@ import { ChatActivityLabel } from "@/components/chat-activity-label";
 import { ChatMessageParts } from "@/components/chat-message-parts";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
+import {
+  clipSelectionToContainer,
+  blurFocusOutside,
+} from "@/lib/dom/clip-selection";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import {
   isActiveRunStatus,
@@ -118,6 +122,7 @@ export function Chat({
   const [cancelledHint, setCancelledHint] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const lastSyncedRevisionRef = useRef(conversationRevision);
+  const transcriptRef = useRef<HTMLDivElement>(null);
 
   const serverTurnActive =
     (Boolean(activeTurnId) && isActiveRunStatus(runStatus)) ||
@@ -214,6 +219,51 @@ export function Chat({
     },
     [composerLocked, onSessionRefresh, sendMessage],
   );
+
+  useEffect(() => {
+    let selectionStartedInTranscript = false;
+
+    const onMouseDown = (event: MouseEvent) => {
+      const transcript = transcriptRef.current;
+      selectionStartedInTranscript = Boolean(
+        transcript &&
+          event.target instanceof Node &&
+          transcript.contains(event.target),
+      );
+    };
+
+    const clipTranscriptSelection = () => {
+      const transcript = transcriptRef.current;
+      if (transcript) {
+        clipSelectionToContainer(transcript);
+      }
+    };
+
+    const finishPointerSelection = () => {
+      const transcript = transcriptRef.current;
+      if (!transcript) {
+        return;
+      }
+      clipSelectionToContainer(transcript);
+      if (selectionStartedInTranscript) {
+        blurFocusOutside(transcript);
+      }
+    };
+
+    const finishAfterPointer = () => {
+      finishPointerSelection();
+      requestAnimationFrame(finishPointerSelection);
+    };
+
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("selectionchange", clipTranscriptSelection);
+    document.addEventListener("mouseup", finishAfterPointer);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("selectionchange", clipTranscriptSelection);
+      document.removeEventListener("mouseup", finishAfterPointer);
+    };
+  }, []);
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
@@ -341,49 +391,51 @@ export function Chat({
         </p>
       </div>
 
-      <Conversation className="min-h-0">
-        <ConversationContent className="gap-4 px-6 py-4">
-          {chatMessages.length === 0 ? (
-            <ConversationEmptyState
-              icon={<MessageSquare className="size-10" />}
-              title="Describe the app you want to build"
-              description=""
-            />
-          ) : (
-            chatMessages.map((message, index) => {
-              const isLast = index === chatMessages.length - 1;
-              const messageActivityLabel =
-                isLast && message.role === "assistant"
-                  ? activityLabel
-                  : null;
+      <div className="flex min-h-0 flex-1 flex-col" ref={transcriptRef}>
+        <Conversation className="min-h-0">
+          <ConversationContent className="gap-4 px-6 py-4">
+            {chatMessages.length === 0 ? (
+              <ConversationEmptyState
+                icon={<MessageSquare className="size-10" />}
+                title="Describe the app you want to build"
+                description=""
+              />
+            ) : (
+              chatMessages.map((message, index) => {
+                const isLast = index === chatMessages.length - 1;
+                const messageActivityLabel =
+                  isLast && message.role === "assistant"
+                    ? activityLabel
+                    : null;
 
-              return (
-                <Message from={message.role} key={message.id}>
-                  <MessageContent>
-                    <ChatMessageParts
-                      activityLabel={messageActivityLabel}
-                      isLastMessage={isLast}
-                      isStreaming={localStreamAnimating}
-                      message={message}
-                    />
-                  </MessageContent>
-                </Message>
-              );
-            })
-          )}
+                return (
+                  <Message from={message.role} key={message.id}>
+                    <MessageContent>
+                      <ChatMessageParts
+                        activityLabel={messageActivityLabel}
+                        isLastMessage={isLast}
+                        isStreaming={localStreamAnimating}
+                        message={message}
+                      />
+                    </MessageContent>
+                  </Message>
+                );
+              })
+            )}
 
-          {showStandaloneActivity && activityLabel ? (
-            <Message from="assistant">
-              <MessageContent>
-                <div className="flex flex-col gap-0.5">
-                  <ChatActivityLabel label={activityLabel} />
-                </div>
-              </MessageContent>
-            </Message>
-          ) : null}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+            {showStandaloneActivity && activityLabel ? (
+              <Message from="assistant">
+                <MessageContent>
+                  <div className="flex flex-col gap-0.5">
+                    <ChatActivityLabel label={activityLabel} />
+                  </div>
+                </MessageContent>
+              </Message>
+            ) : null}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+      </div>
 
       <div className="select-none border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
         <PromptInput onSubmit={handleSubmit}>
