@@ -918,7 +918,7 @@ export const PromptInput = ({
         type="file"
       />
       <form
-        className={cn("w-full", className)}
+        className={cn("w-full select-none", className)}
         onSubmit={handleSubmit}
         ref={formRef}
         {...props}
@@ -1057,7 +1057,12 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      className={cn("field-sizing-content max-h-48 min-h-16", className)}
+      className={cn(
+        // Empty textarea placeholders participate in document selection in
+        // Chromium; isolate them from adjacent message double-click ranges.
+        "field-sizing-content max-h-48 min-h-16 select-text placeholder-shown:select-none",
+        className
+      )}
       name="message"
       onCompositionEnd={handleCompositionEnd}
       onCompositionStart={handleCompositionStart}
