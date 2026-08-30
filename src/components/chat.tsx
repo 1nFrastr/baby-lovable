@@ -385,7 +385,7 @@ export function Chat({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
+      <div className="select-none border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
