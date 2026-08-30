@@ -1,5 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "streamdown/styles.css";
+@import "katex/dist/katex.min.css";
+
+/* Streamdown + plugins: scan their dist for Tailwind classes */
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/math/dist/*.js";
+@source "../../node_modules/@streamdown/cjk/dist/*.js";
 
 :root {
   --background: #ffffff;
@@ -77,6 +84,82 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Compact chat markdown — quieter than Streamdown defaults */
+.chat-md {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-md [data-streamdown="heading-1"] {
+  margin-top: 0.75rem;
+  margin-bottom: 0.2rem;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.chat-md [data-streamdown="heading-2"] {
+  margin-top: 0.65rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.925rem;
+  line-height: 1.35;
+}
+
+.chat-md [data-streamdown="heading-3"],
+.chat-md [data-streamdown="heading-4"],
+.chat-md [data-streamdown="heading-5"],
+.chat-md [data-streamdown="heading-6"] {
+  margin-top: 0.55rem;
+  margin-bottom: 0.15rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.chat-md [data-streamdown="unordered-list"],
+.chat-md [data-streamdown="ordered-list"] {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-md [data-streamdown="list-item"] {
+  padding-top: 0.05rem;
+  padding-bottom: 0.05rem;
+}
+
+.chat-md [data-streamdown="inline-code"] {
+  border: none;
+  box-shadow: none;
+}
+
+.chat-md [data-streamdown="table-wrapper"],
+.chat-md [data-streamdown="table"],
+.chat-md [data-streamdown="table-row"],
+.chat-md [data-streamdown="mermaid-block"] {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.chat-md [data-streamdown="table"] {
+  border-collapse: collapse;
+}
+
+.chat-md [data-streamdown="table-header-cell"],
+.chat-md [data-streamdown="table-cell"] {
+  border-bottom: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+}
+
+.chat-md [data-streamdown="blockquote"] {
+  border-left-width: 2px;
+  margin-block: 0.5rem;
+  padding-left: 0.75rem;
+}
+
+.chat-md [data-streamdown="horizontal-rule"] {
+  margin-block: 0.75rem;
 }
 
 /* Compact highlight.js theme for the workspace file explorer (light + dark). */

@@ -6,9 +6,7 @@
  *   npx tsx src/cli/test-freestyle-git.ts
  *   npx tsx src/cli/test-freestyle-git.ts --keep
  */
-import { config as loadEnv } from "dotenv";
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import "@/lib/load-host-env";
 
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { ensureFreestyleRepository } from "@/lib/git/provision-repo";

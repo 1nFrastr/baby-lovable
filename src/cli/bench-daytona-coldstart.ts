@@ -4,10 +4,7 @@
  *
  * Usage: npx tsx src/cli/bench-daytona-coldstart.ts
  */
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import "@/lib/load-host-env";
 
 import { createSession } from "@/lib/session/store";
 import { ensureDesiredState } from "@/lib/sandbox/daytona/runtime-reconciler";

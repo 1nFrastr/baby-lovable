@@ -16,6 +16,7 @@ describe("workspace-explorer", () => {
     expect(isExplorerHiddenPath(".next/cache")).toBe(true);
     expect(isExplorerHiddenPath("coverage/lcov.info")).toBe(true);
     expect(isExplorerHiddenPath(".env.local")).toBe(true);
+    expect(isExplorerHiddenPath(".env.prod")).toBe(true);
     expect(isExplorerHiddenPath("src/app/page.tsx")).toBe(false);
     expect(isExplorerHiddenPath("package.json")).toBe(false);
   });

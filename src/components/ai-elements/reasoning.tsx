@@ -18,6 +18,7 @@ import {
   useRef,
 } from "react";
 import { Streamdown } from "streamdown";
+import { streamdownChatProps } from "@/lib/chat/streamdown-plugins";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 
 import { Shimmer } from "./shimmer";
@@ -194,7 +195,14 @@ export const ReasoningContent = memo(
         )}
         {...props}
       >
-        <Streamdown className="w-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0" mode="static">
+        <Streamdown
+          {...streamdownChatProps}
+          className={cn(
+            streamdownChatProps.className,
+            "w-full min-w-0 max-w-full space-y-2 whitespace-normal break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          )}
+          mode="static"
+        >
           {children}
         </Streamdown>
       </div>

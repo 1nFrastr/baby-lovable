@@ -7,10 +7,7 @@
  *   npm run build:daytona-snapshot -- --name my-snapshot
  *   npm run build:daytona-snapshot -- --name my-snapshot --cpu 1 --memory 1 --disk 3
  */
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import "@/lib/load-host-env";
 
 import {
   DAYTONA_DEFAULT_SNAPSHOT,

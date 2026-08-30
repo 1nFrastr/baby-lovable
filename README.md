@@ -155,9 +155,10 @@ Splitting these two concerns avoids leaning on polling, in-process state, or a s
 - Local and production both use Supabase for metadata storage and Realtime
 - Local and production both use Daytona Sandbox + Freestyle `main`
 - Local development requires Supabase Auth, database, and a CLI user
+- Prefer Docker `supabase start` + Studio for isolated DB debugging (see [Local Supabase](./docs/local-supabase.md))
 - CLI end-to-end verification is supported; there is no local sandbox simulation branch
 
-See: [Local development guide](./docs/local-development.md)
+See: [Local development guide](./docs/local-development.md) · [Local Supabase + Studio](./docs/local-supabase.md)
 
 ## Docs
 
@@ -166,6 +167,7 @@ See: [Local development guide](./docs/local-development.md)
 - [Realtime state sync design](./docs/realtime-projection.md)
 - [Workflow Agent design](./docs/workflow-agent.md)
 - [Local development guide](./docs/local-development.md)
+- [Local Supabase + Studio](./docs/local-supabase.md)
 
 ## Roadmap
 
