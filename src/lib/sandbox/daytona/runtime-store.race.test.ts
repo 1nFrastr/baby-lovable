@@ -221,4 +221,43 @@ describe("runtime-store serverless isolate races", () => {
       expect(again.desired).toBe("stopped");
     });
   });
+
+  it("renewRuntimeLease skips persist when remaining TTL is above half", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      const acquired = await acquireRuntimeLease(
+        sessionId,
+        "owner-a",
+        30_000,
+      );
+      expect(acquired).not.toBeNull();
+      const revision = acquired!.revision;
+
+      const renewed = await renewRuntimeLease(
+        sessionId,
+        "owner-a",
+        30_000,
+      );
+      expect(renewed?.revision).toBe(revision);
+      expect(renewed?.leaseOwner).toBe("owner-a");
+    });
+  });
+
+  it("renewRuntimeLease persists when remaining TTL is below half", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      await upsertRuntimeSnapshot(sessionId, {
+        leaseOwner: "owner-a",
+        leaseExpiresAt: new Date(Date.now() + 1_000).toISOString(),
+      });
+      const before = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+      const renewed = await renewRuntimeLease(
+        sessionId,
+        "owner-a",
+        30_000,
+        null,
+        { current: before },
+      );
+      expect(renewed).not.toBeNull();
+      expect(renewed!.revision).toBe(before.revision + 1);
+    });
+  });
 });

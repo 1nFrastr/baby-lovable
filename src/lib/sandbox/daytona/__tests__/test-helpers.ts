@@ -13,6 +13,7 @@ import {
   setRuntimeDurableAdapterForTests,
   type RuntimeDurableAdapter,
 } from "@/lib/sandbox/daytona/runtime-store";
+import { clearReconcileInFlightForTests } from "@/lib/sandbox/daytona/runtime-reconciler";
 import type { DaytonaRuntimeSnapshot } from "@/lib/sandbox/daytona/runtime-state";
 
 export function makeSession(sessionId: string): Session {
@@ -72,6 +73,7 @@ export async function withMemoryRuntime<T>(
   try {
     return await fn({ sessionId });
   } finally {
+    clearReconcileInFlightForTests();
     setRuntimeDurableAdapterForTests(null);
   }
 }

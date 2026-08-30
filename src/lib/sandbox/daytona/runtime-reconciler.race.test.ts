@@ -38,6 +38,11 @@ vi.mock("@/lib/session/store", () => ({
   getSession: vi.fn(async (id: string) =>
     id === ctx.sessionId ? makeSession(id) : null,
   ),
+  getSessionOwner: vi.fn(async (id: string) =>
+    id === ctx.sessionId
+      ? { userId: null, sandboxMode: "daytona" as const }
+      : null,
+  ),
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
 }));
 
@@ -1119,6 +1124,118 @@ describe("runtime-reconciler isolate / UI races", () => {
       expect(startDevSession).not.toHaveBeenCalled();
       expect(result.observed).toBe("preview-ready");
       expect(result.devSessionName).toBe(`preview-${sessionId}`);
+    });
+  });
+
+  it("wait=true joins an in-flight wait=false ensure without a second create", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      observeRuntime.mockImplementation(async (_sid, opts) => {
+        const snap = opts?.snapshot ?? (await getRuntimeSnapshot(sessionId));
+        if (snap.devSessionName || snap.observed === "preview-ready") {
+          return observed({
+            phase: "preview-ready",
+            sandboxId: snap.sandboxId ?? "sb_1",
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+            httpStatus: 200,
+          });
+        }
+        if (snap.sandboxId) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId: snap.sandboxId,
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+            httpStatus: 503,
+          });
+        }
+        return observed({ phase: "missing" });
+      });
+
+      const kicked = await ensureDesiredState(sessionId, "preview-ready", {
+        wait: false,
+        owner: "kick",
+      });
+      expect(kicked.desired).toBe("preview-ready");
+
+      const waited = await ensureDesiredState(sessionId, "preview-ready", {
+        wait: true,
+        owner: "after",
+      });
+
+      expect(createSandbox).toHaveBeenCalledTimes(1);
+      expect(waited.observed).toBe("preview-ready");
+    });
+  });
+
+  it("sandbox-ready wait does not join an in-flight preview-ready ensure", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+
+      let sandboxId: string | null = null;
+      let startEntered = 0;
+      let releaseStart: () => void = () => {};
+      const startGate = new Promise<void>((resolve) => {
+        releaseStart = resolve;
+      });
+
+      createSandbox.mockImplementation(async () => {
+        sandboxId = "sb_1";
+        return { id: "sb_1", state: "started" };
+      });
+      startDevSession.mockImplementation(async () => {
+        startEntered += 1;
+        await startGate;
+        return { sessionName: "preview-sess", port: 3000 };
+      });
+      observeRuntime.mockImplementation(async () => {
+        if (!sandboxId) {
+          return observed({ phase: "missing" });
+        }
+        if (startEntered === 0) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId,
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+          });
+        }
+        return observed({
+          phase: "preview-ready",
+          sandboxId,
+          previewUrl: "https://preview.example/app",
+          previewPort: 3000,
+          httpStatus: 200,
+        });
+      });
+
+      // Same isolate as CLI: kick preview, then FS attach waits sandbox-ready.
+      void ensureDesiredState(sessionId, "preview-ready", {
+        wait: false,
+        owner: "kick-preview",
+      });
+
+      const fsSnap = await ensureDesiredState(sessionId, "sandbox-ready", {
+        wait: true,
+        owner: "agent-fs",
+      });
+
+      expect(
+        isDesiredSatisfied({ ...fsSnap, desired: "sandbox-ready" }),
+      ).toBe(true);
+      expect(fsSnap.sandboxId).toBe("sb_1");
+
+      releaseStart();
+      await vi.waitFor(() => {
+        expect(startEntered).toBeGreaterThanOrEqual(1);
+      });
+      await vi.waitFor(async () => {
+        const snap = await getRuntimeSnapshot(sessionId, null, {
+          fresh: true,
+        });
+        expect(snap.observed).toBe("preview-ready");
+      });
     });
   });
 });

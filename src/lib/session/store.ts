@@ -5,10 +5,12 @@ import {
 } from "./auth-context";
 import {
   createSessionSupabase,
+  getSessionOwnerSupabase,
   getSessionSupabase,
   listSessionsSupabase,
   replaceMessagesSupabase,
   updateSessionSupabase,
+  type SessionOwner,
 } from "./store-supabase";
 import type {
   CreateSessionInput,
@@ -30,6 +32,40 @@ export async function getSession(
 ): Promise<Session | null> {
   return getSessionSupabase(sessionId, auth);
 }
+
+const sessionOwnerCache = new Map<string, SessionOwner>();
+
+/** Owner + sandbox mode. Does not load chat messages. Cached per isolate. */
+export async function getSessionOwner(
+  sessionId: string,
+): Promise<SessionOwner | null> {
+  const hit = sessionOwnerCache.get(sessionId);
+  if (hit) {
+    return hit;
+  }
+  const owner = await getSessionOwnerSupabase(sessionId);
+  if (owner) {
+    sessionOwnerCache.set(sessionId, owner);
+  }
+  return owner;
+}
+
+export function rememberSessionOwner(
+  sessionId: string,
+  owner: SessionOwner,
+): void {
+  sessionOwnerCache.set(sessionId, owner);
+}
+
+export function clearSessionOwnerCache(sessionId?: string): void {
+  if (sessionId) {
+    sessionOwnerCache.delete(sessionId);
+    return;
+  }
+  sessionOwnerCache.clear();
+}
+
+export type { SessionOwner };
 
 export async function listSessions(
   auth: SessionAuthContext = { userId: null },

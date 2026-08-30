@@ -1,6 +1,4 @@
 /** Daytona VM: get / wake / create / delete (SDK only — no session persistence). */
-import type { Session } from "@/lib/session/types";
-
 import {
   allowDaytonaSnapshotFallback,
   getDaytonaSnapshotName,
@@ -129,7 +127,7 @@ export async function reconnectSandbox(
   return null;
 }
 
-export async function createSandbox(session: Session): Promise<Sandbox> {
+export async function createSandbox(sessionId: string): Promise<Sandbox> {
   const daytona = getDaytonaClient();
   const idleMinutes = Number(process.env.DAYTONA_SANDBOX_IDLE_MINUTES ?? 30);
   const snapshot = getDaytonaSnapshotName();
@@ -153,7 +151,7 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
 
   const baseParams = {
     language: "typescript" as const,
-    labels: { "baby-lovable-session": session.id },
+    labels: { "baby-lovable-session": sessionId },
     autoStopInterval: idleMinutes > 0 ? idleMinutes : 0,
     // Public port preview — iframe uses getPreviewLink URL (no signed token).
     public: true,
@@ -161,7 +159,7 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
   };
 
   logDaytonaBootstrap(
-    session.id,
+    sessionId,
     "sandbox",
     snapshot
       ? `create snapshot=${snapshot} (pnpm + node_modules + .next/dev prebaked)`
@@ -187,7 +185,7 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
       );
     }
     logDaytonaBootstrap(
-      session.id,
+      sessionId,
       "sandbox",
       `snapshot failed (${detail.slice(0, 160)}) — default image (FALLBACK)`,
     );
@@ -199,7 +197,7 @@ export async function createSandbox(session: Session): Promise<Sandbox> {
     await ensureSandboxPublic(sandbox);
   }
   logDaytonaBootstrap(
-    session.id,
+    sessionId,
     "sandbox",
     `started ${sandbox.id}${snapshot ? ` from snapshot=${snapshot}` : ""}`,
   );

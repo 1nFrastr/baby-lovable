@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { getSession } from "@/lib/session/store";
+import { getSessionOwner } from "@/lib/session/store";
 import {
   DEV_SESSION,
   formatStartError,
@@ -29,6 +29,7 @@ import {
   hasFreshPreviewEmbed,
   isDesiredSatisfied,
   resolveTargetDesired,
+  runtimePatchChangesState,
   type DaytonaDesiredState,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
@@ -269,15 +270,22 @@ async function upsertWithRetry(
   sessionId: string,
   patch: Omit<Parameters<typeof upsertRuntimeSnapshot>[1], "expectedRevision">,
   attempts = 8,
+  userId: string | null = null,
 ): Promise<DaytonaRuntimeSnapshot> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
-    const current = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+    const current = await getRuntimeSnapshot(sessionId, userId, {
+      fresh: i > 0,
+    });
     try {
-      return await upsertRuntimeSnapshot(sessionId, {
-        ...patch,
-        expectedRevision: current.revision,
-      });
+      return await upsertRuntimeSnapshot(
+        sessionId,
+        {
+          ...patch,
+          expectedRevision: current.revision,
+        },
+        userId,
+      );
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
@@ -363,6 +371,48 @@ async function demoteStalePreviewReady(
 const createInFlight = new Map<string, Promise<void>>();
 /** Process-local Freestyle hydrate lock — create/reconcile share one background pull. */
 const hydrateInFlight = new Map<string, Promise<void>>();
+/** Isolate-local: already kicked background hydrate for this session. */
+const hydrateKicked = new Set<string>();
+
+type InflightEnsure = {
+  requested: DaytonaDesiredState;
+  promise: Promise<DaytonaRuntimeSnapshot>;
+};
+
+/** Same-isolate kick + after() share one reconcile, not a second ensure entry. */
+const ensureInFlight = new Map<string, InflightEnsure>();
+
+function canJoinInflightEnsure(
+  inflightRequested: DaytonaDesiredState,
+  requested: DaytonaDesiredState,
+): boolean {
+  if (requested === "stopped" || requested === "deleted") {
+    return false;
+  }
+  // Exact match only. Joining sandbox-ready onto a preview-ready wait would
+  // block FS attach until Next is up (CLI / same-isolate tools).
+  return inflightRequested === requested;
+}
+
+function trackEnsureInFlight(
+  sessionId: string,
+  requested: DaytonaDesiredState,
+  work: Promise<DaytonaRuntimeSnapshot>,
+): void {
+  ensureInFlight.set(sessionId, { requested, promise: work });
+  void work.finally(() => {
+    const current = ensureInFlight.get(sessionId);
+    if (current?.promise === work) {
+      ensureInFlight.delete(sessionId);
+    }
+  });
+}
+
+/** Test helper — drop in-flight ensure/hydrate bookkeeping with L1. */
+export function clearReconcileInFlightForTests(): void {
+  ensureInFlight.clear();
+  hydrateKicked.clear();
+}
 
 /**
  * Freestyle already has commits (e.g. sandbox recreate) — must pull before
@@ -437,6 +487,7 @@ function kickBackgroundFreestyleHydrate(
 async function actionCreateSandbox(
   sessionId: string,
   snapshot: DaytonaRuntimeSnapshot,
+  userId: string | null,
 ): Promise<void> {
   if (snapshot.sandboxId) {
     return;
@@ -451,15 +502,16 @@ async function actionCreateSandbox(
 
   const work = (async () => {
     const t0 = Date.now();
-    const session = await getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
 
-    await upsertWithRetry(sessionId, {
-      observed: "creating-sandbox",
-      lastError: null,
-    });
+    await upsertWithRetry(
+      sessionId,
+      {
+        observed: "creating-sandbox",
+        lastError: null,
+      },
+      8,
+      userId,
+    );
 
     // Re-check after claiming the creating phase — another isolate may have created.
     let latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
@@ -468,7 +520,7 @@ async function actionCreateSandbox(
     }
 
     const tCreate = Date.now();
-    const sdk = await createSandbox(session);
+    const sdk = await createSandbox(sessionId);
     logDaytonaTiming(
       sessionId,
       "action.createSandbox",
@@ -503,7 +555,7 @@ async function actionCreateSandbox(
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
     if (isFreestyleConfigured()) {
       const { readGitRepository } = await import("@/lib/git/repository-store");
-      const repo = await readGitRepository(sessionId, session.userId);
+      const repo = await readGitRepository(sessionId, userId);
       const blockHydrate = needsBlockingFreestyleHydrate(repo?.remoteHeadSha);
       const project = wrapSandbox(sessionId, sdk);
 
@@ -523,7 +575,7 @@ async function actionCreateSandbox(
         const hydrate = await hydrateWorkspaceFromFreestyle(
           sessionId,
           project,
-          session.userId,
+          userId,
         );
         logDaytonaTiming(
           sessionId,
@@ -538,9 +590,11 @@ async function actionCreateSandbox(
           });
           throw new Error(hydrate.error ?? "Freestyle workspace hydrate failed");
         }
+        hydrateKicked.add(sessionId);
       } else {
         // Trust snapshot tree; seed/pull in background while startDev proceeds.
-        kickBackgroundFreestyleHydrate(sessionId, project, session.userId);
+        kickBackgroundFreestyleHydrate(sessionId, project, userId);
+        hydrateKicked.add(sessionId);
       }
     }
 
@@ -734,6 +788,7 @@ async function reconcileOnce(
   sessionId: string,
   snapshot: DaytonaRuntimeSnapshot,
   observed: ObservedRuntime,
+  userId: string | null,
 ): Promise<boolean> {
   const desired = snapshot.desired;
 
@@ -795,7 +850,7 @@ async function reconcileOnce(
   // as "sandbox gone" when durable state already has an id (would noop-create
   // forever and never reach startDev).
   if (!latest.sandboxId) {
-    await actionCreateSandbox(sessionId, latest);
+    await actionCreateSandbox(sessionId, latest, userId);
     return true;
   }
   if (observed.phase === "missing" && !observed.sandboxId) {
@@ -855,70 +910,10 @@ async function reconcileOnce(
     return false;
   }
 
-  // Freestyle provision: blocking pull only when remote already has commits
-  // (recreate). New sessions keep snapshot workspace and hydrate in background.
-  {
-    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
-    if (isFreestyleConfigured()) {
-      const { readGitRepository } = await import("@/lib/git/repository-store");
-      const repo = await readGitRepository(sessionId);
-      if (!repo || repo.provisionStatus !== "ready") {
-        const blockHydrate = needsBlockingFreestyleHydrate(repo?.remoteHeadSha);
-        if (blockHydrate) {
-          const project = await attachProject(
-            sessionId,
-            latest.sandboxId,
-            false,
-          );
-          if (project) {
-            await upsertWithRetry(sessionId, {
-              observed: "bootstrapping-workspace",
-              lastError: null,
-            });
-            const { hydrateWorkspaceFromFreestyle } = await import(
-              "@/lib/git/hydrate-workspace"
-            );
-            const session = await getSession(sessionId);
-            const hydrate = await hydrateWorkspaceFromFreestyle(
-              sessionId,
-              project,
-              session?.userId ?? null,
-            );
-            if (!hydrate.ok) {
-              await upsertWithRetry(sessionId, {
-                observed: "error",
-                lastError: hydrate.error ?? "Freestyle hydrate failed",
-              });
-              return true;
-            }
-            await upsertWithRetry(sessionId, {
-              observed: "workspace-ready",
-              lastError: null,
-            });
-            return true;
-          }
-        } else {
-          // New session / empty remote — do not block startDev on provision.
-          const project = await attachProject(
-            sessionId,
-            latest.sandboxId,
-            false,
-          );
-          if (project) {
-            const session = await getSession(sessionId);
-            kickBackgroundFreestyleHydrate(
-              sessionId,
-              project,
-              session?.userId ?? null,
-            );
-          }
-          // Fall through to startDev while hydrate runs.
-        }
-      }
-    }
-  }
-
   if (desired === "sandbox-ready") {
+    if ((await maybeKickBackgroundHydrate(sessionId, latest, userId)) === "abort") {
+      return true;
+    }
     return false;
   }
 
@@ -940,8 +935,87 @@ async function reconcileOnce(
     return false;
   }
 
+  if ((await maybeKickBackgroundHydrate(sessionId, latest, userId)) === "abort") {
+    return true;
+  }
   await actionStartDev(sessionId, latest);
   return true;
+}
+
+async function maybeKickBackgroundHydrate(
+  sessionId: string,
+  latest: DaytonaRuntimeSnapshot,
+  userId: string | null,
+): Promise<"ok" | "abort"> {
+  if (hydrateKicked.has(sessionId) || hydrateInFlight.has(sessionId)) {
+    return "ok";
+  }
+  if (!latest.sandboxId) {
+    return "ok";
+  }
+  const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
+  if (!isFreestyleConfigured()) {
+    return "ok";
+  }
+  const { readGitRepository } = await import("@/lib/git/repository-store");
+  const repo = await readGitRepository(sessionId, userId);
+  if (repo?.provisionStatus === "ready") {
+    hydrateKicked.add(sessionId);
+    return "ok";
+  }
+  if (needsBlockingFreestyleHydrate(repo?.remoteHeadSha)) {
+    const project = await attachProject(sessionId, latest.sandboxId, false);
+    if (!project) {
+      return "ok";
+    }
+    await upsertWithRetry(
+      sessionId,
+      {
+        observed: "bootstrapping-workspace",
+        lastError: null,
+      },
+      8,
+      userId,
+    );
+    const { hydrateWorkspaceFromFreestyle } = await import(
+      "@/lib/git/hydrate-workspace"
+    );
+    const hydrate = await hydrateWorkspaceFromFreestyle(
+      sessionId,
+      project,
+      userId,
+    );
+    if (!hydrate.ok) {
+      await upsertWithRetry(
+        sessionId,
+        {
+          observed: "error",
+          lastError: hydrate.error ?? "Freestyle hydrate failed",
+        },
+        8,
+        userId,
+      );
+      return "abort";
+    }
+    await upsertWithRetry(
+      sessionId,
+      {
+        observed: "workspace-ready",
+        lastError: null,
+      },
+      8,
+      userId,
+    );
+    hydrateKicked.add(sessionId);
+    return "ok";
+  }
+
+  const project = await attachProject(sessionId, latest.sandboxId, false);
+  if (project) {
+    kickBackgroundFreestyleHydrate(sessionId, project, userId);
+    hydrateKicked.add(sessionId);
+  }
+  return "ok";
 }
 
 async function reconcileLoop(
@@ -954,12 +1028,22 @@ async function reconcileLoop(
    * block on next dev.
    */
   returnWhen: DaytonaDesiredState,
+  userId: string | null,
 ): Promise<DaytonaRuntimeSnapshot> {
   while (Date.now() < deadline) {
-    await renewRuntimeLease(sessionId, owner, LEASE_TTL_MS);
-
-    // Always reload durable state — another isolate may have flipped desired.
-    let snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+    // One durable read per tick. Renew persists only when the lease is
+    // past half TTL; observe writes only when control-plane fields change.
+    let snapshot = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
+    const renewed = await renewRuntimeLease(
+      sessionId,
+      owner,
+      LEASE_TTL_MS,
+      userId,
+      { current: snapshot },
+    );
+    if (renewed) {
+      snapshot = renewed;
+    }
 
     const tObserve = Date.now();
     let usedLightProbe = canLightProbeStartingDev(snapshot);
@@ -1000,35 +1084,44 @@ async function reconcileLoop(
         0,
         `preserved durable=${snapshot.observed} after transient miss`,
       );
-      // The observe may have taken seconds. Reload even though we skip the
-      // observation write so a concurrent desired-state change is not hidden
-      // behind the preserved snapshot.
-      snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+      snapshot = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
     } else {
       const obsPatch = applyObservation(snapshot, observed);
-      try {
-        snapshot = await upsertRuntimeSnapshot(sessionId, {
-          expectedRevision: snapshot.revision,
-          ...obsPatch,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!/CAS conflict/i.test(message)) {
-          throw error;
+      if (runtimePatchChangesState(snapshot, obsPatch)) {
+        try {
+          snapshot = await upsertRuntimeSnapshot(
+            sessionId,
+            {
+              expectedRevision: snapshot.revision,
+              ...obsPatch,
+            },
+            userId,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!/CAS conflict/i.test(message)) {
+            throw error;
+          }
+          snapshot = await getRuntimeSnapshot(sessionId, userId, {
+            fresh: true,
+          });
+          continue;
         }
-        // Another isolate updated — reload and continue.
-        snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-        continue;
       }
     }
 
     // HTTP can recover after a stale-ready demotion before startDev runs.
     // Restore the deterministic process identity before declaring convergence.
     if (snapshot.observed === "preview-ready" && !snapshot.devSessionName) {
-      snapshot = await upsertWithRetry(sessionId, {
-        devSessionName: DEV_SESSION(sessionId),
-        lastError: null,
-      });
+      snapshot = await upsertWithRetry(
+        sessionId,
+        {
+          devSessionName: DEV_SESSION(sessionId),
+          lastError: null,
+        },
+        8,
+        userId,
+      );
     }
 
     // Prefer caller's wait target (sandbox-ready) over durable preview-ready.
@@ -1044,8 +1137,8 @@ async function reconcileLoop(
       return snapshot;
     }
 
-    // Light-probe wait: Next is already starting — skip reconcileOnce (another
-    // fresh store round-trip ~500ms) until HTTP succeeds or we need an action.
+    // Light-probe wait: Next is already starting — skip reconcileOnce until
+    // HTTP succeeds or we need an action.
     let acted = false;
     if (
       !(
@@ -1055,7 +1148,7 @@ async function reconcileLoop(
       )
     ) {
       const tAction = Date.now();
-      acted = await reconcileOnce(sessionId, snapshot, observed);
+      acted = await reconcileOnce(sessionId, snapshot, observed, userId);
       logDaytonaTiming(
         sessionId,
         "reconcile.action",
@@ -1072,18 +1165,22 @@ async function reconcileLoop(
     }
   }
 
-  const timedOut = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  const timedOut = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
   if (isDesiredSatisfied({ ...timedOut, desired: returnWhen })) {
     return timedOut;
   }
   if (!isDesiredSatisfied(timedOut)) {
-    return upsertRuntimeSnapshot(sessionId, {
-      expectedRevision: timedOut.revision,
-      observed: "error",
-      lastError:
-        timedOut.lastError ??
-        `Timed out reconciling to ${timedOut.desired}`,
-    });
+    return upsertRuntimeSnapshot(
+      sessionId,
+      {
+        expectedRevision: timedOut.revision,
+        observed: "error",
+        lastError:
+          timedOut.lastError ??
+          `Timed out reconciling to ${timedOut.desired}`,
+      },
+      userId,
+    );
   }
   return timedOut;
 }
@@ -1108,15 +1205,16 @@ export async function ensureDesiredState(
   const wait = options?.wait ?? true;
   const owner = options?.owner ?? randomUUID();
 
-  const session = await getSession(sessionId);
-  if (!session) {
+  const sessionOwner = await getSessionOwner(sessionId);
+  if (!sessionOwner) {
     throw new Error(`Session not found: ${sessionId}`);
   }
-  if (session.sandboxMode !== "daytona") {
+  if (sessionOwner.sandboxMode !== "daytona") {
     throw new Error(`Session ${sessionId} is not in daytona mode`);
   }
+  const userId = sessionOwner.userId;
 
-  let snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  let snapshot = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
 
   // What the caller needs vs what we write as durable desired.
   // FS attach requests sandbox-ready; UI warm may already have preview-ready —
@@ -1217,7 +1315,7 @@ export async function ensureDesiredState(
         // Force another startDev cycle; keep preview URL (port unchanged).
         patch.clearNextCache = true;
       }
-      snapshot = await upsertRuntimeSnapshot(sessionId, patch);
+      snapshot = await upsertRuntimeSnapshot(sessionId, patch, userId);
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1238,6 +1336,18 @@ export async function ensureDesiredState(
   // Intent-only: persist desired, let the caller schedule after()/warm separately.
   if (!wait && options?.kick === false) {
     return snapshot;
+  }
+
+  const inflight = ensureInFlight.get(sessionId);
+  if (
+    inflight &&
+    !options?.restart &&
+    canJoinInflightEnsure(inflight.requested, requestedDesired)
+  ) {
+    if (!wait) {
+      return snapshot;
+    }
+    return inflight.promise;
   }
 
   const afterSandboxReadyForPreview = (
@@ -1264,6 +1374,7 @@ export async function ensureDesiredState(
         owner,
         deadline,
         requestedDesired,
+        userId,
       );
     } catch (error) {
       const detail = formatStartError(error);
@@ -1272,32 +1383,41 @@ export async function ensureDesiredState(
         leaseOwner: owner,
       });
       try {
-        const cur = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-        result = await upsertRuntimeSnapshot(sessionId, {
-          expectedRevision: cur.revision,
-          observed: "error",
-          lastError: detail,
-        });
+        const cur = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
+        result = await upsertRuntimeSnapshot(
+          sessionId,
+          {
+            expectedRevision: cur.revision,
+            observed: "error",
+            lastError: detail,
+          },
+          userId,
+        );
       } catch {
-        result = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+        result = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
       }
     } finally {
-      await releaseRuntimeLease(sessionId, owner);
+      await releaseRuntimeLease(sessionId, owner, userId);
     }
     afterSandboxReadyForPreview(result);
     return result;
   };
 
   const run = async (): Promise<DaytonaRuntimeSnapshot> => {
-    const leased = await acquireRuntimeLease(sessionId, owner, LEASE_TTL_MS);
+    const leased = await acquireRuntimeLease(
+      sessionId,
+      owner,
+      LEASE_TTL_MS,
+      userId,
+    );
     if (!leased) {
       // Another writer holds the lease — wait for convergence if requested.
       if (!wait) {
-        return getRuntimeSnapshot(sessionId, null, { fresh: true });
+        return snapshot;
       }
       const deadline = Date.now() + RECONCILE_TIMEOUT_MS;
       while (Date.now() < deadline) {
-        const current = await getRuntimeSnapshot(sessionId, null, {
+        const current = await getRuntimeSnapshot(sessionId, userId, {
           fresh: true,
         });
         // Wait for what the caller asked for, not necessarily full preview-ready.
@@ -1314,26 +1434,33 @@ export async function ensureDesiredState(
           return current;
         }
         // Try to steal expired lease
-        const again = await acquireRuntimeLease(sessionId, owner, LEASE_TTL_MS);
+        const again = await acquireRuntimeLease(
+          sessionId,
+          owner,
+          LEASE_TTL_MS,
+          userId,
+        );
         if (again) {
           return runWithLease(deadline);
         }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       }
-      return getRuntimeSnapshot(sessionId, null, { fresh: true });
+      return getRuntimeSnapshot(sessionId, userId, { fresh: true });
     }
 
     return runWithLease(Date.now() + RECONCILE_TIMEOUT_MS);
   };
 
+  const work = run();
+  trackEnsureInFlight(sessionId, requestedDesired, work);
   if (!wait) {
-    void run().catch(() => {
+    void work.catch(() => {
       // logged inside
     });
-    return getRuntimeSnapshot(sessionId, null, { fresh: true });
+    return snapshot;
   }
 
-  return run();
+  return work;
 }
 
 /**
@@ -1381,16 +1508,23 @@ export async function readRuntime(
     return snapshot;
   }
 
+  const obsPatch = {
+    ...applyObservation(snapshot, observed),
+    ...(observed.phase === "preview-ready"
+      ? {
+          previewUrl: observed.previewUrl,
+          previewPort: observed.previewPort,
+        }
+      : {}),
+  };
+  if (!runtimePatchChangesState(snapshot, obsPatch)) {
+    return snapshot;
+  }
+
   try {
     snapshot = await upsertRuntimeSnapshot(sessionId, {
       expectedRevision: snapshot.revision,
-      ...applyObservation(snapshot, observed),
-      ...(observed.phase === "preview-ready"
-        ? {
-            previewUrl: observed.previewUrl,
-            previewPort: observed.previewPort,
-          }
-        : {}),
+      ...obsPatch,
     });
   } catch {
     snapshot = await getRuntimeSnapshot(sessionId);
@@ -1481,19 +1615,24 @@ export async function checkRuntimePreview(sessionId: string) {
   );
 
   if (!shouldPreserveSnapshotOnObserveMiss(observed, snapshot)) {
-    try {
-      await upsertRuntimeSnapshot(sessionId, {
-        expectedRevision: snapshot.revision,
-        ...applyObservation(snapshot, observed),
-        ...(observed.phase === "preview-ready"
-          ? {
-              previewUrl: observed.previewUrl,
-              previewPort: observed.previewPort,
-            }
-          : {}),
-      });
-    } catch {
-      // CAS — ignore; check result still uses live observe / peek
+    const obsPatch = {
+      ...applyObservation(snapshot, observed),
+      ...(observed.phase === "preview-ready"
+        ? {
+            previewUrl: observed.previewUrl,
+            previewPort: observed.previewPort,
+          }
+        : {}),
+    };
+    if (runtimePatchChangesState(snapshot, obsPatch)) {
+      try {
+        await upsertRuntimeSnapshot(sessionId, {
+          expectedRevision: snapshot.revision,
+          ...obsPatch,
+        });
+      } catch {
+        // CAS — ignore; check result still uses live observe / peek
+      }
     }
   }
 

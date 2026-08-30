@@ -32,6 +32,11 @@ vi.mock("@/lib/session/store", () => ({
   getSession: vi.fn(async (id: string) =>
     id === ctx.sessionId ? makeSession(id) : null,
   ),
+  getSessionOwner: vi.fn(async (id: string) =>
+    id === ctx.sessionId
+      ? { userId: null, sandboxMode: "daytona" as const }
+      : null,
+  ),
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
 }));
 

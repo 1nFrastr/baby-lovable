@@ -8,6 +8,7 @@ import {
   hasFreshPreviewEmbed,
   isDesiredSatisfied,
   resolveTargetDesired,
+  runtimePatchChangesState,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
 
@@ -282,5 +283,36 @@ describe("resolveTargetDesired", () => {
         restart: true,
       }),
     ).toBe("sandbox-ready");
+  });
+});
+
+describe("runtimePatchChangesState", () => {
+  it("ignores lastObservedAt-only patches", () => {
+    const current = snap({
+      observed: "starting-devserver",
+      sandboxId: "sb_1",
+      lastObservedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(
+      runtimePatchChangesState(current, {
+        observed: "starting-devserver",
+        sandboxId: "sb_1",
+        lastObservedAt: "2026-01-01T00:00:01.000Z",
+        lastError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("detects observed phase changes", () => {
+    const current = snap({
+      observed: "starting-devserver",
+      sandboxId: "sb_1",
+    });
+    expect(
+      runtimePatchChangesState(current, {
+        observed: "preview-ready",
+        sandboxId: "sb_1",
+      }),
+    ).toBe(true);
   });
 });
