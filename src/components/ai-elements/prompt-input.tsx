@@ -919,7 +919,7 @@ export const PromptInput = ({
         type="file"
       />
       <form
-        className={cn("w-full select-none", className)}
+        className={cn("w-full", className)}
         onPointerDown={(event) => {
           onPointerDown?.(event);
           if (event.defaultPrevented) {
@@ -1102,12 +1102,7 @@ export const PromptInputTextarea = ({
     <>
       <InputGroupTextarea
         aria-label={ariaLabel ?? placeholder}
-        className={cn(
-          // Native textarea placeholders join Chromium document selections.
-          // Keep the control out of adjacent message ranges unless focused.
-          "field-sizing-content max-h-48 min-h-16 pointer-events-none caret-transparent select-none focus:pointer-events-auto focus:caret-current focus:select-text",
-          className
-        )}
+        className={cn("field-sizing-content max-h-48 min-h-16", className)}
         name="message"
         onCompositionEnd={handleCompositionEnd}
         onCompositionStart={handleCompositionStart}
