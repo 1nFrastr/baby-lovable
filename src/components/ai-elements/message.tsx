@@ -25,6 +25,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { streamdownChatProps } from "@/lib/chat/streamdown-plugins";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -321,9 +322,11 @@ export const MessageResponse = memo(
   ({ className, isAnimating, animated = false, ...props }: MessageResponseProps) => (
     <Streamdown
       {...props}
+      {...streamdownChatProps}
       animated={animated}
       className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        streamdownChatProps.className,
+        "size-full min-w-0 max-w-full space-y-2 whitespace-normal break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
       )}
       isAnimating={isAnimating}
