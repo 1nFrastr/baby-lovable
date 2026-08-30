@@ -30,7 +30,6 @@ import {
   isDesiredSatisfied,
   resolveTargetDesired,
   runtimePatchChangesState,
-  warmDesiredRank,
   type DaytonaDesiredState,
   type DaytonaRuntimeSnapshot,
 } from "./runtime-state";
@@ -390,10 +389,9 @@ function canJoinInflightEnsure(
   if (requested === "stopped" || requested === "deleted") {
     return false;
   }
-  if (inflightRequested === requested) {
-    return true;
-  }
-  return warmDesiredRank(inflightRequested) >= warmDesiredRank(requested);
+  // Exact match only. Joining sandbox-ready onto a preview-ready wait would
+  // block FS attach until Next is up (CLI / same-isolate tools).
+  return inflightRequested === requested;
 }
 
 function trackEnsureInFlight(
