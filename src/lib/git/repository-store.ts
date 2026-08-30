@@ -43,9 +43,9 @@ async function resolveUserId(
   if (userId) {
     return userId;
   }
-  const { getSession } = await import("@/lib/session/store");
-  const session = await getSession(sessionId);
-  return session?.userId ?? null;
+  const { getSessionOwner } = await import("@/lib/session/store");
+  const owner = await getSessionOwner(sessionId);
+  return owner?.userId ?? null;
 }
 
 export async function readGitRepository(

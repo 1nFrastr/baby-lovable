@@ -23,7 +23,13 @@ import { SESSION_SCHEMA_VERSION } from "./types";
 import {
   assertSandboxMode,
   getDefaultSandboxMode,
+  type SandboxMode,
 } from "@/lib/sandbox/types";
+
+export interface SessionOwner {
+  userId: string | null;
+  sandboxMode: SandboxMode;
+}
 
 function createSessionId(): string {
   const timestamp = Date.now().toString(36);
@@ -172,6 +178,34 @@ export async function getSessionSupabase(
   const session = rowToSession(hydrated);
   assertSessionOwner(session.userId, auth);
   return session;
+}
+
+/** Owner + sandbox mode only — no message hydrate. */
+export async function getSessionOwnerSupabase(
+  sessionId: string,
+): Promise<SessionOwner | null> {
+  const supabase = getSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("user_id, sandbox_mode, deleted_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to read session owner: ${error.message}`);
+  }
+
+  if (!data || data.deleted_at) {
+    return null;
+  }
+
+  const row = data as Pick<SessionRow, "user_id" | "sandbox_mode" | "deleted_at">;
+  assertSandboxMode(row.sandbox_mode, sessionId);
+  return {
+    userId: row.user_id,
+    sandboxMode: row.sandbox_mode,
+  };
 }
 
 export async function listSessionsSupabase(

@@ -38,6 +38,11 @@ vi.mock("@/lib/session/store", () => ({
   getSession: vi.fn(async (id: string) =>
     id === ctx.sessionId ? makeSession(id) : null,
   ),
+  getSessionOwner: vi.fn(async (id: string) =>
+    id === ctx.sessionId
+      ? { userId: null, sandboxMode: "daytona" as const }
+      : null,
+  ),
   updateSession: vi.fn(async () => makeSession(ctx.sessionId)),
 }));
 
@@ -1119,6 +1124,48 @@ describe("runtime-reconciler isolate / UI races", () => {
       expect(startDevSession).not.toHaveBeenCalled();
       expect(result.observed).toBe("preview-ready");
       expect(result.devSessionName).toBe(`preview-${sessionId}`);
+    });
+  });
+
+  it("wait=true joins an in-flight wait=false ensure without a second create", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      observeRuntime.mockImplementation(async (_sid, opts) => {
+        const snap = opts?.snapshot ?? (await getRuntimeSnapshot(sessionId));
+        if (snap.devSessionName || snap.observed === "preview-ready") {
+          return observed({
+            phase: "preview-ready",
+            sandboxId: snap.sandboxId ?? "sb_1",
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+            httpStatus: 200,
+          });
+        }
+        if (snap.sandboxId) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId: snap.sandboxId,
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+            httpStatus: 503,
+          });
+        }
+        return observed({ phase: "missing" });
+      });
+
+      const kicked = await ensureDesiredState(sessionId, "preview-ready", {
+        wait: false,
+        owner: "kick",
+      });
+      expect(kicked.desired).toBe("preview-ready");
+
+      const waited = await ensureDesiredState(sessionId, "preview-ready", {
+        wait: true,
+        owner: "after",
+      });
+
+      expect(createSandbox).toHaveBeenCalledTimes(1);
+      expect(waited.observed).toBe("preview-ready");
     });
   });
 });

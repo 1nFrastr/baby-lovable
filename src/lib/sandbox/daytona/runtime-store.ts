@@ -2,11 +2,12 @@
  * Daytona runtime store — durable snapshot + lease for single-writer reconcile.
  * Supabase `session_daytona_runtime` is the production durable store.
  *
- * L1 `memory` is process-local (one serverless isolate). Writers always CAS
- * against durable state so a stale L1 cannot clobber another isolate's write.
+ * L1 `memory` is process-local (one serverless isolate). Writers CAS against
+ * durable state (`WHERE revision = expected`). When L1 already matches
+ * `expectedRevision`, skip the extra pre-read — the SQL predicate is the lock.
  */
 
-import { getSession } from "@/lib/session/store";
+import { getSessionOwner } from "@/lib/session/store";
 
 import {
   emptyRuntimeSnapshot,
@@ -20,6 +21,7 @@ import {
 } from "./runtime-store-supabase";
 
 const memory = new Map<string, DaytonaRuntimeSnapshot>();
+const ownerCache = new Map<string, string | null>();
 
 const DEFAULT_LEASE_TTL_MS = 30_000;
 
@@ -59,22 +61,42 @@ function isLeaseActive(snapshot: DaytonaRuntimeSnapshot, now = Date.now()): bool
   return Date.parse(snapshot.leaseExpiresAt) > now;
 }
 
-async function resolveUserId(
+function leaseRemainingMs(snapshot: DaytonaRuntimeSnapshot, now = Date.now()): number {
+  if (!snapshot.leaseExpiresAt) {
+    return 0;
+  }
+  const expires = Date.parse(snapshot.leaseExpiresAt);
+  if (!Number.isFinite(expires)) {
+    return 0;
+  }
+  return expires - now;
+}
+
+/** Writes need userId to stamp the row. Reads do not (admin client, keyed by session). */
+async function resolveUserIdForWrite(
   sessionId: string,
   userId: string | null = null,
 ): Promise<string | null> {
-  if (userId) {
+  if (durableAdapter.requiresUserId === false) {
     return userId;
   }
-  const session = await getSession(sessionId);
-  return session?.userId ?? null;
+  if (userId) {
+    ownerCache.set(sessionId, userId);
+    return userId;
+  }
+  const cached = ownerCache.get(sessionId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const owner = await getSessionOwner(sessionId);
+  const id = owner?.userId ?? null;
+  ownerCache.set(sessionId, id);
+  return id;
 }
 
 async function loadDurable(
   sessionId: string,
-  userId: string | null,
 ): Promise<DaytonaRuntimeSnapshot | null> {
-  void userId;
   return durableAdapter.read(sessionId);
 }
 
@@ -101,6 +123,7 @@ export async function getRuntimeSnapshot(
   userId: string | null = null,
   options?: GetRuntimeOptions,
 ): Promise<DaytonaRuntimeSnapshot> {
+  void userId;
   if (!options?.fresh) {
     const hit = memory.get(sessionId);
     if (hit) {
@@ -108,11 +131,7 @@ export async function getRuntimeSnapshot(
     }
   }
 
-  const ownerId =
-    durableAdapter.requiresUserId === false
-      ? userId
-      : await resolveUserId(sessionId, userId);
-  let loaded = await loadDurable(sessionId, ownerId);
+  let loaded = await loadDurable(sessionId);
 
   if (!loaded) {
     loaded = emptyRuntimeSnapshot(sessionId);
@@ -127,18 +146,25 @@ export async function upsertRuntimeSnapshot(
   patch: DaytonaRuntimePatch,
   userId: string | null = null,
 ): Promise<DaytonaRuntimeSnapshot> {
-  const ownerId =
-    durableAdapter.requiresUserId === false
-      ? userId
-      : await resolveUserId(sessionId, userId);
-  // Writers always CAS against durable truth — never against a stale L1 copy.
-  const durable = await loadDurable(sessionId, ownerId);
-  const current = durable ?? emptyRuntimeSnapshot(sessionId);
-  const expectedRevision = patch.expectedRevision ?? current.revision;
+  const ownerId = await resolveUserIdForWrite(sessionId, userId);
 
-  if (expectedRevision !== current.revision) {
+  const l1 = memory.get(sessionId);
+  const expectedRevision = patch.expectedRevision;
+  // revision 0 is the synthetic empty snapshot, not a durable row.
+  const canUseL1 =
+    l1 !== undefined &&
+    l1.revision > 0 &&
+    expectedRevision !== undefined &&
+    expectedRevision !== null &&
+    l1.revision === expectedRevision;
+
+  const durable = canUseL1 ? l1 : await loadDurable(sessionId);
+  const current = durable ?? emptyRuntimeSnapshot(sessionId);
+  const casRevision = expectedRevision ?? current.revision;
+
+  if (casRevision !== current.revision) {
     throw new Error(
-      `Daytona runtime CAS conflict for ${sessionId} (expected ${expectedRevision}, got ${current.revision})`,
+      `Daytona runtime CAS conflict for ${sessionId} (expected ${casRevision}, got ${current.revision})`,
     );
   }
 
@@ -221,15 +247,27 @@ export async function acquireRuntimeLease(
   }
 }
 
+export type RenewLeaseOptions = {
+  /** Already-fresh snapshot — skip another durable read. */
+  current?: DaytonaRuntimeSnapshot;
+};
+
 export async function renewRuntimeLease(
   sessionId: string,
   owner: string,
   ttlMs: number = DEFAULT_LEASE_TTL_MS,
   userId: string | null = null,
+  options?: RenewLeaseOptions,
 ): Promise<DaytonaRuntimeSnapshot | null> {
-  const current = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
+  const current =
+    options?.current ??
+    (await getRuntimeSnapshot(sessionId, userId, { fresh: true }));
   if (current.leaseOwner !== owner) {
     return null;
+  }
+
+  if (leaseRemainingMs(current) > ttlMs / 2) {
+    return current;
   }
 
   try {
@@ -276,14 +314,11 @@ export async function clearRuntimeSnapshot(
   sessionId: string,
   userId: string | null = null,
 ): Promise<void> {
+  void userId;
   memory.delete(sessionId);
-  const ownerId =
-    durableAdapter.requiresUserId === false
-      ? userId
-      : await resolveUserId(sessionId, userId);
+  ownerCache.delete(sessionId);
 
   try {
-    void ownerId;
     await durableAdapter.delete(sessionId);
   } catch {
     // ignore
@@ -294,9 +329,11 @@ export async function clearRuntimeSnapshot(
 export function clearRuntimeMemory(sessionId?: string): void {
   if (sessionId) {
     memory.delete(sessionId);
+    ownerCache.delete(sessionId);
     return;
   }
   memory.clear();
+  ownerCache.clear();
 }
 
 /**

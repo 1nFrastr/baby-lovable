@@ -195,6 +195,42 @@ function warmDesiredRank(desired: DaytonaDesiredState): number {
   return 0;
 }
 
+export { warmDesiredRank };
+
+/**
+ * True when applying `patch` would change control-plane fields.
+ * Ignores `lastObservedAt` and `expectedRevision` (timestamp / CAS bookkeeping).
+ */
+export function runtimePatchChangesState(
+  current: DaytonaRuntimeSnapshot,
+  patch: DaytonaRuntimePatch,
+): boolean {
+  const keys: Array<keyof DaytonaRuntimePatch> = [
+    "generation",
+    "desired",
+    "observed",
+    "sandboxId",
+    "devSessionName",
+    "devCmdId",
+    "previewUrl",
+    "previewPort",
+    "lastError",
+    "leaseOwner",
+    "leaseExpiresAt",
+    "clearNextCache",
+  ];
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) {
+      continue;
+    }
+    const next = patch[key];
+    if (next !== undefined && next !== current[key]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Merge caller's requested desired with durable desired before writing.
  *
