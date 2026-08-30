@@ -15,10 +15,7 @@
     "test:daytona-export": "tsx src/cli/test-daytona-export.ts",
     "test:app-preview": "tsx src/cli/test-app-preview.ts",
     "probe:preview-logs": "tsx src/cli/probe-preview-logs.ts",
-    "workflow:web": "workflow web",
-    "supabase:use": "tsx scripts/use-supabase-env.ts",
-    "supabase:use-local": "tsx scripts/use-supabase-env.ts local",
-    "supabase:use-remote": "tsx scripts/use-supabase-env.ts remote"
+    "workflow:web": "workflow web"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.11",

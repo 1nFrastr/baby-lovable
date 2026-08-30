@@ -30,10 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (gitignored). Commit only `.env.example`.
 .env*
 !.env.example
-!.env.supabase.*.example
 
 # vercel
 .vercel

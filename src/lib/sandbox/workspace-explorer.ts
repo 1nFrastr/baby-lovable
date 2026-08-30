@@ -32,6 +32,7 @@ const EXPLORER_HIDDEN_NAMES = new Set([
   "Thumbs.db",
   ".env",
   ".env.local",
+  ".env.prod",
   ".env.development",
   ".env.production",
   ".env.development.local",

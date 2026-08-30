@@ -8,27 +8,26 @@ Local Host and production share the same execution path: Daytona runs the worksp
 pnpm install
 cp .env.example .env.local
 
-# Required:
+# Required in .env.local (local Supabase):
 # AI_GATEWAY_API_KEY (or VERCEL_OIDC_TOKEN)
-# NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-# SUPABASE_SECRET_KEY / BABY_LOVABLE_DEV_USER_ID
+# NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+# NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY (from `supabase status`)
+# BABY_LOVABLE_DEV_USER_ID (seed: 11111111-1111-1111-1111-111111111111)
 # DAYTONA_API_KEY
 # FREESTYLE_API_KEY
 
 npm run dev
 ```
 
-Supabase is the only metadata backend; local Host no longer provides a JSON-file fallback. `BABY_LOVABLE_DEV_USER_ID` must be a real `auth.users.id` in the current Supabase project. The Agent workspace always runs on Daytona; source always uses Freestyle `main` as the source of truth.
+Supabase is the only metadata backend; local Host no longer provides a JSON-file fallback. Day-to-day `.env.local` stays on **local** Supabase; hosted credentials live on Vercel only. The Agent workspace always runs on Daytona; source always uses Freestyle `main` as the source of truth.
 
 ### Local Supabase (recommended for DB debugging)
 
-Prefer a Docker local stack + Studio so you do not mutate the linked remote project while iterating. See **[Local Supabase + Studio](./local-supabase.md)** (`supabase start`, Studio at http://127.0.0.1:54323, one-click env switch, migrations, seed user).
+Prefer a Docker local stack + Studio so you do not mutate the linked remote project while iterating. See **[Local Supabase + Studio](./local-supabase.md)**.
 
 ```bash
 supabase start
-npm run supabase:use-local    # snapshot remote keys, point .env.local at local
-# … debug …
-npm run supabase:use-remote   # point back at hosted project
+# put URL + ANON_KEY / SERVICE_ROLE_KEY into .env.local
 ```
 
 ## CLI (recommended for verification)

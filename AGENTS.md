@@ -41,8 +41,8 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 The CLI runs the **same** builder agent, tools, and system prompt as the web app, but streams a structured trace to the terminal. Use it for end-to-end validation without opening the browser.
 
 ```bash
-# Prerequisites: copy .env.example → .env.local; configure Supabase (including
-# BABY_LOVABLE_DEV_USER_ID), AI Gateway, Daytona, and Freestyle credentials
+# Prerequisites: copy `.env.example` → `.env.local` and fill local Supabase +
+# AI Gateway, Daytona, Freestyle credentials (see `docs/local-supabase.md`).
 
 npm run agent -- -h                          # help
 npm run agent -- -l                          # list sessions
@@ -157,7 +157,7 @@ See `.env.example`:
 
 - `AI_GATEWAY_API_KEY` — Vercel AI Gateway (or `VERCEL_OIDC_TOKEN`)
 - `AI_MODEL` — default `deepseek/deepseek-v4-flash`
-- `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend (local stack: `supabase start` + `docs/local-supabase.md`; switch with `npm run supabase:use-local` / `supabase:use-remote`)
+- `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend. Local Host: `.env.local` → Docker Supabase (`docs/local-supabase.md`). Production: Vercel Dashboard only.
 - `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs (local seed: `11111111-1111-1111-1111-111111111111`)
 - `DAYTONA_API_KEY` — required remote workspace
 - `FREESTYLE_API_KEY` — required durable Git source of truth

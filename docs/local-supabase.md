@@ -33,39 +33,18 @@ Open **Studio** → **Table Editor** to inspect `sessions`, `session_messages`, 
 
 ## Point the app / CLI at local
 
-### One-click switch (recommended)
-
-Keep shared secrets in `.env.local`. Supabase URL/keys live in gitignored profiles and are swapped in place:
+Local Host uses a single gitignored **`.env.local`**. Keep it on local Supabase. Hosted / production secrets stay on the **Vercel Dashboard** only.
 
 ```bash
-npm run supabase:use-local    # → Docker stack (auto `supabase status` + seed user)
-npm run supabase:use-remote   # → linked / hosted project
-npm run supabase:use -- status
-```
-
-First switch to **local** snapshots the current remote keys into `.env.supabase.remote` so you can switch back. Profiles:
-
-| File | Purpose |
-| --- | --- |
-| `.env.supabase.local` | Local stack (refreshed from `supabase status`) |
-| `.env.supabase.remote` | Hosted project |
-
-Examples: `.env.supabase.local.example`, `.env.supabase.remote.example`.
-
-Restart `npm run dev` / `npm run agent` after switching.
-
-### Manual values
-
-If you prefer editing by hand:
-
-```bash
+# After `supabase start`, set in .env.local:
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
-# Prefer the JWT values named ANON_KEY / SERVICE_ROLE_KEY from `supabase status`
-# (status may also print newer sb_publishable_ / sb_secret_ keys — either works with current clients)
+# Prefer ANON_KEY / SERVICE_ROLE_KEY from `supabase status`
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<ANON_KEY>
 SUPABASE_SECRET_KEY=<SERVICE_ROLE_KEY>
 BABY_LOVABLE_DEV_USER_ID=11111111-1111-1111-1111-111111111111
 ```
+
+Restart `npm run dev` / `npm run agent` after changing `.env.local`.
 
 Default local JWT keys are stable demo secrets for the stock stack; still copy from `supabase status` so you do not drift if config changes.
 
@@ -89,18 +68,18 @@ supabase db push
 
 ## Local vs linked remote
 
-| | Local (`supabase start`) | Linked remote (`supabase link`) |
+| | Local (`supabase start`) | Linked remote / Vercel |
 | --- | --- | --- |
-| Purpose | Isolated schema/data debugging next to `npm run dev` / agent | Shared / prod-like project; Vercel & team |
+| Purpose | Isolated schema/data debugging next to `npm run dev` / agent | Shared / prod project |
 | Studio | http://127.0.0.1:54323 | Hosted Dashboard |
-| Env | `.env.local` → `127.0.0.1:54321` | `.env.local` → project URL |
+| Env | `.env.local` → `127.0.0.1:54321` | Vercel Environment Variables |
 | Destructive SQL | Safe to reset / truncate | **Never** “just debug” with truncate / `db reset --linked` |
 
 **Foot-guns**
 
 - Do **not** run `supabase db reset --linked` or destructive SQL against the linked project while iterating.
-- Keep remote credentials out of day-to-day local debugging; switch `.env.local` deliberately when you need remote.
-- Deploy / shared preview still use the remote Supabase project — this guide does not replace that.
+- Do not put hosted Supabase keys in day-to-day `.env.local`.
+- Deploy / shared preview use Vercel env — this guide does not replace that.
 
 Useful remote-only commands (when you intentionally need them):
 
@@ -140,7 +119,6 @@ Then set `BABY_LOVABLE_DEV_USER_ID` to the returned `id`.
 3. `.env.local` points at local URL + keys + seed `BABY_LOVABLE_DEV_USER_ID`.
 4. `npm run agent -- -l` (or create a session via web) succeeds against local.
 5. Refresh Studio: new rows appear under `sessions` / `session_messages`.
-6. Confirm `.env.local` is **not** still pointing at the remote project URL if you intended local-only work.
 
 ## Related
 
