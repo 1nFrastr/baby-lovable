@@ -205,7 +205,7 @@ export function runtimePatchChangesState(
   current: DaytonaRuntimeSnapshot,
   patch: DaytonaRuntimePatch,
 ): boolean {
-  const keys: Array<keyof DaytonaRuntimePatch> = [
+  const keys = [
     "generation",
     "desired",
     "observed",
@@ -218,7 +218,7 @@ export function runtimePatchChangesState(
     "leaseOwner",
     "leaseExpiresAt",
     "clearNextCache",
-  ];
+  ] as const satisfies ReadonlyArray<keyof DaytonaRuntimeSnapshot>;
   for (const key of keys) {
     if (!Object.prototype.hasOwnProperty.call(patch, key)) {
       continue;
