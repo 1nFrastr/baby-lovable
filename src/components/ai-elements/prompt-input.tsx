@@ -521,6 +521,7 @@ export const PromptInput = ({
   maxFileSize,
   onError,
   onSubmit,
+  onPointerDown,
   children,
   ...props
 }: PromptInputProps) => {
@@ -919,11 +920,30 @@ export const PromptInput = ({
       />
       <form
         className={cn("w-full select-none", className)}
+        onPointerDown={(event) => {
+          onPointerDown?.(event);
+          if (event.defaultPrevented) {
+            return;
+          }
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return;
+          }
+          if (target.closest("button, a, input, textarea, [role='button']")) {
+            return;
+          }
+          const textarea = event.currentTarget.querySelector(
+            "textarea[data-slot='input-group-control']",
+          );
+          if (textarea instanceof HTMLTextAreaElement) {
+            textarea.focus();
+          }
+        }}
         onSubmit={handleSubmit}
         ref={formRef}
         {...props}
       >
-        <InputGroup className="overflow-hidden">{children}</InputGroup>
+        <InputGroup className="cursor-text overflow-hidden">{children}</InputGroup>
       </form>
     </>
   );
@@ -958,13 +978,26 @@ export type PromptInputTextareaProps = ComponentProps<
 export const PromptInputTextarea = ({
   onChange,
   onKeyDown,
+  onFocus,
+  onPointerDown,
   className,
   placeholder = "What would you like to know?",
+  value,
+  defaultValue,
+  "aria-label": ariaLabel,
   ...props
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
   const [isComposing, setIsComposing] = useState(false);
+  const [uncontrolledEmpty, setUncontrolledEmpty] = useState(
+    () => String(defaultValue ?? "") === "",
+  );
+  const controlledValue = controller?.textInput.value ?? value;
+  const isEmpty =
+    controlledValue !== undefined
+      ? String(controlledValue).length === 0
+      : uncontrolledEmpty;
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
     (e) => {
@@ -1043,35 +1076,58 @@ export const PromptInputTextarea = ({
   const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
   const handleCompositionStart = useCallback(() => setIsComposing(true), []);
 
+  const emitChange = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
+      setUncontrolledEmpty(e.currentTarget.value.length === 0);
+      if (controller) {
+        controller.textInput.setInput(e.currentTarget.value);
+      }
+      onChange?.(e);
+    },
+    [controller, onChange],
+  );
+
   const controlledProps = controller
     ? {
-        onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
-          controller.textInput.setInput(e.currentTarget.value);
-          onChange?.(e);
-        },
+        onChange: emitChange,
         value: controller.textInput.value,
       }
     : {
-        onChange,
+        onChange: emitChange,
+        ...(value !== undefined ? { value } : {}),
+        ...(defaultValue !== undefined ? { defaultValue } : {}),
       };
 
   return (
-    <InputGroupTextarea
-      className={cn(
-        // Empty textarea placeholders participate in document selection in
-        // Chromium; isolate them from adjacent message double-click ranges.
-        "field-sizing-content max-h-48 min-h-16 select-text placeholder-shown:select-none",
-        className
-      )}
-      name="message"
-      onCompositionEnd={handleCompositionEnd}
-      onCompositionStart={handleCompositionStart}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      placeholder={placeholder}
-      {...props}
-      {...controlledProps}
-    />
+    <>
+      <InputGroupTextarea
+        aria-label={ariaLabel ?? placeholder}
+        className={cn(
+          // Native textarea placeholders join Chromium document selections.
+          // Keep the control out of adjacent message ranges unless focused.
+          "field-sizing-content max-h-48 min-h-16 pointer-events-none caret-transparent select-none focus:pointer-events-auto focus:caret-current focus:select-text",
+          className
+        )}
+        name="message"
+        onCompositionEnd={handleCompositionEnd}
+        onCompositionStart={handleCompositionStart}
+        onFocus={onFocus}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onPointerDown={onPointerDown}
+        {...props}
+        {...controlledProps}
+      />
+      {isEmpty ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0 right-0 left-0 select-none px-2.5 py-2 text-base text-muted-foreground md:text-sm"
+          data-slot="composer-placeholder"
+        >
+          {placeholder}
+        </span>
+      ) : null}
+    </>
   );
 };
 
