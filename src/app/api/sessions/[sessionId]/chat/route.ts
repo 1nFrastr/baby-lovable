@@ -12,6 +12,7 @@ import {
   cancelSessionRun,
   cancelWorkflowRun,
 } from "@/lib/chat/cancel-session-run";
+import { capReasoningStream } from "@/lib/chat/cap-reasoning-stream";
 import { bindAssistantMessageId } from "@/lib/chat/stable-message-stream";
 import {
   awaitRuntimeDesired,
@@ -208,6 +209,7 @@ export async function POST(
 
     const stream = run.readable
       .pipeThrough(createModelCallToUIChunkTransform())
+      .pipeThrough(capReasoningStream())
       .pipeThrough(bindAssistantMessageId(assistantMessageId));
 
     return createUIMessageStreamResponse({

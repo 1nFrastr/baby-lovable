@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
 import { getFreestyleAdapter } from "./freestyle-client";
 import { isFreestyleConfigured } from "./freestyle-config";
 import {
@@ -127,12 +128,14 @@ export async function markRepositoryUnrecoverable(
 
 /** Strip accidental token/password material from persisted errors. */
 export function redactSecrets(message: string): string {
-  return message
-    .replace(/x-access-token:[^\s@/]+/gi, "x-access-token:[REDACTED]")
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-    .replace(/fake-token-[^\s]+/gi, "[REDACTED]")
-    .replace(/ghp_[A-Za-z0-9]+/g, "[REDACTED]")
-    .slice(0, 500);
+  return sanitizeJsonbText(
+    message
+      .replace(/x-access-token:[^\s@/]+/gi, "x-access-token:[REDACTED]")
+      .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+      .replace(/fake-token-[^\s]+/gi, "[REDACTED]")
+      .replace(/ghp_[A-Za-z0-9]+/g, "[REDACTED]")
+      .slice(0, 500),
+  );
 }
 
 export function newLocalCheckpointRunId(): string {

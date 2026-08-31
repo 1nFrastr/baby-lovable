@@ -19,6 +19,7 @@ import {
   formatToolPartLabel,
   formatToolPartOutput,
 } from "@/lib/chat/format-tool-label";
+import { truncateReasoningText } from "@/lib/chat/reasoning-text";
 import { joinReasoningText } from "@/lib/chat/turn-progress";
 import {
   isToolUIPart,
@@ -80,7 +81,7 @@ function ReasoningBlock({
   parts: Extract<UIMessage["parts"][number], { type: "reasoning" }>[];
   isStreaming: boolean;
 }) {
-  const reasoningText = joinReasoningText(parts);
+  const reasoningText = truncateReasoningText(joinReasoningText(parts));
 
   return (
     <Reasoning defaultOpen={false} isStreaming={isStreaming}>
@@ -114,10 +115,14 @@ export function ChatMessageParts({
       return;
     }
 
+    const isTrailing =
+      reasoningRun.startIndex + reasoningRun.parts.length - 1 ===
+      lastPartIndex;
     const isGroupStreaming =
       isLastMessage &&
       isStreaming &&
-      reasoningRun.parts.some((part) => part.state === "streaming");
+      (isTrailing ||
+        reasoningRun.parts.some((part) => part.state === "streaming"));
 
     nodes.push(
       <ReasoningBlock

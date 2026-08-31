@@ -7,6 +7,7 @@ import {
   estimateTokens,
 } from "@/lib/agent/context-compact";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { resolveReasoningEffort } from "@/lib/agent/reasoning";
 import { packageManagerPromptLines } from "@/lib/sandbox/package-manager";
 import { builderTools, createToolsContext } from "@/tools/builder-tools";
 
@@ -80,6 +81,7 @@ export function createBuilderAgent(
   const agent = new WorkflowAgent({
     model: modelId,
     maxOutputTokens: resolveMaxOutputTokens(modelId),
+    reasoning: resolveReasoningEffort(),
     instructions: buildSystemPrompt(),
     tools: builderTools,
     toolsContext,

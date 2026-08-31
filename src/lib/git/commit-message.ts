@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 
+import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
 import type { GitTurnOutcome } from "./types";
 
 const WRITE_TOOLS = new Set([
@@ -11,7 +12,7 @@ const WRITE_TOOLS = new Set([
 ]);
 
 function truncate(value: string, max: number): string {
-  const trimmed = value.trim();
+  const trimmed = sanitizeJsonbText(value).trim();
   if (trimmed.length <= max) {
     return trimmed;
   }
@@ -83,7 +84,7 @@ export function buildTurnCommitMessage(input: {
     `Outcome: ${input.outcome}`,
   );
 
-  return lines.join("\n");
+  return sanitizeJsonbText(lines.join("\n"));
 }
 
 export function deriveTurnCommitInput(

@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 
+import { sanitizeJsonbText, sanitizeJsonbValue } from "@/lib/json/sanitize-jsonb";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import type { SessionRow } from "./session-row";
@@ -66,9 +67,9 @@ export async function rpcClaimSessionTurn(input: {
     p_expected_revision: input.expectedRevision,
     p_turn_id: input.turnId,
     p_assistant_message_id: input.assistantMessageId,
-    p_user_message: input.userMessage,
-    p_assistant_message: input.assistantMessage,
-    p_title: input.title,
+    p_user_message: sanitizeJsonbValue(input.userMessage),
+    p_assistant_message: sanitizeJsonbValue(input.assistantMessage),
+    p_title: sanitizeJsonbText(input.title),
     p_started_at: input.startedAt,
   });
 
@@ -94,7 +95,7 @@ export async function rpcUpdateAssistantMessage(input: {
     p_expected_revision: input.expectedRevision,
     p_expected_turn_id: input.turnId,
     p_assistant_message_id: input.assistantMessageId,
-    p_message: input.message,
+    p_message: sanitizeJsonbValue(input.message),
     p_turn_checkpoint: input.turnCheckpoint ?? null,
   });
 
@@ -120,7 +121,7 @@ export async function rpcTerminalSessionTurn(input: {
     p_expected_revision: input.expectedRevision,
     p_expected_turn_id: input.turnId,
     p_assistant_message_id: input.assistantMessageId,
-    p_message: input.message,
+    p_message: input.message ? sanitizeJsonbValue(input.message) : null,
     p_checkpoint: input.checkpoint,
     p_status: input.status,
   });
@@ -141,7 +142,7 @@ export async function rpcReplaceSessionMessages(input: {
   const { data, error } = await supabase.rpc("cas_replace_session_messages", {
     p_session_id: input.sessionId,
     p_expected_revision: input.expectedRevision,
-    p_messages: input.messages,
+    p_messages: sanitizeJsonbValue(input.messages),
   });
 
   if (error) {

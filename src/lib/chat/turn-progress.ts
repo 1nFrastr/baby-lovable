@@ -1,6 +1,7 @@
 import { isToolUIPart, type UIMessage } from "ai";
 
 import { finalizeInterruptedAssistant } from "./interrupt-assistant";
+import { truncateReasoningText } from "./reasoning-text";
 
 export interface OrderedToolCall {
   toolCallId: string;
@@ -245,6 +246,8 @@ export function applyAssistantSnapshot(
 /**
  * Reasoning deltas are often one token per part. Concatenate them into a
  * single paragraph; do not insert markdown paragraph breaks between tokens.
+ * Do not insert a space between a high+low surrogate pair (one emoji split
+ * across deltas) — that would leave unpaired code units for jsonb sanitize.
  */
 export function joinReasoningText(
   parts: Array<{ text?: string } | string>,
@@ -257,9 +260,21 @@ export function joinReasoningText(
     if (!joined) {
       return next;
     }
-    const needsSpace = !/\s$/.test(joined) && !/^\s/.test(next);
+    const glueSurrogatePair =
+      isHighSurrogate(joined.charCodeAt(joined.length - 1)) &&
+      isLowSurrogate(next.charCodeAt(0));
+    const needsSpace =
+      !glueSurrogatePair && !/\s$/.test(joined) && !/^\s/.test(next);
     return needsSpace ? `${joined} ${next}` : `${joined}${next}`;
   }, "");
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }
 
 export function appendRecordedStep(
@@ -272,7 +287,9 @@ export function appendRecordedStep(
   }
 
   const stepParts: UIMessage["parts"] = [{ type: "step-start" }];
-  const reasoningText = joinReasoningText(step.reasoning ?? []);
+  const reasoningText = truncateReasoningText(
+    joinReasoningText(step.reasoning ?? []),
+  );
   if (reasoningText) {
     stepParts.push({
       type: "reasoning",

@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
+import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
 import {
   appendRecordedStep,
   applyAssistantSnapshot,
@@ -150,6 +151,23 @@ describe("appendRecordedStep", () => {
       text: "The user wants to revert.",
     });
   });
+
+  it("caps very long reasoning so snapshots stay UI-safe", () => {
+    const assistant = appendRecordedStep(
+      createTurnAssistantMessage("assistant-1"),
+      {
+        reasoning: [{ text: "x".repeat(5_000) }],
+        content: [],
+      },
+      new Map(),
+    );
+
+    expect(assistant.parts[1]).toMatchObject({ type: "reasoning" });
+    if (assistant.parts[1]?.type === "reasoning") {
+      expect(assistant.parts[1].text.endsWith("…")).toBe(true);
+      expect(assistant.parts[1].text.length).toBe(4_001);
+    }
+  });
 });
 
 describe("joinReasoningText", () => {
@@ -157,6 +175,12 @@ describe("joinReasoningText", () => {
     expect(
       joinReasoningText(["The", "user", " wants", " to revert."]),
     ).toBe("The user wants to revert.");
+  });
+
+  it("rejoins split emoji code units so later jsonb sanitize can keep them", () => {
+    const joined = joinReasoningText(["hello", "\uD83D", "\uDE00", "world"]);
+    expect(joined).toBe("hello 😀 world");
+    expect(sanitizeJsonbText(joined)).toBe("hello 😀 world");
   });
 });
 

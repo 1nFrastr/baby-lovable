@@ -4,6 +4,7 @@ import { createInterface } from "node:readline/promises";
 
 import { generateId, type UIMessage } from "ai";
 
+import { resolveReasoningEffort } from "@/lib/agent/reasoning";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import {
@@ -286,6 +287,7 @@ async function main(): Promise<void> {
     `baby-lovable agent · CLI`,
     `session   : ${session.id}`,
     `model     : ${process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash"}`,
+    `reasoning : ${resolveReasoningEffort()}`,
     `workspace : daytona:workspace`,
   ]);
 
