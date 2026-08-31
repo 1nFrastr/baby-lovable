@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getRun } from "workflow/api";
 
+import { capReasoningStream } from "@/lib/chat/cap-reasoning-stream";
 import { bindAssistantMessageId } from "@/lib/chat/stable-message-stream";
 import {
   requireSessionAuth,
@@ -53,9 +54,9 @@ export async function GET(
       [...session.messages]
         .reverse()
         .find((message) => message.role === "assistant")?.id;
-    let stream = rawReadable.pipeThrough(
-      createModelCallToUIChunkTransform(),
-    );
+    let stream = rawReadable
+      .pipeThrough(createModelCallToUIChunkTransform())
+      .pipeThrough(capReasoningStream());
     if (assistantMessageId) {
       stream = stream.pipeThrough(
         bindAssistantMessageId(assistantMessageId),

@@ -1,3 +1,4 @@
+import { sanitizeJsonbValue } from "@/lib/json/sanitize-jsonb";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import type { SessionGitSyncTask } from "./types";
@@ -63,7 +64,7 @@ export async function writeGitSyncTaskSupabase(
       session_id: task.sessionId,
       run_id: task.runId,
       user_id: userId,
-      task,
+      task: sanitizeJsonbValue(task),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "session_id,run_id" },

@@ -19,6 +19,10 @@ describe("freestyle git helpers", () => {
     expect(redacted).toContain("[REDACTED]");
   });
 
+  it("strips jsonb-illegal NULs from persisted error text", () => {
+    expect(redactSecrets("boom\u0000done")).toBe("boomdone");
+  });
+
   it("maps repository states to sourceControl projection", () => {
     const base = emptyGitRepository("sess_1");
     expect(sourceControlFromRepository(base).status).toBe("preparing");
@@ -67,6 +71,18 @@ describe("freestyle git helpers", () => {
     expect(message).toContain("Run: run_1");
     expect(message).toContain("Outcome: completed");
     expect(message).toContain("src/app/page.tsx");
+  });
+
+  it("strips jsonb-illegal characters from commit messages", () => {
+    const message = buildTurnCommitMessage({
+      turnIndex: 1,
+      userPrompt: "hello\u0000world",
+      sessionId: "sess_abc",
+      runId: "run_1",
+      outcome: "completed",
+    });
+    expect(message).toContain("helloworld");
+    expect(message).not.toContain("\u0000");
   });
 });
 

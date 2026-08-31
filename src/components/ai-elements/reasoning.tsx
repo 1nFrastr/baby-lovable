@@ -79,11 +79,26 @@ export const Reasoning = memo(
         if (startTimeRef.current === null) {
           startTimeRef.current = Date.now();
         }
-        return;
+
+        const tick = () => {
+          const start = startTimeRef.current;
+          if (start == null) {
+            return;
+          }
+          setDuration(
+            Math.max(1, Math.round((Date.now() - start) / MS_IN_S)),
+          );
+        };
+
+        tick();
+        const interval = window.setInterval(tick, MS_IN_S);
+        return () => window.clearInterval(interval);
       }
 
       if (startTimeRef.current !== null) {
-        setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S));
+        setDuration(
+          Math.max(1, Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S)),
+        );
         startTimeRef.current = null;
       }
     }, [isStreaming, setDuration]);
@@ -126,10 +141,12 @@ export type ReasoningTriggerProps = ComponentProps<
 };
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
-  if (isStreaming || duration === 0) {
+  if (isStreaming) {
+    const suffix =
+      duration != null && duration > 0 ? ` · ${duration}s` : "";
     return (
       <Shimmer as="span" className="text-sm" duration={1.5}>
-        Thinking
+        {`Thinking${suffix}`}
       </Shimmer>
     );
   }

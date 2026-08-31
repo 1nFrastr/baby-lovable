@@ -1,3 +1,4 @@
+import { sanitizeJsonbValue } from "@/lib/json/sanitize-jsonb";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import {
@@ -61,7 +62,7 @@ export async function writeGitRepositorySupabase(
     {
       session_id: repo.sessionId,
       user_id: userId,
-      repository: repo,
+      repository: sanitizeJsonbValue(repo),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "session_id" },
