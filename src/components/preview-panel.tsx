@@ -564,6 +564,7 @@ export function PreviewPanel({
     [
       invalidateRuntime,
       sessionId,
+      setEmbedRemountNonce,
       setPreviewAction,
       setPreviewActionError,
     ],
