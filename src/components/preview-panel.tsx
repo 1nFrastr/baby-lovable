@@ -6,9 +6,9 @@ import {
   Download,
   ExternalLink,
   House,
+  RefreshCcw,
   RefreshCw,
   RotateCcw,
-  RotateCcwSquare,
   RotateCw,
   X,
 } from "lucide-react";
@@ -844,7 +844,7 @@ export function PreviewPanel({
                 aria-busy={previewAction === "restart" || undefined}
                 className={toolbarIconButtonClass}
               >
-                <RotateCcwSquare className="h-3.5 w-3.5" strokeWidth={2} />
+                <RefreshCcw className="h-3.5 w-3.5" strokeWidth={2} />
               </button>
             </>
           )}
