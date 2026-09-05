@@ -5,6 +5,7 @@ import { getWritable } from "workflow";
 import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { toPromptUiMessages } from "@/lib/chat/compaction";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import {
@@ -13,6 +14,7 @@ import {
   type ToolCompletion,
 } from "@/lib/chat/turn-progress";
 import { createBuilderAgent } from "./builder-agent";
+import { ensureCompactionStep } from "./compaction-step";
 
 import {
   closeAgentWritableStep,
@@ -48,9 +50,18 @@ export async function builderChat(
       ),
     );
   }
-  const modelMessages = await convertToModelMessages(repairedMessages, {
-    ignoreIncompleteToolCalls: true,
-  });
+  const compactedMessages = await ensureCompactionStep(
+    sessionId,
+    turnId,
+    repairedMessages,
+    "turn",
+  );
+  const modelMessages = await convertToModelMessages(
+    toPromptUiMessages(compactedMessages),
+    {
+      ignoreIncompleteToolCalls: true,
+    },
+  );
 
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(
     sessionId,

@@ -166,6 +166,7 @@ export function ChatMessageParts({
         />,
       );
     }
+    // data-compaction and other non-renderable parts are ignored.
   });
 
   flushReasoning();

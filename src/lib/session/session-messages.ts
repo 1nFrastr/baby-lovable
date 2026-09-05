@@ -152,6 +152,31 @@ export async function rpcReplaceSessionMessages(input: {
   return (data as SessionRow[] | null)?.[0] ?? null;
 }
 
+export async function rpcInsertCompactionMessages(input: {
+  sessionId: string;
+  expectedRevision: number;
+  turnId: string;
+  beforeMessageId: string;
+  nail: UIMessage;
+  summary: UIMessage;
+}): Promise<SessionRow | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.rpc("cas_insert_compaction_messages", {
+    p_session_id: input.sessionId,
+    p_expected_revision: input.expectedRevision,
+    p_expected_turn_id: input.turnId,
+    p_before_message_id: input.beforeMessageId,
+    p_nail: sanitizeJsonbValue(input.nail),
+    p_summary: sanitizeJsonbValue(input.summary),
+  });
+
+  if (error) {
+    throw new Error(`Failed to insert compaction messages: ${error.message}`);
+  }
+
+  return (data as SessionRow[] | null)?.[0] ?? null;
+}
+
 export async function hydrateSessionRow(
   row: SessionRow,
 ): Promise<SessionRow & { messages: UIMessage[] }> {

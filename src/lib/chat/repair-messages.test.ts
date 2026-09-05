@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { UIMessage } from "ai";
 
+import {
+  createCompactionNail,
+  createCompactionSummary,
+} from "./compaction";
 import { isEmptyUiMessage, repairUiMessages } from "./repair-messages";
 
 function user(id: string, text: string): UIMessage {
@@ -109,5 +113,41 @@ describe("repairUiMessages", () => {
 
   it("treats whitespace-only user rows as empty", () => {
     expect(isEmptyUiMessage(user("u", "   \n"))).toBe(true);
+  });
+
+  it("keeps compaction nails and summary bubbles", () => {
+    const nail = createCompactionNail({
+      turnId: "turn_1",
+      auto: true,
+      tailStartId: "u2",
+    });
+    const summary = createCompactionSummary({
+      turnId: "turn_1",
+      text: "## Goal\n- Keep the todo app",
+    });
+    const messages = [
+      user("u1", "build a todo app"),
+      assistant("a1", "done"),
+      user("u2", "add color"),
+      assistant("a2", "colored"),
+      nail,
+      summary,
+      user("u3", "now add a gradient"),
+    ];
+
+    expect(isEmptyUiMessage(nail)).toBe(false);
+    expect(repairUiMessages(messages).map((message) => message.id)).toEqual(
+      messages.map((message) => message.id),
+    );
+  });
+
+  it("does not merge a compaction nail into adjacent user messages", () => {
+    const nail = createCompactionNail({ turnId: "turn_1", auto: true });
+    const result = repairUiMessages([
+      user("u1", "hello"),
+      nail,
+      user("u2", "continue"),
+    ]);
+    expect(result.map((message) => message.id)).toEqual(["u1", "cmp_turn_1", "u2"]);
   });
 });

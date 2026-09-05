@@ -13,6 +13,7 @@ import {
   finishSessionTurnSupabase,
   persistSessionStepSnapshotSupabase,
   persistSessionToolProgressSupabase,
+  persistSessionCompactionSupabase,
 } from "./turn-store-supabase";
 
 export type {
@@ -106,6 +107,22 @@ export async function finalizeSessionTurnCancellation(
     turnId,
     clientSnapshot,
     auth,
+  );
+}
+
+export async function persistSessionCompaction(
+  sessionId: string,
+  turnId: string,
+  beforeMessageId: string,
+  nail: UIMessage,
+  summary: UIMessage,
+) {
+  return persistSessionCompactionSupabase(
+    sessionId,
+    turnId,
+    beforeMessageId,
+    nail,
+    summary,
   );
 }
 

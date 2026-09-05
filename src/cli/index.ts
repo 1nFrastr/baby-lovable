@@ -190,15 +190,15 @@ async function runTurn(
     finalizeInterruptedMessages([...session.messages, userMessage]),
   );
 
-  const { assistantMessage } = await runAgentTurn({
+  const { assistantMessage, messages: compactedMessages } = await runAgentTurn({
     sessionId: session.id,
     messages,
     maxSteps,
   });
 
   const mergedMessages = assistantMessage
-    ? [...messages, assistantMessage]
-    : messages;
+    ? [...compactedMessages, assistantMessage]
+    : compactedMessages;
 
   await replaceMessages(session.id, mergedMessages);
 

@@ -1,5 +1,7 @@
 import { isToolUIPart, type UIMessage } from "ai";
 
+import { isCompactionMessage, isSummaryMessage, summaryText } from "./compaction";
+
 function textOf(message: UIMessage): string {
   return message.parts
     .filter(
@@ -25,6 +27,9 @@ export function isToolPartIncomplete(
 
 /** True when a message has nothing the model can use. */
 export function isEmptyUiMessage(message: UIMessage): boolean {
+  if (isCompactionMessage(message) || isSummaryMessage(message)) {
+    return false;
+  }
   return !message.parts.some((part) => {
     if (part.type === "text" || part.type === "reasoning") {
       return part.text.trim().length > 0;
@@ -47,6 +52,9 @@ export function isEmptyUiMessage(message: UIMessage): boolean {
  */
 function isInterruptedAssistant(message: UIMessage): boolean {
   if (message.role !== "assistant") {
+    return false;
+  }
+  if (isSummaryMessage(message) && summaryText(message).length > 0) {
     return false;
   }
   const parts = message.parts.filter((part) => part.type !== "step-start");
@@ -95,17 +103,29 @@ export function repairUiMessages(messages: UIMessage[]): UIMessage[] {
     }
 
     if (repaired.length === 0 && message.role !== "user") {
+      if (isSummaryMessage(message)) {
+        repaired.push(message);
+        continue;
+      }
       continue;
     }
 
     const previous = repaired[repaired.length - 1];
 
     if (previous?.role === "user" && message.role === "user") {
+      if (isCompactionMessage(previous) || isCompactionMessage(message)) {
+        repaired.push(message);
+        continue;
+      }
       repaired[repaired.length - 1] = mergeUserUiMessages(previous, message);
       continue;
     }
 
     if (previous?.role === "assistant" && message.role === "assistant") {
+      if (isSummaryMessage(previous) || isSummaryMessage(message)) {
+        repaired.push(message);
+        continue;
+      }
       repaired[repaired.length - 1] =
         message.parts.length >= previous.parts.length ? message : previous;
       continue;

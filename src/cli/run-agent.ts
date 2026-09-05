@@ -9,10 +9,12 @@ import {
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { toPromptUiMessages } from "@/lib/chat/compaction";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import { createBuilderAgent } from "@/workflow/builder-agent";
 import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
+import { ensureCompactionStep } from "@/workflow/compaction-step";
 
 export interface RunAgentOptions {
   sessionId: string;
@@ -24,6 +26,8 @@ export interface RunAgentOptions {
 
 export interface RunAgentResult {
   assistantMessage: UIMessage | null;
+  /** Ledger used for this turn, including any compaction nail + summary. */
+  messages: UIMessage[];
   modelMessages: ModelMessage[];
   usage: LanguageModelUsage;
   stepCount: number;
@@ -42,8 +46,15 @@ export async function runAgentTurn({
   messages,
   maxSteps = 30,
 }: RunAgentOptions): Promise<RunAgentResult> {
+  const repaired = repairUiMessages(finalizeInterruptedMessages(messages));
+  const compactedMessages = await ensureCompactionStep(
+    sessionId,
+    repaired.at(-1)?.id ?? `cli_${sessionId}`,
+    repaired,
+    "replace",
+  );
   const modelMessages = await convertToModelMessages(
-    repairUiMessages(finalizeInterruptedMessages(messages)),
+    toPromptUiMessages(compactedMessages),
     {
       ignoreIncompleteToolCalls: true,
     },
@@ -104,6 +115,7 @@ export async function runAgentTurn({
 
   return {
     assistantMessage,
+    messages: compactedMessages,
     modelMessages: result.messages,
     usage: result.totalUsage,
     stepCount: result.steps.length,

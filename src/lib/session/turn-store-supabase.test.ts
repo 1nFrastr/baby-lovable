@@ -300,6 +300,41 @@ function handleRpc(
     return [structuredClone(next)];
   }
 
+  if (fn === "cas_insert_compaction_messages") {
+    if (
+      current.conversation_revision !== params.p_expected_revision ||
+      current.active_turn_id !== params.p_expected_turn_id ||
+      !["pending", "running"].includes(current.run_status)
+    ) {
+      return null;
+    }
+    const nail = params.p_nail as UIMessage;
+    const summary = params.p_summary as UIMessage;
+    const existing = sortedMessages(sessionId);
+    if (
+      existing.some((row) => row.message_id === nail.id) &&
+      existing.some((row) => row.message_id === summary.id)
+    ) {
+      return [structuredClone(current)];
+    }
+    const beforeId = String(params.p_before_message_id);
+    const insertAt = existing.findIndex((row) => row.message_id === beforeId);
+    if (insertAt < 0) {
+      throw new Error(`before message ${beforeId} not found`);
+    }
+    const nextMessages = existing.map((row) => row.message);
+    nextMessages.splice(insertAt, 0, nail, summary);
+    replaceAllMessages(sessionId, nextMessages);
+    const next: SessionRow = {
+      ...current,
+      conversation_revision: current.conversation_revision + 1,
+      message_count: nextMessages.length,
+      updated_at: new Date().toISOString(),
+    };
+    memory.set(sessionId, next);
+    return [structuredClone(next)];
+  }
+
   throw new Error(`unexpected rpc ${fn}`);
 }
 
@@ -326,6 +361,7 @@ import {
   failSessionTurnSupabase,
   finalizeSessionTurnCancellationSupabase,
   finishSessionTurnSupabase,
+  persistSessionCompactionSupabase,
   persistSessionStepSnapshotSupabase,
   persistSessionToolProgressSupabase,
 } from "./turn-store-supabase";
@@ -649,5 +685,45 @@ describe("session turn store CAS", () => {
     expect(failed).toMatchObject({ ok: false, reason: "stale_turn" });
     expect(memory.get("sess_1")?.run_status).toBe("pending");
     expect(memory.get("sess_1")?.active_turn_id).toBe("turn_1");
+  });
+
+  it("inserts compaction nail and summary before the current user", async () => {
+    await claimTurn();
+    const nail: UIMessage = {
+      id: "cmp_turn_1",
+      role: "user",
+      parts: [
+        {
+          type: "data-compaction",
+          data: { auto: true, tailStartId: "user-1" },
+        },
+      ],
+    };
+    const summary: UIMessage = {
+      id: "csm_turn_1",
+      role: "assistant",
+      metadata: { summary: true },
+      parts: [{ type: "text", text: "## Goal\n- Build a todo app" }],
+    };
+    const result = await persistSessionCompactionSupabase(
+      "sess_1",
+      "turn_1",
+      "user-1",
+      nail,
+      summary,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.session.messages.map((message) => message.id)).toEqual(
+      ["cmp_turn_1", "csm_turn_1", "user-1", "assistant-1"],
+    );
+
+    const again = await persistSessionCompactionSupabase(
+      "sess_1",
+      "turn_1",
+      "user-1",
+      nail,
+      summary,
+    );
+    expect(again.ok && again.changed).toBe(false);
   });
 });
