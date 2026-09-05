@@ -61,10 +61,10 @@ That runs migrations in `supabase/migrations/`, then `supabase/seed.sql`.
 To push only new migration files against the already-running local DB (without wiping):
 
 ```bash
-supabase db push
+supabase db push --local
 ```
 
-(omit `--linked`; default target is the local stack when it is running)
+The `--local` flag is **required**. Bare `supabase db push` can target the linked remote project. Production schema is applied by GitHub Actions, not from a laptop — see [Supabase migrations](./supabase-migrations.md).
 
 ## Local vs linked remote
 
@@ -77,17 +77,11 @@ supabase db push
 
 **Foot-guns**
 
-- Do **not** run `supabase db reset --linked` or destructive SQL against the linked project while iterating.
+- Always pass `--local` to `supabase db push`. Bare `db push` or `--linked` can mutate the hosted project.
+- Do **not** run `supabase db reset --linked` or destructive / schema SQL against the linked project while iterating.
 - Do not put hosted Supabase keys in day-to-day `.env.local`.
 - Deploy / shared preview use Vercel env — this guide does not replace that.
-
-Useful remote-only commands (when you intentionally need them):
-
-```bash
-supabase link                 # one-time project link
-supabase db push --linked     # apply migrations to remote
-supabase db query --linked "select count(*) from public.sessions;"
-```
+- Production migrations: merge to `main` (or Actions `workflow_dispatch`). See [Supabase migrations](./supabase-migrations.md).
 
 ## Seed user (optional detail)
 
@@ -123,5 +117,6 @@ Then set `BABY_LOVABLE_DEV_USER_ID` to the returned `id`.
 ## Related
 
 - [Local development guide](./local-development.md)
+- [Supabase migrations](./supabase-migrations.md) — local `--local` vs production GitHub Actions
 - Schema baseline: `supabase/migrations/20260829010000_baseline.sql`
 - Env template: `.env.example`
