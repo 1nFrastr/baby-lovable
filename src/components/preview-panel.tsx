@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   House,
+  RefreshCcw,
   RefreshCw,
   RotateCcw,
   RotateCw,
@@ -256,9 +257,10 @@ export function PreviewPanel({
 
   const appTest = mergeChatAndPolledAppTest(runtimeAppTest, chatAppTest);
 
-  // Do not navigate while the proxy or Next is still warming. An early iframe
-  // can retain failed CSS requests even after the document and HMR become ready.
-  const previewEmbedUrl = readyPreviewUrl;
+  // Hide the iframe while a process restart is in-flight so a dying / 502
+  // document is not left on screen until the new Next boot is ready.
+  const previewEmbedUrl =
+    previewAction === "restart" ? undefined : readyPreviewUrl;
   const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
   const iframeLoaded =
     Boolean(previewEmbedUrl) && loadedIframeKey === previewIframeKey;
@@ -543,6 +545,11 @@ export function PreviewPanel({
           );
         }
         invalidateRuntime(sessionId);
+        if (action === "restart") {
+          // Remount even if generation already arrived via realtime (avoids
+          // sticking on a 502 loaded while pnpm was being killed).
+          setEmbedRemountNonce((nonce) => nonce + 1);
+        }
       } catch (error) {
         if (action === "warm") {
           previewWarmRequested.delete(sessionId);
@@ -557,6 +564,7 @@ export function PreviewPanel({
     [
       invalidateRuntime,
       sessionId,
+      setEmbedRemountNonce,
       setPreviewAction,
       setPreviewActionError,
     ],
@@ -640,8 +648,14 @@ export function PreviewPanel({
     runtimeError ??
     (preview.status === "error" ? preview.error : null);
   const previewStatus =
-    runtimeLoading && !projection
+    previewAction === "restart"
       ? {
+          title: "Restarting preview",
+          detail:
+            "Clearing the Next.js cache and restarting the remote dev server.",
+        }
+      : runtimeLoading && !projection
+        ? {
           title: "Connecting to preview",
           detail: "Syncing this session's runtime…",
         }
@@ -818,19 +832,19 @@ export function PreviewPanel({
                 }}
                 disabled={previewAction !== null}
                 title={
-                  previewAction === "restart" ? "Restarting…" : "Restart preview server"
+                  previewAction === "restart"
+                    ? "Restarting…"
+                    : "Restart preview server"
                 }
                 aria-label={
-                  previewAction === "restart" ? "Restarting" : "Restart preview"
+                  previewAction === "restart"
+                    ? "Restarting preview server"
+                    : "Restart preview server"
                 }
+                aria-busy={previewAction === "restart" || undefined}
                 className={toolbarIconButtonClass}
               >
-                <RotateCcw
-                  className={`h-3.5 w-3.5 ${
-                    previewAction === "restart" ? "animate-spin" : ""
-                  }`}
-                  strokeWidth={2}
-                />
+                <RefreshCcw className="h-3.5 w-3.5" strokeWidth={2} />
               </button>
             </>
           )}
