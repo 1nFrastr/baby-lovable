@@ -33,7 +33,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
-import { ChatMessageParts } from "@/components/chat-message-parts";
+import { ChatTimeline } from "@/components/chat-compaction";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
@@ -350,26 +350,11 @@ export function Chat({
               description=""
             />
           ) : (
-            chatMessages.map((message, index) => {
-              const isLast = index === chatMessages.length - 1;
-              const messageActivityLabel =
-                isLast && message.role === "assistant"
-                  ? activityLabel
-                  : null;
-
-              return (
-                <Message from={message.role} key={message.id}>
-                  <MessageContent>
-                    <ChatMessageParts
-                      activityLabel={messageActivityLabel}
-                      isLastMessage={isLast}
-                      isStreaming={localStreamAnimating}
-                      message={message}
-                    />
-                  </MessageContent>
-                </Message>
-              );
-            })
+            <ChatTimeline
+              activityLabel={activityLabel}
+              isStreaming={localStreamAnimating}
+              messages={chatMessages}
+            />
           )}
 
           {showStandaloneActivity && activityLabel ? (

@@ -168,6 +168,7 @@ See: [Local development guide](./docs/local-development.md) · [Local Supabase +
 - [Workflow Agent design](./docs/workflow-agent.md)
 - [Local development guide](./docs/local-development.md)
 - [Local Supabase + Studio](./docs/local-supabase.md)
+- [Supabase migrations](./docs/supabase-migrations.md)
 
 ## Roadmap
 

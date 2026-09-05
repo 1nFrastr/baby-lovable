@@ -45,7 +45,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 ```
 
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
-- **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks). For isolated local DB debugging (Studio + migrations, no remote foot-guns), see `docs/local-supabase.md`.
+- **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks). For isolated local DB debugging (Studio + migrations, no remote foot-guns), see `docs/local-supabase.md`. Schema changes: local Docker only; production is applied by GitHub Actions — see **Supabase schema changes** below.
 - **Daytona + Freestyle** — Freestyle `main` is the durable source of truth; the Daytona working tree is a projection. There is no local sandbox mode. See `docs/freestyle-git.md`.
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
@@ -174,3 +174,12 @@ See `.env.example`:
 - `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs (local seed: `11111111-1111-1111-1111-111111111111`)
 - `DAYTONA_API_KEY` — required remote workspace
 - `FREESTYLE_API_KEY` — required durable Git source of truth
+
+## Supabase schema changes
+
+Local Docker only. Production schema is applied by GitHub Actions, never from a laptop or this agent.
+
+- Apply new files with `supabase db push --local` (the `--local` flag is **required**). Bare `supabase db push` can hit the linked remote project.
+- Wipe and replay with `supabase db reset` against the local stack only.
+- Do **not** run `supabase db push --linked`, `supabase db reset --linked`, or schema-changing SQL via `supabase db query --linked` / the hosted Dashboard SQL editor.
+- Production: merge the migration to `main`, or run **Deploy Migrations to Production** (`workflow_dispatch`). See [docs/supabase-migrations.md](docs/supabase-migrations.md).

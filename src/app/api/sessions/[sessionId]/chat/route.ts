@@ -61,8 +61,14 @@ function emptyRunResponse(
 function latestUserMessage(messages: UIMessage[]): UIMessage | null {
   const message = [...messages]
     .reverse()
-    .find((candidate) => candidate.role === "user");
-  if (!message || !message.id || message.parts.length === 0) {
+    .find(
+      (candidate) =>
+        candidate.role === "user" &&
+        candidate.parts.some(
+          (part) => part.type === "text" && part.text.trim().length > 0,
+        ),
+    );
+  if (!message || !message.id) {
     return null;
   }
   return message;

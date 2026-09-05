@@ -90,7 +90,13 @@ export async function replaceMessages(
 }
 
 export function deriveSessionTitle(messages: UIMessage[]): string | undefined {
-  const firstUserMessage = messages.find((message) => message.role === "user");
+  const firstUserMessage = messages.find(
+    (message) =>
+      message.role === "user" &&
+      message.parts.some(
+        (part) => part.type === "text" && part.text.trim().length > 0,
+      ),
+  );
   if (!firstUserMessage) {
     return undefined;
   }

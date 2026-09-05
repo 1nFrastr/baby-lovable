@@ -18,6 +18,7 @@ import type { SessionAuthContext } from "./auth-context";
 import {
   hydrateSessionRow,
   rpcClaimSessionTurn,
+  rpcInsertCompactionMessages,
   rpcTerminalSessionTurn,
   rpcUpdateAssistantMessage,
   sessionMessageExists,
@@ -55,7 +56,13 @@ export type TurnMutationResult =
     };
 
 function titleFromFirstUser(messages: UIMessage[]): string | null {
-  const firstUser = messages.find((message) => message.role === "user");
+  const firstUser = messages.find(
+    (message) =>
+      message.role === "user" &&
+      message.parts.some(
+        (part) => part.type === "text" && part.text.trim().length > 0,
+      ),
+  );
   const text = firstUser?.parts.find((part) => part.type === "text");
   if (!text || text.type !== "text") {
     return null;
@@ -560,6 +567,61 @@ export async function failSessionTurnSupabase(
 
   throw new Error(
     `Failed to mark session turn failed after ${MAX_CAS_ATTEMPTS} CAS attempts`,
+  );
+}
+
+export async function persistSessionCompactionSupabase(
+  sessionId: string,
+  turnId: string,
+  beforeMessageId: string,
+  nail: UIMessage,
+  summary: UIMessage,
+): Promise<TurnMutationResult> {
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+    const current = await getSessionSupabase(sessionId);
+    if (!current) {
+      return { ok: false, reason: "not_found", session: null };
+    }
+    if (current.activeTurnId !== turnId) {
+      return {
+        ok: false,
+        reason: "stale_turn",
+        session: current,
+      };
+    }
+    if (current.runStatus !== "pending" && current.runStatus !== "running") {
+      return {
+        ok: false,
+        reason: "not_active",
+        session: current,
+      };
+    }
+    if (
+      current.messages.some((message) => message.id === nail.id) &&
+      current.messages.some((message) => message.id === summary.id)
+    ) {
+      return { ok: true, session: current, changed: false };
+    }
+
+    const row = await rpcInsertCompactionMessages({
+      sessionId,
+      expectedRevision: current.conversationRevision,
+      turnId,
+      beforeMessageId,
+      nail,
+      summary,
+    });
+    if (row) {
+      return {
+        ok: true,
+        session: await sessionFromRow(row as SessionRow),
+        changed: true,
+      };
+    }
+  }
+
+  throw new Error(
+    `Failed to persist compaction messages after ${MAX_CAS_ATTEMPTS} CAS attempts`,
   );
 }
 

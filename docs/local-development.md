@@ -23,7 +23,7 @@ Supabase is the only metadata backend; local Host no longer provides a JSON-file
 
 ### Local Supabase (recommended for DB debugging)
 
-Prefer a Docker local stack + Studio so you do not mutate the linked remote project while iterating. See **[Local Supabase + Studio](./local-supabase.md)**.
+Prefer a Docker local stack + Studio so you do not mutate the linked remote project while iterating. See **[Local Supabase + Studio](./local-supabase.md)**. Apply new SQL with `supabase db push --local` only; production migrations go through GitHub Actions ([Supabase migrations](./supabase-migrations.md)).
 
 ```bash
 supabase start
