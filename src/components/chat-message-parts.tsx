@@ -15,6 +15,10 @@ import {
 } from "@/components/ai-elements/tool";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
 import {
+  CONTEXT_SUMMARY_HEADING,
+  isContextSummaryMessage,
+} from "@/lib/chat/context-summary";
+import {
   compactToolInput,
   formatToolPartLabel,
   formatToolPartOutput,
@@ -147,6 +151,30 @@ export function ChatMessageParts({
     flushReasoning();
 
     if (part.type === "text") {
+      if (isContextSummaryMessage(message)) {
+        const body = part.text.startsWith(CONTEXT_SUMMARY_HEADING)
+          ? part.text.slice(CONTEXT_SUMMARY_HEADING.length).trim()
+          : part.text;
+        nodes.push(
+          <div
+            className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60"
+            key={`${message.id}-${index}`}
+          >
+            <p className="mb-1.5 text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
+              Summarized context
+            </p>
+            <MessageResponse
+              isAnimating={
+                isLastMessage && isStreaming && index === lastPartIndex
+              }
+            >
+              {body}
+            </MessageResponse>
+          </div>,
+        );
+        return;
+      }
+
       nodes.push(
         <MessageResponse
           isAnimating={isLastMessage && isStreaming && index === lastPartIndex}

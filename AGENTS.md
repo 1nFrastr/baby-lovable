@@ -78,7 +78,7 @@ npm run agent -- -s sess_abc123              # interactive REPL on existing sess
 ### Run modes
 
 1. **One-shot** (`-p`) — Best for automated / AI-driven testing. Creates or resumes a session, runs one agent turn, saves state, and exits while keeping the remote preview available.
-2. **Interactive REPL** (no `-p`) — Multi-turn chat in the terminal. Commands: `/exit`, `/quit`.
+2. **Interactive REPL** (no `-p`) — Multi-turn chat in the terminal. Commands: `/summarize` (compress context), `/exit`, `/quit`.
 3. **Session resume** (`-s`) — Continue prior work; Supabase messages and the Freestyle workspace are preserved.
 
 ### CLI observability
@@ -101,7 +101,7 @@ On each turn the runner also:
 npm run dev    # host app at http://localhost:3000
 ```
 
-Chat + live preview iframe. Same sessions and workspaces as CLI. Use when you want a human visual pass; **do not require it** for agent verification.
+Chat + live preview iframe. Same sessions and workspaces as CLI. Type `/` in the composer for slash commands (`/summarize` compresses conversation context without starting a builder turn). Use the UI when you want a human visual pass; **do not require it** for agent verification.
 
 **Web observability:** each chat turn emits a real-time trace to `npm run dev` stdout with the tag `[agent-trace] session=<id>` (e.g. `STEP`, `TOOL`, `DONE`, `WARN`). Filter without touching workflow steps:
 

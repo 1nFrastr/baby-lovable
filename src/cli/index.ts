@@ -15,6 +15,8 @@ import {
   listSessions,
   updateSession,
 } from "@/lib/session/store";
+import { executeSlashCommand } from "@/lib/chat/run-slash-command";
+import { resolveComposerSubmit } from "@/lib/chat/slash-commands";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import type { Session } from "@/lib/session/types";
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
@@ -105,7 +107,8 @@ function printHelp(): void {
       `  npm run agent -- -p "Create a todo app"\n` +
       `  npm run agent -- --session sess_abc123 -p "Add a gradient to the title"\n` +
       `  npm run agent            # interactive REPL (new session)\n` +
-      `  npm run agent -- -s sess_abc123   # interactive REPL on an existing session\n\n`,
+      `  npm run agent -- -s sess_abc123   # interactive REPL on an existing session\n\n` +
+      `REPL commands: /summarize [guidance], /exit, /quit\n`,
   );
 }
 
@@ -231,7 +234,7 @@ async function interactiveLoop(
   maxSteps: number,
 ): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  logger.info("Interactive mode. Type your prompt and press Enter. Commands: /exit, /quit.");
+  logger.info("Interactive mode. Type your prompt and press Enter. Commands: /summarize, /exit, /quit.");
 
   try {
     while (true) {
@@ -239,11 +242,46 @@ async function interactiveLoop(
       if (!answer) {
         continue;
       }
-      if (answer === "/exit" || answer === "/quit") {
+      const parsed = resolveComposerSubmit(answer, { surface: "cli" });
+      if (parsed.kind === "command" && parsed.command.name === "exit") {
         break;
       }
+      if (parsed.kind === "slash-draft") {
+        logger.error("Unknown or incomplete command. Try /summarize or /exit.");
+        continue;
+      }
+      if (parsed.kind === "unknown-command") {
+        logger.error(`Unknown command: /${parsed.name}`);
+        continue;
+      }
+      if (parsed.kind === "command" && parsed.command.name === "summarize") {
+        try {
+          logger.info("Summarizing conversation context…");
+          const result = await executeSlashCommand({
+            sessionId: session.id,
+            name: "summarize",
+            args: parsed.args,
+            auth: { userId: session.userId },
+          });
+          if (!result.ok) {
+            logger.error(result.error);
+            continue;
+          }
+          session.messages = result.session.messages;
+          logger.info(
+            `Context compressed: ~${result.estimatedTokensBefore} → ~${result.estimatedTokensAfter} tokens (dropped ${result.droppedMessageCount} messages).`,
+          );
+        } catch (error) {
+          logger.error(
+            error instanceof Error ? error.stack ?? error.message : String(error),
+          );
+        }
+        continue;
+      }
+      const prompt =
+        parsed.kind === "message" ? parsed.text : answer;
       try {
-        await runTurn(session, answer, maxSteps);
+        await runTurn(session, prompt, maxSteps);
       } catch (error) {
         logger.error(
           error instanceof Error ? error.stack ?? error.message : String(error),

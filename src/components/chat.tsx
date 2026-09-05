@@ -34,11 +34,15 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
 import { ChatMessageParts } from "@/components/chat-message-parts";
+import { SlashCommandMenu } from "@/components/slash-command-menu";
+import { useSlashCommandComposer } from "@/hooks/use-slash-command-composer";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
+import type { SlashCommand } from "@/lib/chat/slash-commands";
 import {
   isActiveRunStatus,
+  type Session,
   type SessionRunStatus,
 } from "@/lib/session/types";
 
@@ -117,6 +121,8 @@ export function Chat({
   const [stopping, setStopping] = useState(false);
   const [cancelledHint, setCancelledHint] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
   const lastSyncedRevisionRef = useRef(conversationRevision);
 
   const serverTurnActive =
@@ -175,7 +181,20 @@ export function Chat({
   ]);
 
   const composerLocked =
-    stopping || Boolean(pendingUserMessageId) || serverTurnActive;
+    stopping ||
+    summarizing ||
+    Boolean(pendingUserMessageId) ||
+    serverTurnActive;
+  const slash = useSlashCommandComposer({
+    disabled: composerLocked,
+    surface: "web",
+  });
+  const {
+    clear: clearSlash,
+    resolveSubmit,
+    setValue: setSlashValue,
+    handleKeyDown: handleSlashKeyDown,
+  } = slash;
   const showStop =
     !stopping &&
     runStatus !== "cancelling" &&
@@ -201,7 +220,9 @@ export function Chat({
       setLocalUserMessageId(userMessageId);
       setPendingUserMessageId(userMessageId);
       setStopError(null);
+      setCommandError(null);
       setCancelledHint(false);
+      clearSlash();
 
       void sendMessage({
         id: userMessageId,
@@ -212,18 +233,68 @@ export function Chat({
       });
       onSessionRefresh?.();
     },
-    [composerLocked, onSessionRefresh, sendMessage],
+    [composerLocked, onSessionRefresh, sendMessage, clearSlash],
+  );
+
+  const runSlashCommand = useCallback(
+    async (command: SlashCommand, args: string) => {
+      if (composerLocked || command.name !== "summarize") {
+        return;
+      }
+
+      setCommandError(null);
+      setStopError(null);
+      setSummarizing(true);
+      clearSlash();
+
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}/commands`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ command: command.name, args }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | {
+              error?: string;
+              session?: Session;
+            }
+          | null;
+        if (!response.ok) {
+          throw new Error(data?.error ?? `Command failed (${response.status})`);
+        }
+        if (data?.session?.messages) {
+          lastSyncedRevisionRef.current = data.session.conversationRevision;
+          setMessages(data.session.messages);
+        }
+        onSessionRefresh?.();
+      } catch (cause) {
+        setCommandError(
+          cause instanceof Error ? cause.message : "Command failed",
+        );
+      } finally {
+        setSummarizing(false);
+      }
+    },
+    [clearSlash, composerLocked, onSessionRefresh, sessionId, setMessages],
   );
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
-      const trimmed = message.text.trim();
-      if (!trimmed) {
+      const parsed = resolveSubmit(message.text);
+      if (parsed.kind === "empty" || parsed.kind === "slash-draft") {
         return;
       }
-      sendUserText(trimmed);
+      if (parsed.kind === "unknown-command") {
+        setCommandError(`Unknown command: /${parsed.name}`);
+        return;
+      }
+      if (parsed.kind === "command") {
+        void runSlashCommand(parsed.command, parsed.args);
+        return;
+      }
+      sendUserText(parsed.text);
     },
-    [sendUserText],
+    [resolveSubmit, runSlashCommand, sendUserText],
   );
 
   const handleRunAppTest = useCallback(() => {
@@ -311,12 +382,14 @@ export function Chat({
     ? "streaming"
     : status === "error"
       ? "error"
-      : pendingUserMessageId
+      : summarizing || pendingUserMessageId
         ? "submitted"
         : "ready";
   const composerPlaceholder = stopping
     ? "Stopping… you can send again after cancel succeeds"
-    : "Describe the app you want to build…";
+    : summarizing
+      ? "Summarizing conversation…"
+      : "Describe the app you want to build… Type / for commands";
   const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop
@@ -338,6 +411,7 @@ export function Chat({
           {sessionStatusHint}
           {error ? ` - ${error.message}` : ""}
           {stopError ? ` - ${stopError}` : ""}
+          {commandError ? ` - ${commandError}` : ""}
         </p>
       </div>
 
@@ -386,48 +460,74 @@ export function Chat({
       </Conversation>
 
       <div className="border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <PromptInput onSubmit={handleSubmit}>
-          <PromptInputBody>
-            <PromptInputTextarea
-              aria-busy={composerLocked || undefined}
-              className={
-                composerLocked
-                  ? "cursor-not-allowed text-muted-foreground"
-                  : undefined
-              }
-              onKeyDown={(event) => {
-                if (
-                  composerLocked &&
-                  event.key === "Enter" &&
-                  !event.shiftKey
-                ) {
-                  event.preventDefault();
-                }
+        <div className="relative">
+          {slash.menuOpen ? (
+            <SlashCommandMenu
+              commands={slash.matches}
+              highlight={slash.highlight}
+              onHighlight={slash.setHighlight}
+              onSelect={(command) => {
+                void runSlashCommand(command, "");
               }}
-              placeholder={composerPlaceholder}
-              readOnly={composerLocked}
             />
-          </PromptInputBody>
-          <PromptInputFooter>
-            <PromptInputTools>
-              {showAppTestButton ? (
-                <PromptInputButton
-                  disabled={composerLocked}
-                  onClick={handleRunAppTest}
-                  tooltip="Send a message asking the agent to run a happy-path UI test"
-                >
-                  <FlaskConical className="size-4" />
-                  Auto Test
-                </PromptInputButton>
-              ) : null}
-            </PromptInputTools>
-            <PromptInputSubmit
-              onStop={showStop ? handleStop : undefined}
-              status={submitStatus}
-              stopping={stopping}
-            />
-          </PromptInputFooter>
-        </PromptInput>
+          ) : null}
+          <PromptInput onSubmit={handleSubmit}>
+            <PromptInputBody>
+              <PromptInputTextarea
+                aria-activedescendant={
+                  slash.menuOpen && slash.highlighted
+                    ? `slash-command-${slash.highlighted.name}`
+                    : undefined
+                }
+                aria-busy={composerLocked || undefined}
+                aria-controls={slash.menuOpen ? "slash-command-list" : undefined}
+                aria-expanded={slash.menuOpen || undefined}
+                aria-haspopup={slash.menuOpen ? "listbox" : undefined}
+                className={
+                  composerLocked
+                    ? "cursor-not-allowed text-muted-foreground"
+                    : undefined
+                }
+                onChange={(event) => setSlashValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (handleSlashKeyDown(event)) {
+                    return;
+                  }
+                  if (
+                    composerLocked &&
+                    event.key === "Enter" &&
+                    !event.shiftKey
+                  ) {
+                    event.preventDefault();
+                  }
+                }}
+                placeholder={composerPlaceholder}
+                readOnly={composerLocked}
+                role={slash.menuOpen ? "combobox" : undefined}
+                value={slash.value}
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <PromptInputTools>
+                {showAppTestButton ? (
+                  <PromptInputButton
+                    disabled={composerLocked}
+                    onClick={handleRunAppTest}
+                    tooltip="Send a message asking the agent to run a happy-path UI test"
+                  >
+                    <FlaskConical className="size-4" />
+                    Auto Test
+                  </PromptInputButton>
+                ) : null}
+              </PromptInputTools>
+              <PromptInputSubmit
+                onStop={showStop ? handleStop : undefined}
+                status={submitStatus}
+                stopping={stopping}
+              />
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
       </div>
     </div>
   );
