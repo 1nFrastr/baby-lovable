@@ -234,6 +234,7 @@ export function PreviewPanel({
   >(null);
   /** Bumped on turn end / sourceControl change — refetch version list. */
   const [versionsRefreshKey, setVersionsRefreshKey] = useState(0);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
@@ -795,11 +796,16 @@ export function PreviewPanel({
             <button
               type="button"
               onClick={() => setVersionsRefreshKey((key) => key + 1)}
+              disabled={historyBusy}
               className={toolbarIconButtonClass}
               title="Refresh version history"
               aria-label="Refresh version history"
+              aria-busy={historyBusy || undefined}
             >
-              <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${historyBusy ? "animate-spin" : ""}`}
+                strokeWidth={2}
+              />
             </button>
           ) : (
             <>
@@ -945,6 +951,7 @@ export function PreviewPanel({
               key={sessionId}
               sessionId={sessionId}
               refreshKey={versionsRefreshKey}
+              onBusyChange={setHistoryBusy}
             />
           ) : null}
         </div>

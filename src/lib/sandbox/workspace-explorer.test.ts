@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EXPLORER_MAX_IMAGE_BYTES,
   EXPLORER_MAX_LINES,
   buildExplorerTree,
+  explorerImageMimeType,
+  explorerImageResult,
   filterExplorerEntries,
   isExplorerHiddenPath,
   looksBinaryByExtension,
+  looksImageByExtension,
+  looksSvgByExtension,
   truncateExplorerContent,
 } from "./workspace-explorer";
 import type { FileInfo } from "./types";
@@ -97,7 +102,51 @@ describe("workspace-explorer", () => {
   });
 
   it("detects binary extensions", () => {
-    expect(looksBinaryByExtension("public/logo.png")).toBe(true);
+    expect(looksBinaryByExtension("public/fonts/inter.woff2")).toBe(true);
+    expect(looksBinaryByExtension("archive.zip")).toBe(true);
     expect(looksBinaryByExtension("src/app/page.tsx")).toBe(false);
+  });
+
+  it("detects previewable image extensions including svg", () => {
+    expect(looksImageByExtension("public/logo.png")).toBe(true);
+    expect(looksImageByExtension("public/hero.JPEG")).toBe(true);
+    expect(looksImageByExtension("public/icon.svg")).toBe(true);
+    expect(looksImageByExtension("public/mark.webp")).toBe(true);
+    expect(looksImageByExtension("src/app/page.tsx")).toBe(false);
+    expect(looksBinaryByExtension("public/logo.png")).toBe(false);
+    expect(looksBinaryByExtension("public/icon.svg")).toBe(false);
+    expect(explorerImageMimeType("assets/logo.svg")).toBe("image/svg+xml");
+    expect(explorerImageMimeType("assets/photo.jpg")).toBe("image/jpeg");
+    expect(looksSvgByExtension("public/icon.svg")).toBe(true);
+    expect(looksSvgByExtension("public/logo.png")).toBe(false);
+  });
+
+  it("builds an image preview payload and clears content when truncated", () => {
+    const ok = explorerImageResult({
+      path: "public/logo.png",
+      mimeType: "image/png",
+      encoding: "base64",
+      content: "aaaa",
+      byteLength: 3,
+    });
+    expect(ok).toMatchObject({
+      kind: "image",
+      binary: false,
+      encoding: "base64",
+      content: "aaaa",
+      truncated: false,
+    });
+
+    const tooLarge = explorerImageResult({
+      path: "public/hero.png",
+      mimeType: "image/png",
+      encoding: "base64",
+      content: "aaaa",
+      byteLength: EXPLORER_MAX_IMAGE_BYTES + 1,
+      truncated: true,
+    });
+    expect(tooLarge.content).toBe("");
+    expect(tooLarge.truncated).toBe(true);
+    expect(tooLarge.maxBytes).toBe(EXPLORER_MAX_IMAGE_BYTES);
   });
 });

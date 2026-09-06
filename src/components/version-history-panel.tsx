@@ -1,6 +1,6 @@
 "use client";
 
-import { History, RefreshCw } from "lucide-react";
+import { History } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type { VersionHistoryItem } from "@/lib/git/types";
@@ -9,6 +9,8 @@ interface VersionHistoryPanelProps {
   sessionId: string;
   /** Bump when sourceControl flips (e.g. syncing → synced) to refetch. */
   refreshKey: number;
+  /** Lets the panel toolbar mirror the in-panel refresh spinner. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 interface VersionsResponse {
@@ -63,6 +65,7 @@ function formatTime(iso: string): string {
 export function VersionHistoryPanel({
   sessionId,
   refreshKey,
+  onBusyChange,
 }: VersionHistoryPanelProps) {
   const [versions, setVersions] = useState<VersionHistoryItem[]>([]);
   const [available, setAvailable] = useState(true);
@@ -90,8 +93,18 @@ export function VersionHistoryPanel({
   }, [sessionId]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => {
+      void load();
+    });
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    onBusyChange?.(loading);
+  }, [loading, onBusyChange]);
+
+  useEffect(() => {
+    return () => onBusyChange?.(false);
+  }, [onBusyChange]);
 
   if (!available) {
     return (
@@ -104,22 +117,10 @@ export function VersionHistoryPanel({
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-zinc-950">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+      <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Auto-archived after each chat turn (read-only)
         </p>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-600 transition hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-900"
-        >
-          <RefreshCw
-            className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
-            strokeWidth={2}
-          />
-          Refresh
-        </button>
       </div>
 
       {error ? (
