@@ -271,6 +271,92 @@ export function looksSvgByExtension(filePath: string): boolean {
   return extensionOf(filePath) === "svg";
 }
 
+const SVG_OPEN_TAG = /<svg\b[^>]*>/i;
+
+function svgOpenTagAttr(openTag: string, name: string): string | undefined {
+  const quoted = new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i").exec(
+    openTag,
+  );
+  if (quoted) {
+    return quoted[1];
+  }
+  const unquoted = new RegExp(`\\b${name}\\s*=\\s*([^\\s>]+)`, "i").exec(
+    openTag,
+  );
+  return unquoted?.[1];
+}
+
+/** CSS lengths that are not a concrete preview size (fill the parent instead). */
+function parseSvgUserLength(raw: string | undefined): number | null {
+  if (!raw) {
+    return null;
+  }
+  const value = raw.trim();
+  if (value.endsWith("%") || value.startsWith("calc(")) {
+    return null;
+  }
+  const match = /^([0-9]*\.?[0-9]+)(px)?$/i.exec(value);
+  if (!match) {
+    return null;
+  }
+  const n = Number(match[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseSvgViewBoxSize(
+  raw: string | undefined,
+): { width: number; height: number } | null {
+  if (!raw) {
+    return null;
+  }
+  const parts = raw
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  if (
+    parts.length !== 4 ||
+    !Number.isFinite(parts[2]) ||
+    !Number.isFinite(parts[3]) ||
+    parts[2] <= 0 ||
+    parts[3] <= 0
+  ) {
+    return null;
+  }
+  return { width: parts[2], height: parts[3] };
+}
+
+/**
+ * Intrinsic CSS pixel size for an SVG `<img>` preview.
+ * Template icons often have only `viewBox` (no width/height), which Chrome
+ * reports as 0×0 when the `<img>` shrink-wraps inside a flex item.
+ */
+export function parseSvgDisplaySize(
+  svg: string,
+): { width: number; height: number } | null {
+  const openTag = SVG_OPEN_TAG.exec(svg)?.[0];
+  if (!openTag) {
+    return null;
+  }
+
+  const width = parseSvgUserLength(svgOpenTagAttr(openTag, "width"));
+  const height = parseSvgUserLength(svgOpenTagAttr(openTag, "height"));
+  if (width && height) {
+    return { width, height };
+  }
+
+  const viewBox = parseSvgViewBoxSize(svgOpenTagAttr(openTag, "viewBox"));
+  if (!viewBox) {
+    return null;
+  }
+  if (width) {
+    return { width, height: (viewBox.height / viewBox.width) * width };
+  }
+  if (height) {
+    return { width: (viewBox.width / viewBox.height) * height, height };
+  }
+  return viewBox;
+}
+
 export function explorerUnsupportedBinaryResult(
   path: string,
 ): ExplorerContentResult {
