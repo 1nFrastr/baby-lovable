@@ -192,14 +192,6 @@ export function WorkspaceFileExplorer({
     }
   }, [sessionId]);
 
-  // Drop cache + selection when switching sessions.
-  useEffect(() => {
-    clearContentCache();
-    setSelectedPath(null);
-    setContent(null);
-    setContentError(null);
-  }, [sessionId, clearContentCache]);
-
   useEffect(() => {
     onBusyChange?.(rootLoading);
   }, [rootLoading, onBusyChange]);
