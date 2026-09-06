@@ -23,6 +23,19 @@ const LARGE_RESULT_TOOLS = new Set([
   "testPreview",
 ]);
 
+/**
+ * Host used to replace writeFile/readFile payloads with a stub that looked
+ * like file contents (`[compacted: path · N chars — already written…]`).
+ * Models then wrote that stub back to disk. Detect both the old stub and
+ * any one-line `[compacted … · N chars — …]` payload.
+ */
+const COMPACTED_FILE_PAYLOAD_RE =
+  /^\[compacted(?::\s+[^·]+)?\s·\s\d+\s+chars\s+—/;
+
+export function isCompactedFilePayload(value: string): boolean {
+  return COMPACTED_FILE_PAYLOAD_RE.test(value.trim());
+}
+
 /** Rough token estimate — good enough for compaction triggers. */
 export function estimateTokens(messages: ModelMessage[]): number {
   return Math.ceil(JSON.stringify(messages).length / 4);
@@ -35,6 +48,28 @@ function truncateText(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n…[truncated ${value.length - maxChars} chars]`;
 }
 
+function omitLargeField(
+  record: Record<string, unknown>,
+  key: string,
+  minChars: number,
+  note: string,
+): void {
+  const value = record[key];
+  if (typeof value !== "string" || value.length <= minChars) {
+    return;
+  }
+  const chars = value.length;
+  delete record[key];
+  record[`${key}Omitted`] = true;
+  record[`${key}Chars`] = chars;
+  if (typeof record.note !== "string") {
+    record.note = note;
+  }
+}
+
+const OMIT_WRITE_NOTE =
+  "Payload omitted after a successful write. Do not write a placeholder. Call readFile if you need the current file.";
+
 function compactToolInput(toolName: string, input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return input;
@@ -43,17 +78,9 @@ function compactToolInput(toolName: string, input: unknown): unknown {
   const record = { ...(input as Record<string, unknown>) };
 
   if (FILE_MUTATION_TOOLS.has(toolName)) {
-    if (typeof record.content === "string" && record.content.length > 200) {
-      const path =
-        typeof record.path === "string" ? record.path : "(unknown path)";
-      record.content = `[compacted: ${path} · ${record.content.length} chars — already written; use readFile if needed]`;
-    }
-    if (typeof record.oldString === "string" && record.oldString.length > 200) {
-      record.oldString = truncateText(record.oldString, 120);
-    }
-    if (typeof record.newString === "string" && record.newString.length > 200) {
-      record.newString = truncateText(record.newString, 120);
-    }
+    omitLargeField(record, "content", 200, OMIT_WRITE_NOTE);
+    omitLargeField(record, "oldString", 200, OMIT_WRITE_NOTE);
+    omitLargeField(record, "newString", 200, OMIT_WRITE_NOTE);
   }
 
   return record;
@@ -133,10 +160,12 @@ function compactToolOutput(toolName: string, output: unknown): unknown {
 
   if (typeof output === "object" && !Array.isArray(output)) {
     const rec = { ...(output as Record<string, unknown>) };
-    if (typeof rec.content === "string" && rec.content.length > 300) {
-      const path = typeof rec.path === "string" ? rec.path : undefined;
-      rec.content = `[compacted${path ? `: ${path}` : ""} · ${rec.content.length} chars — re-read if needed]`;
-    }
+    omitLargeField(
+      rec,
+      "content",
+      300,
+      "File contents omitted from history. Call readFile to get the current file.",
+    );
     if (typeof rec.stdout === "string" && rec.stdout.length > 300) {
       rec.stdout = truncateText(rec.stdout, 300);
     }

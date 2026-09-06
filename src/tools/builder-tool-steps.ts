@@ -1,3 +1,4 @@
+import { isCompactedFilePayload } from "@/lib/agent/context-compact";
 import {
   buildAllowedShellCommand,
   validateRunCommand,
@@ -20,6 +21,9 @@ function pathGuard(
 
   return { ok: false as const, error };
 }
+
+const COMPACTED_WRITE_ERROR =
+  "Refusing to write a compacted history stub. Call readFile for the current file, then write the real contents.";
 
 export type ToolContext = {
   sessionId: string;
@@ -69,6 +73,14 @@ export async function writeFileStep(
     return { ...blocked, path: input.path };
   }
 
+  if (isCompactedFilePayload(input.content)) {
+    return {
+      ok: false as const,
+      path: input.path,
+      error: COMPACTED_WRITE_ERROR,
+    };
+  }
+
   try {
     await awaitMutationGate(context);
   } catch (error) {
@@ -109,6 +121,17 @@ export async function editFileStep(
   const blocked = pathGuard("edit", input.path);
   if (blocked) {
     return { ...blocked, path: input.path };
+  }
+
+  if (
+    isCompactedFilePayload(input.oldString) ||
+    isCompactedFilePayload(input.newString)
+  ) {
+    return {
+      ok: false as const,
+      path: input.path,
+      error: COMPACTED_WRITE_ERROR,
+    };
   }
 
   try {
