@@ -17,7 +17,7 @@ export const AUTO_CONTINUE_MAX = Math.max(
 
 /** Transient model message — never persisted to session UI history. */
 export const AUTO_CONTINUE_HINT_LENGTH =
-  "[Auto-continue] Your previous reply was cut off by the per-step output token limit (finishReason=length). Continue the SAME task. Do NOT resume or repeat a long analysis / coordinate dump / step-by-step narration — that burns the limit again. Prefer tools (readFile/editFile/writeFile/checkPreview). Keep chat text to 1–3 short sentences. Do not repeat tool calls that already succeeded. If a file write was interrupted, readFile first, then editFile or writeFile.";
+  "[Auto-continue] Your previous reply was cut off by the per-step output token limit (finishReason=length). Continue the SAME task. Do NOT resume or repeat a long analysis / coordinate dump / step-by-step narration — that burns the limit again. Prefer tools (readFile/editFile/writeFile/checkPreview). Keep chat text to 1–3 short sentences. Do not repeat tool calls that already succeeded. If a file write was interrupted, readFile first, then editFile or writeFile. Never write compacted/omitted history placeholders back to files.";
 
 export const AUTO_CONTINUE_HINT_STEPS =
   "[Auto-continue] You hit the per-pass step budget before finishing. Continue the same task from where you left off. Do not repeat tool calls that already succeeded. Prefer small focused files and short chat replies; call checkPreview before finishing if you edited files.";

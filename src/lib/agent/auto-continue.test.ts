@@ -8,6 +8,7 @@ import {
 import {
   compactModelMessages,
   estimateTokens,
+  isCompactedFilePayload,
 } from "./context-compact";
 import {
   isOutputLengthFinish,
@@ -321,9 +322,17 @@ describe("compactModelMessages", () => {
       const part = firstCall.content[0];
       expect(part?.type).toBe("tool-call");
       if (part?.type === "tool-call") {
-        const input = part.input as { content?: string };
-        expect(input.content).toMatch(/\[compacted:/);
-        expect(input.content?.length ?? 0).toBeLessThan(big.length);
+        const input = part.input as {
+          content?: string;
+          contentOmitted?: boolean;
+          contentChars?: number;
+          note?: string;
+        };
+        expect(input.content).toBeUndefined();
+        expect(input.contentOmitted).toBe(true);
+        expect(input.contentChars).toBe(big.length);
+        expect(input.note).toMatch(/readFile/i);
+        expect(JSON.stringify(input)).not.toMatch(/\[compacted:/);
       }
     }
 
@@ -366,5 +375,30 @@ describe("compactModelMessages", () => {
           ),
       ),
     ).toBe(false);
+  });
+});
+
+describe("isCompactedFilePayload", () => {
+  it("detects the historical writeFile stub that poisoned SVG files", () => {
+    expect(
+      isCompactedFilePayload(
+        "[compacted: public/images/rifle-3.svg · 449 chars — already written; use readFile if needed]",
+      ),
+    ).toBe(true);
+  });
+
+  it("detects omitted readFile payloads from older compact output", () => {
+    expect(
+      isCompactedFilePayload(
+        "[compacted: src/app/page.tsx · 1200 chars — re-read if needed]\n",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag real source", () => {
+    expect(isCompactedFilePayload("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>")).toBe(
+      false,
+    );
+    expect(isCompactedFilePayload("export const compacted = true;")).toBe(false);
   });
 });
