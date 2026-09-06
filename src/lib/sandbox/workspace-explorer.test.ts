@@ -11,6 +11,7 @@ import {
   looksBinaryByExtension,
   looksImageByExtension,
   looksSvgByExtension,
+  parseSvgDisplaySize,
   truncateExplorerContent,
 } from "./workspace-explorer";
 import type { FileInfo } from "./types";
@@ -148,5 +149,42 @@ describe("workspace-explorer", () => {
     expect(tooLarge.content).toBe("");
     expect(tooLarge.truncated).toBe(true);
     expect(tooLarge.maxBytes).toBe(EXPLORER_MAX_IMAGE_BYTES);
+  });
+
+  it("parses SVG preview size from width/height or viewBox", () => {
+    expect(
+      parseSvgDisplaySize(
+        `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"></svg>`,
+      ),
+    ).toEqual({ width: 24, height: 24 });
+
+    expect(
+      parseSvgDisplaySize(
+        `<svg viewBox="0 0 394 80" fill="none" xmlns="http://www.w3.org/2000/svg"></svg>`,
+      ),
+    ).toEqual({ width: 394, height: 80 });
+
+    expect(
+      parseSvgDisplaySize(
+        `<svg viewBox="0,0,32,16" xmlns="http://www.w3.org/2000/svg"></svg>`,
+      ),
+    ).toEqual({ width: 32, height: 16 });
+
+    expect(
+      parseSvgDisplaySize(
+        `<svg width="100%" height="100%" viewBox="0 0 48 24" xmlns="http://www.w3.org/2000/svg"></svg>`,
+      ),
+    ).toEqual({ width: 48, height: 24 });
+
+    expect(
+      parseSvgDisplaySize(`<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 16 8"
+></svg>`),
+    ).toEqual({ width: 16, height: 8 });
+
+    expect(
+      parseSvgDisplaySize(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`),
+    ).toBeNull();
   });
 });

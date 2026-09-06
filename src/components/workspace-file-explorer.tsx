@@ -3,10 +3,11 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type {
-  ExplorerContentResult,
-  ExplorerTreeNode,
-  ExplorerTreeResult,
+import {
+  parseSvgDisplaySize,
+  type ExplorerContentResult,
+  type ExplorerTreeNode,
+  type ExplorerTreeResult,
 } from "@/lib/sandbox/workspace-explorer";
 
 import { CodeHighlight } from "./code-highlight";
@@ -66,6 +67,23 @@ function formatByteSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+const SVG_PREVIEW_FALLBACK_SIZE = 512;
+
+function explorerImagePreviewHint(
+  result: ExplorerContentResult,
+): { width: number; height: number } | undefined {
+  if (result.mimeType !== "image/svg+xml") {
+    return undefined;
+  }
+  if (result.encoding === "utf8" && result.content) {
+    const parsed = parseSvgDisplaySize(result.content);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return { width: SVG_PREVIEW_FALLBACK_SIZE, height: SVG_PREVIEW_FALLBACK_SIZE };
+}
+
 function ExplorerImagePreview({
   result,
 }: {
@@ -89,16 +107,21 @@ function ExplorerImagePreview({
     );
   }
 
+  const hint = explorerImagePreviewHint(result);
+
   return (
-    <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
-      {/* Avoid max-w-full on a shrink-wrapped flex child — % max size becomes 0×0. */}
-      <div className="shrink-0 overflow-hidden rounded-md border border-zinc-200 bg-[image:repeating-conic-gradient(#e4e4e7_0_25%,#fafafa_0_50%)] bg-[size:16px_16px] dark:border-zinc-800 dark:bg-[image:repeating-conic-gradient(#27272a_0_25%,#18181b_0_50%)]">
+    <div className="flex h-full min-h-0 w-full items-center justify-center overflow-auto p-6">
+      {/* Width must come from this pane, not the image. max-width alone
+          cannot expand an SVG that has no intrinsic size (Chrome → 0×0). */}
+      <div className="min-w-0 w-full max-w-[40rem] overflow-hidden rounded-md border border-zinc-200 bg-[image:repeating-conic-gradient(#e4e4e7_0_25%,#fafafa_0_50%)] bg-[size:16px_16px] dark:border-zinc-800 dark:bg-[image:repeating-conic-gradient(#27272a_0_25%,#18181b_0_50%)]">
         {/* Data URLs from the sandbox cannot go through next/image. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
           alt={result.path}
-          className="block h-auto w-auto max-h-[min(70vh,640px)] max-w-[min(90vw,40rem)] object-contain"
+          width={hint?.width}
+          height={hint?.height}
+          className="block h-auto w-full max-h-[min(70vh,640px)] object-contain"
         />
       </div>
     </div>
