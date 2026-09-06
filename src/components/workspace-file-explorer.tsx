@@ -91,13 +91,14 @@ function ExplorerImagePreview({
 
   return (
     <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
-      <div className="max-h-full max-w-full overflow-hidden rounded-md border border-zinc-200 bg-[image:repeating-conic-gradient(#e4e4e7_0_25%,#fafafa_0_50%)] bg-[size:16px_16px] dark:border-zinc-800 dark:bg-[image:repeating-conic-gradient(#27272a_0_25%,#18181b_0_50%)]">
+      {/* Avoid max-w-full on a shrink-wrapped flex child — % max size becomes 0×0. */}
+      <div className="shrink-0 overflow-hidden rounded-md border border-zinc-200 bg-[image:repeating-conic-gradient(#e4e4e7_0_25%,#fafafa_0_50%)] bg-[size:16px_16px] dark:border-zinc-800 dark:bg-[image:repeating-conic-gradient(#27272a_0_25%,#18181b_0_50%)]">
         {/* Data URLs from the sandbox cannot go through next/image. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
           alt={result.path}
-          className="max-h-[min(70vh,640px)] max-w-full object-contain"
+          className="block h-auto w-auto max-h-[min(70vh,640px)] max-w-[min(90vw,40rem)] object-contain"
         />
       </div>
     </div>
