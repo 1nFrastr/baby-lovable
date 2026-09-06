@@ -227,6 +227,7 @@ export function PreviewPanel({
   );
   /** Bumped when an agent turn finishes — explorer re-lists from sandbox. */
   const [filesRefreshKey, setFilesRefreshKey] = useState(0);
+  const [filesBusy, setFilesBusy] = useState(false);
   /** Session id for which History panel stays mounted. */
   const [historyMountSessionId, setHistoryMountSessionId] = useState<
     string | null
@@ -294,6 +295,7 @@ export function PreviewPanel({
   useEffect(() => {
     setPreviewRefreshPending(false);
     setIframeLocation(null);
+    setFilesBusy(false);
   }, [sessionId]);
 
   // Remount clears SPA history inside the iframe — reset chrome until bridge reports.
@@ -778,11 +780,16 @@ export function PreviewPanel({
             <button
               type="button"
               onClick={() => setFilesRefreshKey((key) => key + 1)}
+              disabled={filesBusy}
               className={toolbarIconButtonClass}
               title="Sync file list"
               aria-label="Sync file list"
+              aria-busy={filesBusy || undefined}
             >
-              <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${filesBusy ? "animate-spin" : ""}`}
+                strokeWidth={2}
+              />
             </button>
           ) : panelTab === "history" ? (
             <button
@@ -922,6 +929,7 @@ export function PreviewPanel({
               key={sessionId}
               sessionId={sessionId}
               refreshKey={filesRefreshKey}
+              onBusyChange={setFilesBusy}
             />
           ) : null}
         </div>
