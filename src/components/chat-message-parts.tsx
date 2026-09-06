@@ -21,13 +21,93 @@ import {
 } from "@/lib/chat/format-tool-label";
 import { truncateReasoningText } from "@/lib/chat/reasoning-text";
 import { joinReasoningText } from "@/lib/chat/turn-progress";
+import { cn } from "@/lib/utils";
 import {
   isToolUIPart,
   type DynamicToolUIPart,
   type ToolUIPart,
   type UIMessage,
 } from "ai";
-import type { ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+
+/** ~6 lines of text-sm; long user prompts stay collapsed until expanded. */
+const USER_MESSAGE_COLLAPSE_CLASS = "max-h-36 overflow-hidden";
+
+function collectTextParts(message: UIMessage): string {
+  return message.parts
+    .filter(
+      (part): part is Extract<UIMessage["parts"][number], { type: "text" }> =>
+        part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+function UserMessageText({ text }: { text: string }) {
+  const contentRef = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) {
+      return;
+    }
+
+    const measure = () => {
+      if (expanded) {
+        return;
+      }
+      setOverflows(el.scrollHeight > el.clientHeight + 1);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [expanded, text]);
+
+  return (
+    <div className="min-w-0">
+      <div className="relative">
+        <p
+          className={cn(
+            "whitespace-pre-wrap break-words",
+            !expanded && USER_MESSAGE_COLLAPSE_CLASS,
+          )}
+          ref={contentRef}
+        >
+          {text}
+        </p>
+        {overflows && !expanded ? (
+          <button
+            aria-expanded={false}
+            className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-secondary from-35% to-transparent pt-8 text-left text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+            onClick={() => setExpanded(true)}
+            type="button"
+          >
+            Show more
+          </button>
+        ) : null}
+      </div>
+      {overflows && expanded ? (
+        <button
+          aria-expanded={true}
+          className="mt-1.5 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+          onClick={() => setExpanded(false)}
+          type="button"
+        >
+          Show less
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function BuilderToolPart({
   part,
@@ -103,6 +183,14 @@ export function ChatMessageParts({
   /** Idle planning label; rendered in the same column/gap as tool rows. */
   activityLabel?: string | null;
 }) {
+  if (message.role === "user") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <UserMessageText text={collectTextParts(message)} />
+      </div>
+    );
+  }
+
   const lastPartIndex = message.parts.length - 1;
   const nodes: ReactNode[] = [];
   let reasoningRun: {
