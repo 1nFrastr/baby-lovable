@@ -93,7 +93,9 @@ export function VersionHistoryPanel({
   }, [sessionId]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => {
+      void load();
+    });
   }, [load, refreshKey]);
 
   useEffect(() => {

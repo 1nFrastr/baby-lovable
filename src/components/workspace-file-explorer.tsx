@@ -92,7 +92,8 @@ function ExplorerImagePreview({
   return (
     <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
       <div className="max-h-full max-w-full overflow-hidden rounded-md border border-zinc-200 bg-[image:repeating-conic-gradient(#e4e4e7_0_25%,#fafafa_0_50%)] bg-[size:16px_16px] dark:border-zinc-800 dark:bg-[image:repeating-conic-gradient(#27272a_0_25%,#18181b_0_50%)]">
-        {/* SVG is rendered via <img> so scripts in the markup do not run. */}
+        {/* Data URLs from the sandbox cannot go through next/image. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
           alt={result.path}
@@ -197,7 +198,10 @@ export function WorkspaceFileExplorer({
   const [contentError, setContentError] = useState<string | null>(null);
   const [rootError, setRootError] = useState<string | null>(null);
   const [rootLoading, setRootLoading] = useState(true);
-  const [svgView, setSvgView] = useState<"preview" | "source">("preview");
+  const [svgViewByPath, setSvgViewByPath] = useState<{
+    path: string;
+    mode: "preview" | "source";
+  } | null>(null);
   const contentRequestRef = useRef(0);
   const treeRequestRef = useRef(0);
   const prevRefreshKeyRef = useRef(refreshKey);
@@ -311,9 +315,10 @@ export function WorkspaceFileExplorer({
     [sessionId],
   );
 
-  useEffect(() => {
-    setSvgView("preview");
-  }, [selectedPath]);
+  const svgView =
+    selectedPath && svgViewByPath?.path === selectedPath
+      ? svgViewByPath.mode
+      : "preview";
 
   // Invalidate cache + re-fetch open file when sandbox sync refreshKey bumps.
   useEffect(() => {
@@ -412,7 +417,11 @@ export function WorkspaceFileExplorer({
               <div className="flex rounded-md border border-zinc-200 p-0.5 text-[11px] dark:border-zinc-700">
                 <button
                   type="button"
-                  onClick={() => setSvgView("preview")}
+                  onClick={() => {
+                    if (selectedPath) {
+                      setSvgViewByPath({ path: selectedPath, mode: "preview" });
+                    }
+                  }}
                   className={`rounded px-1.5 py-0.5 font-medium ${
                     svgView === "preview"
                       ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
@@ -423,7 +432,11 @@ export function WorkspaceFileExplorer({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSvgView("source")}
+                  onClick={() => {
+                    if (selectedPath) {
+                      setSvgViewByPath({ path: selectedPath, mode: "source" });
+                    }
+                  }}
                   className={`rounded px-1.5 py-0.5 font-medium ${
                     svgView === "source"
                       ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
