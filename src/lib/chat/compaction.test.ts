@@ -221,4 +221,13 @@ describe("buildCompactionUserPrompt", () => {
     expect(prompt).toContain("src/app/page.tsx");
     expect(prompt).not.toContain("data-compaction");
   });
+
+  it("includes optional user guidance", () => {
+    const prompt = buildCompactionUserPrompt({
+      head: [user("u1", "build a todo app")],
+      guidance: "focus on auth",
+    });
+    expect(prompt).toContain("<user-guidance>");
+    expect(prompt).toContain("focus on auth");
+  });
 });

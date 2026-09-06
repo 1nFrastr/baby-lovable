@@ -407,6 +407,7 @@ export function transcriptOf(messages: UIMessage[]): string {
 export function buildCompactionUserPrompt(input: {
   head: UIMessage[];
   previousSummary?: string;
+  guidance?: string;
 }): string {
   const previous =
     input.previousSummary?.trim() ||
@@ -417,6 +418,10 @@ export function buildCompactionUserPrompt(input: {
   const sections = [COMPACTION_SUMMARY_TEMPLATE];
   if (previous) {
     sections.push(`<previous-summary>\n${previous}\n</previous-summary>`);
+  }
+  const guidance = input.guidance?.trim();
+  if (guidance) {
+    sections.push(`<user-guidance>\n${guidance}\n</user-guidance>`);
   }
   sections.push(
     history
