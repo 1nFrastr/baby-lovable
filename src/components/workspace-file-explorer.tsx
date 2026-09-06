@@ -15,6 +15,8 @@ interface WorkspaceFileExplorerProps {
   sessionId: string;
   /** Bump after each agent turn (or manual refresh) to re-sync from sandbox. */
   refreshKey: number;
+  /** Lets the panel toolbar mirror the in-explorer refresh spinner. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -127,6 +129,7 @@ function FileTreeNode({
 export function WorkspaceFileExplorer({
   sessionId,
   refreshKey,
+  onBusyChange,
 }: WorkspaceFileExplorerProps) {
   const [tree, setTree] = useState<ExplorerTreeNode[]>([]);
   const [treeTruncated, setTreeTruncated] = useState(false);
@@ -138,6 +141,7 @@ export function WorkspaceFileExplorer({
   const [rootError, setRootError] = useState<string | null>(null);
   const [rootLoading, setRootLoading] = useState(true);
   const contentRequestRef = useRef(0);
+  const treeRequestRef = useRef(0);
   const prevRefreshKeyRef = useRef(refreshKey);
   /** Opened-file content cache — skip re-fetch when switching tabs unless force/refresh. */
   const contentCacheRef = useRef(new Map<string, ExplorerContentResult>());
@@ -147,6 +151,7 @@ export function WorkspaceFileExplorer({
   }, []);
 
   const reloadTree = useCallback(async () => {
+    const requestId = ++treeRequestRef.current;
     setRootLoading(true);
     setRootError(null);
 
@@ -154,6 +159,9 @@ export function WorkspaceFileExplorer({
       const data = await fetchJson<ExplorerTreeResult>(
         `/api/sessions/${sessionId}/files`,
       );
+      if (requestId !== treeRequestRef.current) {
+        return;
+      }
       setTree(data.tree);
       setTreeTruncated(data.truncated);
 
@@ -170,23 +178,27 @@ export function WorkspaceFileExplorer({
         return next;
       });
     } catch (error) {
-      setTree([]);
-      setTreeTruncated(false);
+      if (requestId !== treeRequestRef.current) {
+        return;
+      }
+      // Keep the last good tree on refresh failure; only first load stays empty.
       setRootError(
         error instanceof Error ? error.message : "Failed to load workspace",
       );
     } finally {
-      setRootLoading(false);
+      if (requestId === treeRequestRef.current) {
+        setRootLoading(false);
+      }
     }
   }, [sessionId]);
 
-  // Drop cache + selection when switching sessions.
   useEffect(() => {
-    clearContentCache();
-    setSelectedPath(null);
-    setContent(null);
-    setContentError(null);
-  }, [sessionId, clearContentCache]);
+    onBusyChange?.(rootLoading);
+  }, [rootLoading, onBusyChange]);
+
+  useEffect(() => {
+    return () => onBusyChange?.(false);
+  }, [onBusyChange]);
 
   // Initial load + sync after agent turn / manual refresh (one tree request).
   useEffect(() => {
@@ -221,12 +233,14 @@ export function WorkspaceFileExplorer({
         }
         contentCacheRef.current.set(filePath, data);
         setContent(data);
+        setContentError(null);
       } catch (error) {
         if (requestId !== contentRequestRef.current) {
           return;
         }
         contentCacheRef.current.delete(filePath);
-        setContent(null);
+        // Keep the last good view when re-fetching the same file fails.
+        setContent((prev) => (prev?.path === filePath ? prev : null));
         setContentError(
           error instanceof Error ? error.message : "Failed to read file",
         );
@@ -255,6 +269,17 @@ export function WorkspaceFileExplorer({
     });
   }, [refreshKey, selectedPath, loadFile, clearContentCache]);
 
+  const handleRefresh = useCallback(() => {
+    if (rootLoading) {
+      return;
+    }
+    clearContentCache();
+    void reloadTree();
+    if (selectedPath) {
+      void loadFile(selectedPath, { force: true });
+    }
+  }, [rootLoading, clearContentCache, reloadTree, selectedPath, loadFile]);
+
   const handleToggleDir = useCallback((dirPath: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -267,6 +292,10 @@ export function WorkspaceFileExplorer({
     });
   }, []);
 
+  const showingCurrentFile = Boolean(
+    selectedPath && content?.path === selectedPath,
+  );
+
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex w-[220px] shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
@@ -276,17 +305,17 @@ export function WorkspaceFileExplorer({
           </p>
           <button
             type="button"
-            onClick={() => {
-              clearContentCache();
-              void reloadTree();
-              if (selectedPath) {
-                void loadFile(selectedPath, { force: true });
-              }
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            onClick={handleRefresh}
+            disabled={rootLoading}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
             title="Resync full file tree from sandbox"
+            aria-label="Refresh file tree"
+            aria-busy={rootLoading || undefined}
           >
-            <RefreshCw className="h-3 w-3" strokeWidth={2} />
+            <RefreshCw
+              className={`h-3 w-3 ${rootLoading ? "animate-spin" : ""}`}
+              strokeWidth={2}
+            />
             Refresh
           </button>
         </div>
@@ -294,30 +323,32 @@ export function WorkspaceFileExplorer({
         <div className="min-h-0 flex-1 overflow-auto py-1">
           {rootLoading && tree.length === 0 ? (
             <p className="px-3 py-2 text-[12px] text-zinc-400">Loading…</p>
-          ) : rootError ? (
-            <p className="px-3 py-2 text-[12px] text-red-500">{rootError}</p>
           ) : (
             <>
-              <ul className="m-0 list-none p-0">
-                {tree.map((node) => (
-                  <FileTreeNode
-                    key={node.path}
-                    node={node}
-                    depth={0}
-                    expanded={expanded}
-                    selectedPath={selectedPath}
-                    onToggleDir={handleToggleDir}
-                    onSelectFile={(path) => {
-                      void loadFile(path);
-                    }}
-                  />
-                ))}
-                {!rootLoading && tree.length === 0 ? (
-                  <li className="px-3 py-2 text-[12px] text-zinc-400">
-                    Workspace is empty
-                  </li>
-                ) : null}
-              </ul>
+              {rootError ? (
+                <p className="px-3 py-2 text-[12px] text-red-500">{rootError}</p>
+              ) : null}
+              {tree.length === 0 && !rootError ? (
+                <p className="px-3 py-2 text-[12px] text-zinc-400">
+                  Workspace is empty
+                </p>
+              ) : tree.length > 0 ? (
+                <ul className="m-0 list-none p-0">
+                  {tree.map((node) => (
+                    <FileTreeNode
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      expanded={expanded}
+                      selectedPath={selectedPath}
+                      onToggleDir={handleToggleDir}
+                      onSelectFile={(path) => {
+                        void loadFile(path);
+                      }}
+                    />
+                  ))}
+                </ul>
+              ) : null}
               {treeTruncated ? (
                 <p className="px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
                   File tree truncated (node or depth limit reached)
@@ -336,11 +367,22 @@ export function WorkspaceFileExplorer({
           >
             {selectedPath ?? "Select a file to view (read-only)"}
           </p>
-          {content && !content.binary && content.truncated ? (
-            <span className="shrink-0 text-[11px] text-amber-700 dark:text-amber-300">
-              Truncated {content.shownLines}/{content.totalLines} lines
-            </span>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            {contentLoading && showingCurrentFile ? (
+              <span
+                className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300"
+                aria-label="Refreshing file"
+              />
+            ) : null}
+            {showingCurrentFile &&
+            content &&
+            !content.binary &&
+            content.truncated ? (
+              <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                Truncated {content.shownLines}/{content.totalLines} lines
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
@@ -348,12 +390,12 @@ export function WorkspaceFileExplorer({
             <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-400">
               Open a source file from the left
             </div>
-          ) : contentLoading ? (
+          ) : contentLoading && !showingCurrentFile ? (
             <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-400">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300" />
               Reading…
             </div>
-          ) : contentError ? (
+          ) : contentError && !showingCurrentFile ? (
             <p className="px-4 py-3 text-sm text-red-600 dark:text-red-400">
               {contentError}
             </p>
@@ -362,10 +404,17 @@ export function WorkspaceFileExplorer({
               Binary or non-text file; preview is not supported.
             </p>
           ) : (
-            <CodeHighlight
-              code={content?.content ?? ""}
-              filePath={selectedPath}
-            />
+            <>
+              {contentError && showingCurrentFile ? (
+                <p className="px-4 py-2 text-[12px] text-red-600 dark:text-red-400">
+                  {contentError}
+                </p>
+              ) : null}
+              <CodeHighlight
+                code={content?.content ?? ""}
+                filePath={selectedPath}
+              />
+            </>
           )}
         </div>
       </div>
