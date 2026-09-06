@@ -9,6 +9,8 @@ import {
 /** Soft cap for read-only explorer content (MVP). */
 export const EXPLORER_MAX_LINES = 2_000;
 export const EXPLORER_MAX_BYTES = 512 * 1024;
+/** Soft cap for inline image previews (raster + SVG). */
+export const EXPLORER_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 /** Full tree walk caps — one network round-trip to the host API. */
 export const EXPLORER_MAX_TREE_NODES = 2_000;
 export const EXPLORER_MAX_TREE_DEPTH = 16;
@@ -39,14 +41,21 @@ const EXPLORER_HIDDEN_NAMES = new Set([
   ".env.production.local",
 ]);
 
+/** Previewable in the explorer via `<img>` (including SVG). */
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  ico: "image/x-icon",
+  avif: "image/avif",
+  bmp: "image/bmp",
+};
+
+/** Non-previewable binary types — images are handled separately. */
 const BINARY_EXTENSIONS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "ico",
-  "svg",
   "woff",
   "woff2",
   "ttf",
@@ -91,10 +100,18 @@ export interface ExplorerListResult {
   entries: ExplorerFileEntry[];
 }
 
+export type ExplorerContentKind = "text" | "image" | "binary";
+export type ExplorerContentEncoding = "utf8" | "base64";
+
 export interface ExplorerContentResult {
   path: string;
+  /** UTF-8 text, or base64 payload when `encoding` is `"base64"`. */
   content: string;
+  kind: ExplorerContentKind;
+  /** True only for non-previewable binaries (`kind === "binary"`). */
   binary: boolean;
+  mimeType?: string;
+  encoding?: ExplorerContentEncoding;
   truncated: boolean;
   totalLines: number;
   shownLines: number;
@@ -242,6 +259,60 @@ export function looksBinaryByExtension(filePath: string): boolean {
   return BINARY_EXTENSIONS.has(extensionOf(filePath));
 }
 
+export function explorerImageMimeType(filePath: string): string | null {
+  return IMAGE_MIME_TYPES[extensionOf(filePath)] ?? null;
+}
+
+export function looksImageByExtension(filePath: string): boolean {
+  return explorerImageMimeType(filePath) !== null;
+}
+
+export function looksSvgByExtension(filePath: string): boolean {
+  return extensionOf(filePath) === "svg";
+}
+
+export function explorerUnsupportedBinaryResult(
+  path: string,
+): ExplorerContentResult {
+  return {
+    path,
+    content: "",
+    kind: "binary",
+    binary: true,
+    truncated: false,
+    totalLines: 0,
+    shownLines: 0,
+    maxLines: 0,
+    maxBytes: 0,
+    byteLength: 0,
+  };
+}
+
+export function explorerImageResult(args: {
+  path: string;
+  mimeType: string;
+  encoding: ExplorerContentEncoding;
+  content: string;
+  byteLength: number;
+  truncated?: boolean;
+}): ExplorerContentResult {
+  const truncated = Boolean(args.truncated);
+  return {
+    path: args.path,
+    content: truncated ? "" : args.content,
+    kind: "image",
+    binary: false,
+    mimeType: args.mimeType,
+    encoding: args.encoding,
+    truncated,
+    totalLines: 0,
+    shownLines: 0,
+    maxLines: 0,
+    maxBytes: EXPLORER_MAX_IMAGE_BYTES,
+    byteLength: args.byteLength,
+  };
+}
+
 export function looksBinaryContent(content: string): boolean {
   if (content.includes("\u0000")) {
     return true;
@@ -261,7 +332,10 @@ export function looksBinaryContent(content: string): boolean {
 export function truncateExplorerContent(
   raw: string,
   options?: { maxLines?: number; maxBytes?: number },
-): Omit<ExplorerContentResult, "path" | "binary"> {
+): Omit<
+  ExplorerContentResult,
+  "path" | "binary" | "kind" | "mimeType" | "encoding"
+> {
   const maxLines = options?.maxLines ?? EXPLORER_MAX_LINES;
   const maxBytes = options?.maxBytes ?? EXPLORER_MAX_BYTES;
 

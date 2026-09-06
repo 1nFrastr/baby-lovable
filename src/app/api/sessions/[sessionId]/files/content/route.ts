@@ -2,10 +2,16 @@ import { NextResponse } from "next/server";
 
 import { getProjectSandbox } from "@/lib/sandbox/factory";
 import { normalizeWorkspacePath } from "@/lib/sandbox/protected-paths";
+import type { ProjectSandbox } from "@/lib/sandbox/types";
 import {
+  EXPLORER_MAX_IMAGE_BYTES,
   assertExplorerReadPath,
+  explorerImageMimeType,
+  explorerImageResult,
+  explorerUnsupportedBinaryResult,
   looksBinaryByExtension,
   looksBinaryContent,
+  looksSvgByExtension,
   truncateExplorerContent,
 } from "@/lib/sandbox/workspace-explorer";
 import {
@@ -14,6 +20,94 @@ import {
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
+
+function jsonNoStore(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
+async function readExplorerImage(
+  sandbox: ProjectSandbox,
+  path: string,
+  mimeType: string,
+) {
+  let details;
+  try {
+    details = await sandbox.fs.getFileDetails(path);
+  } catch {
+    details = null;
+  }
+  if (details?.isDir) {
+    return jsonNoStore({ error: `"${path}" is a directory` }, 400);
+  }
+
+  const encoding = looksSvgByExtension(path) ? "utf8" : "base64";
+  const knownSize = details?.size ?? 0;
+  if (knownSize > EXPLORER_MAX_IMAGE_BYTES) {
+    return jsonNoStore(
+      explorerImageResult({
+        path,
+        mimeType,
+        encoding,
+        content: "",
+        byteLength: knownSize,
+        truncated: true,
+      }),
+    );
+  }
+
+  if (encoding === "utf8") {
+    const raw = await sandbox.fs.readTextFile(path);
+    const byteLength = new TextEncoder().encode(raw).byteLength;
+    if (byteLength > EXPLORER_MAX_IMAGE_BYTES) {
+      return jsonNoStore(
+        explorerImageResult({
+          path,
+          mimeType,
+          encoding,
+          content: "",
+          byteLength,
+          truncated: true,
+        }),
+      );
+    }
+    return jsonNoStore(
+      explorerImageResult({
+        path,
+        mimeType,
+        encoding,
+        content: raw,
+        byteLength,
+      }),
+    );
+  }
+
+  const bytes = await sandbox.fs.readBinaryFile(path);
+  if (bytes.byteLength > EXPLORER_MAX_IMAGE_BYTES) {
+    return jsonNoStore(
+      explorerImageResult({
+        path,
+        mimeType,
+        encoding,
+        content: "",
+        byteLength: bytes.byteLength,
+        truncated: true,
+      }),
+    );
+  }
+
+  return jsonNoStore(
+    explorerImageResult({
+      path,
+      mimeType,
+      encoding,
+      content: Buffer.from(bytes).toString("base64"),
+      byteLength: bytes.byteLength,
+    }),
+  );
+}
 
 export async function GET(
   request: Request,
@@ -53,23 +147,14 @@ export async function GET(
     }
 
     if (looksBinaryByExtension(path)) {
-      return NextResponse.json(
-        {
-          path,
-          content: "",
-          binary: true,
-          truncated: false,
-          totalLines: 0,
-          shownLines: 0,
-          maxLines: 0,
-          maxBytes: 0,
-          byteLength: 0,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
+      return jsonNoStore(explorerUnsupportedBinaryResult(path));
     }
 
     const sandbox = await getProjectSandbox(sessionId);
+    const imageMime = explorerImageMimeType(path);
+    if (imageMime) {
+      return readExplorerImage(sandbox, path, imageMime);
+    }
 
     let details;
     try {
@@ -78,40 +163,22 @@ export async function GET(
       details = null;
     }
     if (details?.isDir) {
-      return NextResponse.json(
-        { error: `"${path}" is a directory` },
-        { status: 400 },
-      );
+      return jsonNoStore({ error: `"${path}" is a directory` }, 400);
     }
 
     const raw = await sandbox.fs.readTextFile(path);
     if (looksBinaryContent(raw)) {
-      return NextResponse.json(
-        {
-          path,
-          content: "",
-          binary: true,
-          truncated: false,
-          totalLines: 0,
-          shownLines: 0,
-          maxLines: 0,
-          maxBytes: 0,
-          byteLength: 0,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
+      return jsonNoStore(explorerUnsupportedBinaryResult(path));
     }
 
     const truncated = truncateExplorerContent(raw);
 
-    return NextResponse.json(
-      {
-        path,
-        binary: false,
-        ...truncated,
-      },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+    return jsonNoStore({
+      path,
+      kind: "text",
+      binary: false,
+      ...truncated,
+    });
   } catch (error) {
     if (error instanceof SessionAccessDeniedError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

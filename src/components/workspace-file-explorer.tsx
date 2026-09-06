@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -15,7 +15,7 @@ interface WorkspaceFileExplorerProps {
   sessionId: string;
   /** Bump after each agent turn (or manual refresh) to re-sync from sandbox. */
   refreshKey: number;
-  /** Lets the panel toolbar mirror the in-explorer refresh spinner. */
+  /** Lets the panel toolbar show the single refresh spinner. */
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -44,6 +44,63 @@ function collectDirPaths(nodes: ExplorerTreeNode[], into: Set<string>): void {
       collectDirPaths(node.children, into);
     }
   }
+}
+
+function explorerImageDataUrl(result: ExplorerContentResult): string | null {
+  if (result.kind !== "image" || !result.mimeType || !result.content) {
+    return null;
+  }
+  if (result.encoding === "base64") {
+    return `data:${result.mimeType};base64,${result.content}`;
+  }
+  return `data:${result.mimeType};charset=utf-8,${encodeURIComponent(result.content)}`;
+}
+
+function formatByteSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${bytes} B`;
+}
+
+function ExplorerImagePreview({
+  result,
+}: {
+  result: ExplorerContentResult;
+}) {
+  const src = explorerImageDataUrl(result);
+  if (result.truncated && !src) {
+    return (
+      <p className="px-4 py-3 text-sm text-zinc-500">
+        {result.byteLength > 0
+          ? `Image is too large to preview (${formatByteSize(result.byteLength)}; max ${formatByteSize(result.maxBytes)}).`
+          : `Image is too large to preview (max ${formatByteSize(result.maxBytes)}).`}
+      </p>
+    );
+  }
+  if (!src) {
+    return (
+      <p className="px-4 py-3 text-sm text-zinc-500">
+        Image preview is not available.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
+      <div className="max-h-full max-w-full overflow-hidden rounded-md border border-zinc-200 bg-[image:repeating-conic-gradient(#e4e4e7_0_25%,#fafafa_0_50%)] bg-[size:16px_16px] dark:border-zinc-800 dark:bg-[image:repeating-conic-gradient(#27272a_0_25%,#18181b_0_50%)]">
+        {/* SVG is rendered via <img> so scripts in the markup do not run. */}
+        <img
+          src={src}
+          alt={result.path}
+          className="max-h-[min(70vh,640px)] max-w-full object-contain"
+        />
+      </div>
+    </div>
+  );
 }
 
 function FileTreeNode({
@@ -140,6 +197,7 @@ export function WorkspaceFileExplorer({
   const [contentError, setContentError] = useState<string | null>(null);
   const [rootError, setRootError] = useState<string | null>(null);
   const [rootLoading, setRootLoading] = useState(true);
+  const [svgView, setSvgView] = useState<"preview" | "source">("preview");
   const contentRequestRef = useRef(0);
   const treeRequestRef = useRef(0);
   const prevRefreshKeyRef = useRef(refreshKey);
@@ -253,6 +311,10 @@ export function WorkspaceFileExplorer({
     [sessionId],
   );
 
+  useEffect(() => {
+    setSvgView("preview");
+  }, [selectedPath]);
+
   // Invalidate cache + re-fetch open file when sandbox sync refreshKey bumps.
   useEffect(() => {
     const previous = prevRefreshKeyRef.current;
@@ -268,17 +330,6 @@ export function WorkspaceFileExplorer({
       void loadFile(selectedPath, { force: true });
     });
   }, [refreshKey, selectedPath, loadFile, clearContentCache]);
-
-  const handleRefresh = useCallback(() => {
-    if (rootLoading) {
-      return;
-    }
-    clearContentCache();
-    void reloadTree();
-    if (selectedPath) {
-      void loadFile(selectedPath, { force: true });
-    }
-  }, [rootLoading, clearContentCache, reloadTree, selectedPath, loadFile]);
 
   const handleToggleDir = useCallback((dirPath: string) => {
     setExpanded((prev) => {
@@ -299,25 +350,10 @@ export function WorkspaceFileExplorer({
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex w-[220px] shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+        <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
           <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             Workspace
           </p>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={rootLoading}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            title="Resync full file tree from sandbox"
-            aria-label="Refresh file tree"
-            aria-busy={rootLoading || undefined}
-          >
-            <RefreshCw
-              className={`h-3 w-3 ${rootLoading ? "animate-spin" : ""}`}
-              strokeWidth={2}
-            />
-            Refresh
-          </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto py-1">
@@ -368,18 +404,52 @@ export function WorkspaceFileExplorer({
             {selectedPath ?? "Select a file to view (read-only)"}
           </p>
           <div className="flex shrink-0 items-center gap-2">
-            {contentLoading && showingCurrentFile ? (
+            {showingCurrentFile &&
+            content?.kind === "image" &&
+            content.mimeType === "image/svg+xml" &&
+            content.encoding === "utf8" &&
+            content.content ? (
+              <div className="flex rounded-md border border-zinc-200 p-0.5 text-[11px] dark:border-zinc-700">
+                <button
+                  type="button"
+                  onClick={() => setSvgView("preview")}
+                  className={`rounded px-1.5 py-0.5 font-medium ${
+                    svgView === "preview"
+                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                      : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSvgView("source")}
+                  className={`rounded px-1.5 py-0.5 font-medium ${
+                    svgView === "source"
+                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                      : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  }`}
+                >
+                  Source
+                </button>
+              </div>
+            ) : null}
+            {contentLoading && showingCurrentFile && !rootLoading ? (
               <span
                 className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300"
                 aria-label="Refreshing file"
               />
             ) : null}
-            {showingCurrentFile &&
-            content &&
-            !content.binary &&
-            content.truncated ? (
+            {showingCurrentFile && content?.kind === "text" && content.truncated ? (
               <span className="text-[11px] text-amber-700 dark:text-amber-300">
                 Truncated {content.shownLines}/{content.totalLines} lines
+              </span>
+            ) : null}
+            {showingCurrentFile &&
+            content?.kind === "image" &&
+            content.truncated ? (
+              <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                Too large to preview
               </span>
             ) : null}
           </div>
@@ -399,7 +469,17 @@ export function WorkspaceFileExplorer({
             <p className="px-4 py-3 text-sm text-red-600 dark:text-red-400">
               {contentError}
             </p>
-          ) : content?.binary ? (
+          ) : content?.kind === "image" &&
+            !(svgView === "source" && content.encoding === "utf8") ? (
+            <>
+              {contentError && showingCurrentFile ? (
+                <p className="px-4 py-2 text-[12px] text-red-600 dark:text-red-400">
+                  {contentError}
+                </p>
+              ) : null}
+              <ExplorerImagePreview result={content} />
+            </>
+          ) : content?.binary || content?.kind === "binary" ? (
             <p className="px-4 py-3 text-sm text-zinc-500">
               Binary or non-text file; preview is not supported.
             </p>
