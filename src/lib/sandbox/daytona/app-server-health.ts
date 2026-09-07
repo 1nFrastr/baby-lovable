@@ -61,9 +61,54 @@ export async function remoteFileExists(
   }
 }
 
+/**
+ * Max bytes of next-development.log to pull for diagnosis.
+ * The file is append-only and can grow large; we only need the recent tail
+ * (errors + nearby access lines). Console UI keeps its own 200KB ring buffer.
+ */
+export const DEV_LOG_DIAGNOSE_TAIL_BYTES = 64 * 1024;
+
+const DEV_LOG_PATH = ".next/dev/logs/next-development.log";
+
+/** Drop a possibly partial first line after a mid-file byte/char cut. */
+export function trimLogTail(text: string): string {
+  if (!text) {
+    return "";
+  }
+  const nl = text.indexOf("\n");
+  if (nl === -1) {
+    return text;
+  }
+  // If the cut started mid-line, the first segment is garbage; keep from next line.
+  return text.slice(nl + 1);
+}
+
+/**
+ * Read only the recent tail of the Next development log.
+ * Prefers remote `tail -c` so Daytona never ships a multi-MB file over downloadFile.
+ */
 export async function readDevLog(sandbox: DaytonaProjectSandbox): Promise<string> {
   try {
-    return await sandbox.fs.readTextFile(".next/dev/logs/next-development.log");
+    const tailed = await sandbox.process.executeCommand(
+      `tail -c ${DEV_LOG_DIAGNOSE_TAIL_BYTES} -- ${DEV_LOG_PATH}`,
+      ".",
+      undefined,
+      15,
+    );
+    if (tailed.exitCode === 0) {
+      return trimLogTail(tailed.stdout);
+    }
+  } catch {
+    // Fall through to bounded download.
+  }
+
+  try {
+    const details = await sandbox.fs.getFileDetails(DEV_LOG_PATH);
+    // Never download a multi-MB log over the Daytona Files API.
+    if (details.size > DEV_LOG_DIAGNOSE_TAIL_BYTES) {
+      return "";
+    }
+    return await sandbox.fs.readTextFile(DEV_LOG_PATH);
   } catch {
     return "";
   }
