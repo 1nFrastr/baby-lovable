@@ -14,6 +14,7 @@ import {
   installPackageStep,
   listFilesStep,
   readFileStep,
+  readLogStep,
   runCommandStep,
   searchFilesStep,
   testPreviewStep,
@@ -76,6 +77,7 @@ export function createToolsContext(
 
   return {
     readFile: context,
+    readLog: context,
     writeFile: context,
     editFile: context,
     listFiles: context,
@@ -205,6 +207,24 @@ export const builderTools = {
     contextSchema: toolContextSchema,
     execute: withTurnProgress("readFile", readFileStep),
   }),
+  readLog: tool({
+    description:
+      "Read the latest lines from a platform log source (on-demand diagnosis). Use when checkPreview returns ok:false with httpStatus >= 500, or when you need runtime/SSR error text. source=preview is the Next development log. Do not use readFile on .next. Returns { ok, source, lines, text, error? }.",
+    inputSchema: z.object({
+      source: z
+        .enum(["preview"])
+        .describe('Log source. Currently only "preview" (Next dev log).'),
+      lines: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("How many trailing lines to return (default 20, max 100)."),
+    }),
+    contextSchema: toolContextSchema,
+    execute: withTurnProgress("readLog", readLogStep),
+  }),
   writeFile: tool({
     description:
       "Create or overwrite a text file in the project workspace. Only src/**, public/**, and root config files are writable. When preview is already ready, may include compileError from the live next log — fix and checkPreview if present.",
@@ -310,7 +330,7 @@ export const builderTools = {
   }),
   checkPreview: tool({
     description:
-      "Probe preview readiness via HTTP (does not start preview). On httpStatus >= 500 may include buildError from the Next log (runtime/SSR or compile). Compile errors also come from writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/buildError/user asks. If status is installing/starting with no buildError, wait and call again — do not finish while still warming. If ok:false with buildError or httpStatus >= 500, fix source then re-check — do not loop checkPreview without editing. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
+      "Probe preview readiness via HTTP (does not start preview; does not read logs). HTTP 500 means the app is up but broken (ok:false) — call readLog({ source: \"preview\" }) for the error text, fix source, then re-check. HTTP 502/503 / status installing|starting are warm-up — wait and call again. Compile hints may also arrive on writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/httpStatus>=500/user asks. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
     inputSchema: z.object({
       restart: z
         .boolean()

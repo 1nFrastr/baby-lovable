@@ -62,6 +62,16 @@ export async function readFileStep(
   };
 }
 
+export async function readLogStep(
+  input: { source: "preview"; lines?: number },
+  { context }: { context: ToolContext },
+) {
+  "use step";
+
+  const { readSessionLog } = await import("@/lib/sandbox/read-log");
+  return readSessionLog(context.sessionId, input.source, input.lines);
+}
+
 export async function writeFileStep(
   input: { path: string; content: string },
   { context }: { context: ToolContext },

@@ -120,8 +120,7 @@ export async function awaitRuntimeDesired(
 
 /**
  * Check app server health (HTTP readiness).
- * Daytona: on HTTP 5xx may include a Next log excerpt as buildError.
- * Does not start sandbox or app server.
+ * Does not start sandbox or app server. Does not read logs (`readLog` tool).
  */
 export async function checkAppServer(
   sessionId: string,

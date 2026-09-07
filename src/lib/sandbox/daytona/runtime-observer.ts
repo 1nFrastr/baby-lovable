@@ -3,12 +3,8 @@
  * Snapshot already has starter + pnpm + node_modules; no seed / package.json probe.
  */
 
-import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
-import { getDaytonaDevPort } from "./config";
 import {
-  isApplicationPreviewFailure,
   PREVIEW_HTTP_TIMEOUT_MS,
-  readDevLog,
 } from "./app-server-health";
 import type { DaytonaProjectSandbox } from "./provider";
 import {
@@ -17,6 +13,8 @@ import {
 } from "./runtime-state";
 import { getRuntimeSnapshot } from "./runtime-store";
 import { ensureSandboxPublic, isAsleep, reconnectSandbox, wrapSandbox } from "./vm";
+import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
+import { getDaytonaDevPort } from "./config";
 
 /** Soft deadline for a full observe pass (reconnect + short HTTP). */
 const PROBE_TIMEOUT_MS = 8_000;
@@ -313,34 +311,6 @@ async function runObserve(
       httpStatus: preview.http,
       lastError: null,
     };
-  }
-
-  // 502/503 without ready flag: still may be an app failure if Next logged 5xx.
-  if (preview.http != null && preview.http >= 500) {
-    const log = await readDevLog(project);
-    if (isApplicationPreviewFailure(preview.http, log)) {
-      logDaytonaBootstrap(
-        sessionId,
-        "preview",
-        `ready-via-app-5xx http=${preview.http} ${preview.probeUrl}`,
-      );
-      logDaytonaTiming(
-        sessionId,
-        "observe.total",
-        Date.now() - t0,
-        "preview-ready app-5xx",
-      );
-      return {
-        phase: "preview-ready",
-        sandboxId: sdk.id,
-        sandboxState: sdk.state ?? null,
-        previewUrl: preview.url,
-        previewPort: preview.port,
-        probeUrl: preview.probeUrl,
-        httpStatus: preview.http,
-        lastError: null,
-      };
-    }
   }
 
   logDaytonaTiming(

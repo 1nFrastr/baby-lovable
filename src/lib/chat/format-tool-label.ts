@@ -10,6 +10,7 @@ const FILE_PATH_TOOLS = new Set([
 /** Present / past activity verbs for Cursor-style inline labels. */
 const ACTIVITY_VERBS: Record<string, [running: string, done: string]> = {
   readFile: ["Reading", "Read"],
+  readLog: ["Reading logs", "Read logs"],
   writeFile: ["Writing", "Wrote"],
   editFile: ["Editing", "Edited"],
   deleteFile: ["Deleting", "Deleted"],
@@ -143,13 +144,22 @@ export function formatToolPartOutput(
     if (rec.ok) {
       return rec.httpStatus != null ? `ok · ${rec.httpStatus}` : "ok";
     }
-    if (rec.buildError) {
-      const snippet = rec.buildError.replace(/\s+/g, " ").trim().slice(0, 80);
-      return rec.httpStatus != null
-        ? `failed · ${rec.httpStatus} · ${snippet}`
-        : `failed · ${snippet}`;
-    }
     return rec.httpStatus != null ? `failed · ${rec.httpStatus}` : "failed";
+  }
+
+  if (name === "readLog" && output && typeof output === "object") {
+    const rec = output as {
+      ok?: boolean;
+      source?: string;
+      lines?: number;
+      error?: string;
+    };
+    if (rec.ok) {
+      return `${rec.source ?? "log"} · ${rec.lines ?? "?"} lines`;
+    }
+    return rec.error
+      ? `failed · ${rec.error.slice(0, 80)}`
+      : "failed";
   }
 
   return JSON.stringify(output).slice(0, 120);

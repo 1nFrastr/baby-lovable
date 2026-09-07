@@ -144,13 +144,13 @@ describe("runCheckPreviewProbe", () => {
     expect(sleeps).toContain(2_000);
   });
 
-  it("ready + HTTP 500 + buildError is ok:false without warm retries", async () => {
+  it("ready + HTTP 500 is ok:false without warm retries", async () => {
     const sleeps: number[] = [];
     const checkAppServer = vi.fn(async (): Promise<AppServerCheck> => ({
       status: "ready",
       url: "http://localhost:3001",
       httpStatus: 500,
-      buildError: "Error: Failed prop type: href",
+      buildError: null,
     }));
 
     getPreviewBackend.mockResolvedValue(
@@ -169,7 +169,7 @@ describe("runCheckPreviewProbe", () => {
       ok: false,
       status: "ready",
       httpStatus: 500,
-      buildError: "Error: Failed prop type: href",
+      buildError: null,
       retried: false,
     });
     expect(checkAppServer).toHaveBeenCalledTimes(1);
