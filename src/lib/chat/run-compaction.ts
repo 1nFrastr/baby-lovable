@@ -14,6 +14,7 @@ import {
   insertCompactionBefore,
   isCompactionMessage,
   isSummaryMessage,
+  planAutoCompaction,
   planCompaction,
   toPromptUiMessages,
 } from "@/lib/chat/compaction";
@@ -105,7 +106,9 @@ export async function compactSessionMessages(input: {
     };
   }
 
-  const plan = planCompaction(messages);
+  const plan = input.force
+    ? planCompaction(messages)
+    : planAutoCompaction(messages);
   const headHasNewContent = plan.head.some(
     (message) => !isSummaryMessage(message) && !isCompactionMessage(message),
   );
