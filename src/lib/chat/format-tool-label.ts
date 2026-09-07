@@ -135,9 +135,19 @@ export function formatToolPartOutput(
   }
 
   if (name === "checkPreview" && output && typeof output === "object") {
-    const rec = output as { ok?: boolean; httpStatus?: number };
+    const rec = output as {
+      ok?: boolean;
+      httpStatus?: number;
+      buildError?: string | null;
+    };
     if (rec.ok) {
       return rec.httpStatus != null ? `ok · ${rec.httpStatus}` : "ok";
+    }
+    if (rec.buildError) {
+      const snippet = rec.buildError.replace(/\s+/g, " ").trim().slice(0, 80);
+      return rec.httpStatus != null
+        ? `failed · ${rec.httpStatus} · ${snippet}`
+        : `failed · ${snippet}`;
     }
     return rec.httpStatus != null ? `failed · ${rec.httpStatus}` : "failed";
   }

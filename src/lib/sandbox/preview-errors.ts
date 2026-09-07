@@ -18,6 +18,11 @@ export function isTempFailure(report: AppServerCheck): boolean {
     return false;
   }
 
+  // Stable Next application 500s are not Daytona cold-start blips.
+  if (report.httpStatus === 500) {
+    return false;
+  }
+
   if (
     report.httpStatus !== undefined &&
     report.httpStatus < 500 &&

@@ -310,7 +310,7 @@ export const builderTools = {
   }),
   checkPreview: tool({
     description:
-      "Probe preview readiness via HTTP (does not start preview; does not read compile logs). Compile errors come from writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/user asks. If status is installing/starting, wait and call again — do not finish while still warming. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
+      "Probe preview readiness via HTTP (does not start preview). On httpStatus >= 500 may include buildError from the Next log (runtime/SSR or compile). Compile errors also come from writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/buildError/user asks. If status is installing/starting with no buildError, wait and call again — do not finish while still warming. If ok:false with buildError or httpStatus >= 500, fix source then re-check — do not loop checkPreview without editing. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
     inputSchema: z.object({
       restart: z
         .boolean()

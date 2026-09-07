@@ -1,6 +1,6 @@
 /**
- * checkRuntimePreview: ready requires HTTP < 500; fast path is HTTP-only
- * (no reconnect / no remote compile-log read).
+ * checkRuntimePreview: healthy HTTP stays log-free; 5xx diagnoses via Next log
+ * so application 500s return ready + buildError instead of endless starting.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,9 @@ const {
   wrapSandbox,
   observeRuntime,
   readDevLog,
-  extractCompileError,
+  extractPreviewError,
+  hasNextAccessLog5xx,
+  isApplicationPreviewFailure,
   httpStatus,
 } = vi.hoisted(() => {
   const ctx = { sessionId: "" };
@@ -23,7 +25,9 @@ const {
     wrapSandbox: vi.fn(),
     observeRuntime: vi.fn(),
     readDevLog: vi.fn(),
-    extractCompileError: vi.fn(),
+    extractPreviewError: vi.fn(),
+    hasNextAccessLog5xx: vi.fn(),
+    isApplicationPreviewFailure: vi.fn(),
     httpStatus: vi.fn(),
   };
 });
@@ -58,7 +62,9 @@ vi.mock("./runtime-observer", () => ({
 
 vi.mock("./app-server-health", () => ({
   readDevLog,
-  extractCompileError,
+  extractPreviewError,
+  hasNextAccessLog5xx,
+  isApplicationPreviewFailure,
   remoteFileExists: vi.fn(),
   httpStatus,
   PREVIEW_HTTP_TIMEOUT_MS: 1_500,
@@ -91,6 +97,8 @@ function observed(partial: Partial<ObservedRuntime>): ObservedRuntime {
 }
 
 const PREVIEW_URL = "https://3000-sb.daytonaproxy.example";
+const PROP_TYPE_ERROR =
+  "Error: Failed prop type: The prop 'href' expects a 'string'";
 
 describe("checkRuntimePreview", () => {
   beforeEach(() => {
@@ -98,7 +106,14 @@ describe("checkRuntimePreview", () => {
     reconnectSandbox.mockResolvedValue({ id: "sb_1", state: "started" });
     wrapSandbox.mockReturnValue({ id: "proj" });
     readDevLog.mockResolvedValue("ok log");
-    extractCompileError.mockReturnValue(null);
+    extractPreviewError.mockReturnValue(null);
+    hasNextAccessLog5xx.mockReturnValue(false);
+    isApplicationPreviewFailure.mockImplementation(
+      (http: number, log: string) =>
+        http === 500 ||
+        Boolean(extractPreviewError(log)) ||
+        hasNextAccessLog5xx(log),
+    );
     httpStatus.mockResolvedValue(200);
   });
 
@@ -133,10 +148,12 @@ describe("checkRuntimePreview", () => {
     });
   });
 
-  it("fast path: HTTP 502 is starting, not ready", async () => {
+  it("fast path: HTTP 502 without app log stays starting", async () => {
     await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       httpStatus.mockResolvedValue(502);
+      extractPreviewError.mockReturnValue(null);
+      hasNextAccessLog5xx.mockReturnValue(false);
 
       await withFreshIsolate(sessionId, () =>
         upsertRuntimeSnapshot(sessionId, {
@@ -157,14 +174,48 @@ describe("checkRuntimePreview", () => {
       expect(report.url).toBe(PREVIEW_URL);
       expect(report.buildError).toBeNull();
       expect(observeRuntime).not.toHaveBeenCalled();
-      expect(reconnectSandbox).not.toHaveBeenCalled();
-      expect(readDevLog).not.toHaveBeenCalled();
+      expect(reconnectSandbox).toHaveBeenCalled();
+      expect(readDevLog).toHaveBeenCalled();
     });
   });
 
-  it("full path when not ready: observe once; 5xx is starting", async () => {
+  it("fast path: HTTP 500 + runtime log returns ready with buildError", async () => {
     await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
+      httpStatus.mockResolvedValue(500);
+      readDevLog.mockResolvedValue(PROP_TYPE_ERROR);
+      extractPreviewError.mockReturnValue(PROP_TYPE_ERROR);
+
+      await withFreshIsolate(sessionId, () =>
+        upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "preview-ready",
+          sandboxId: "sb_1",
+          previewUrl: PREVIEW_URL,
+          previewPort: 3000,
+        }),
+      );
+
+      const report = await withFreshIsolate(sessionId, () =>
+        checkRuntimePreview(sessionId),
+      );
+
+      expect(report).toEqual({
+        status: "ready",
+        url: PREVIEW_URL,
+        buildError: PROP_TYPE_ERROR,
+        httpStatus: 500,
+      });
+      expect(observeRuntime).not.toHaveBeenCalled();
+      expect(readDevLog).toHaveBeenCalled();
+    });
+  });
+
+  it("full path when not ready: observe once; 502 without log is starting", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      extractPreviewError.mockReturnValue(null);
+      hasNextAccessLog5xx.mockReturnValue(false);
 
       await withFreshIsolate(sessionId, () =>
         upsertRuntimeSnapshot(sessionId, {
@@ -193,7 +244,45 @@ describe("checkRuntimePreview", () => {
       expect(report.httpStatus).toBe(502);
       expect(report.buildError).toBeNull();
       expect(observeRuntime).toHaveBeenCalledTimes(1);
-      expect(readDevLog).not.toHaveBeenCalled();
+    });
+  });
+
+  it("full path: observe HTTP 500 + log returns ready with buildError", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      extractPreviewError.mockReturnValue(PROP_TYPE_ERROR);
+
+      await withFreshIsolate(sessionId, () =>
+        upsertRuntimeSnapshot(sessionId, {
+          desired: "preview-ready",
+          observed: "starting-devserver",
+          sandboxId: "sb_1",
+        }),
+      );
+
+      observeRuntime.mockResolvedValue(
+        observed({
+          phase: "preview-ready",
+          sandboxId: "sb_1",
+          previewUrl: PREVIEW_URL,
+          previewPort: 3000,
+          probeUrl: PREVIEW_URL,
+          httpStatus: 500,
+        }),
+      );
+
+      const report = await withFreshIsolate(sessionId, () =>
+        checkRuntimePreview(sessionId),
+      );
+
+      expect(report).toEqual({
+        status: "ready",
+        url: PREVIEW_URL,
+        buildError: PROP_TYPE_ERROR,
+        httpStatus: 500,
+      });
+      expect(observeRuntime).toHaveBeenCalledTimes(1);
+      expect(readDevLog).toHaveBeenCalled();
     });
   });
 

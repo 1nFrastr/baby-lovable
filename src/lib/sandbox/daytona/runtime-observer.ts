@@ -5,7 +5,11 @@
 
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
 import { getDaytonaDevPort } from "./config";
-import { PREVIEW_HTTP_TIMEOUT_MS } from "./app-server-health";
+import {
+  isApplicationPreviewFailure,
+  PREVIEW_HTTP_TIMEOUT_MS,
+  readDevLog,
+} from "./app-server-health";
 import type { DaytonaProjectSandbox } from "./provider";
 import {
   type DaytonaObservedPhase,
@@ -140,7 +144,10 @@ async function probeUrl(url: string): Promise<UrlProbe> {
     const http = res.status;
     await res.body?.cancel().catch(() => {});
 
-    if (http >= 200 && http < 400) {
+    // 2xx–3xx: healthy. HTTP 500: Next is up and returned an app/SSR error —
+    // treat as ready so durable observe leaves "starting" and the iframe can
+    // show the Next overlay. Daytona cold-start / proxy hangs are 502/503.
+    if ((http >= 200 && http < 400) || http === 500) {
       return { ready: true, http, lastError: null, transient: false };
     }
     if (http >= 500) {
@@ -306,6 +313,34 @@ async function runObserve(
       httpStatus: preview.http,
       lastError: null,
     };
+  }
+
+  // 502/503 without ready flag: still may be an app failure if Next logged 5xx.
+  if (preview.http != null && preview.http >= 500) {
+    const log = await readDevLog(project);
+    if (isApplicationPreviewFailure(preview.http, log)) {
+      logDaytonaBootstrap(
+        sessionId,
+        "preview",
+        `ready-via-app-5xx http=${preview.http} ${preview.probeUrl}`,
+      );
+      logDaytonaTiming(
+        sessionId,
+        "observe.total",
+        Date.now() - t0,
+        "preview-ready app-5xx",
+      );
+      return {
+        phase: "preview-ready",
+        sandboxId: sdk.id,
+        sandboxState: sdk.state ?? null,
+        previewUrl: preview.url,
+        previewPort: preview.port,
+        probeUrl: preview.probeUrl,
+        httpStatus: preview.http,
+        lastError: null,
+      };
+    }
   }
 
   logDaytonaTiming(

@@ -10,7 +10,7 @@ import {
 } from "./runtime-reconciler";
 import { deriveAppServerStatus } from "./runtime-state";
 import { getExistingDaytonaSandbox } from "./sandbox";
-import { extractCompileError, readDevLog } from "./app-server-health";
+import { extractPreviewError, readDevLog } from "./app-server-health";
 import { getDaytonaDevPort } from "./config";
 
 export async function getDaytonaBuildError(
@@ -20,7 +20,7 @@ export async function getDaytonaBuildError(
   if (!sandbox) {
     return null;
   }
-  return extractCompileError(await readDevLog(sandbox));
+  return extractPreviewError(await readDevLog(sandbox));
 }
 
 /** Read-only status. Never creates or wakes a stopped sandbox. */

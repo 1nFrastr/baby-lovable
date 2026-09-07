@@ -29,6 +29,26 @@ const COMPILE_MARKERS = [
   /⨯ Error:/,
 ];
 
+/** Runtime / SSR failures that still produce a real Next HTTP 500 (not compile). */
+const RUNTIME_MARKERS = [
+  /Failed prop type/i,
+  /\bdigest:\s*['"]?[0-9A-Fa-f]+/,
+  /Unhandled Runtime Error/i,
+  /Application error:/i,
+  /⨯ Error:/,
+  /Error: .*<\/Link>/i,
+  /TypeError:\s/i,
+  /ReferenceError:\s/i,
+];
+
+/** Access-log 5xx — weaker signal; used only when no richer error marker exists. */
+const ACCESS_LOG_5XX = /GET\s+\S+\s+5\d\d\b/;
+
+const PRIMARY_PREVIEW_ERROR_MARKERS = [
+  ...COMPILE_MARKERS,
+  ...RUNTIME_MARKERS,
+];
+
 export async function remoteFileExists(
   sandbox: DaytonaProjectSandbox,
   path: string,
@@ -49,19 +69,74 @@ export async function readDevLog(sandbox: DaytonaProjectSandbox): Promise<string
   }
 }
 
-export function extractCompileError(content: string): string | null {
+function extractErrorWithMarkers(
+  content: string,
+  markers: RegExp[],
+  lookback = 2,
+  lookahead = 12,
+): string | null {
   const lines = content.split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i] ?? "";
-    if (!COMPILE_MARKERS.some((m) => m.test(line))) {
+    if (!markers.some((m) => m.test(line))) {
       continue;
     }
-    const slice = lines.slice(Math.max(0, i - 2), i + 12).join("\n");
+    const slice = lines
+      .slice(Math.max(0, i - lookback), i + lookahead)
+      .join("\n");
     if (!isUnreliableCompileError(slice)) {
       return slice.trim();
     }
   }
   return null;
+}
+
+/** Compile / Turbopack failures from the Next development log. */
+export function extractCompileError(content: string): string | null {
+  return extractErrorWithMarkers(content, COMPILE_MARKERS);
+}
+
+/**
+ * Compile or runtime/SSR error excerpt from the Next development log.
+ * Used by checkPreview when HTTP is 5xx so the agent sees the failure instead
+ * of treating a stable application 500 as "still starting".
+ *
+ * Prefer rich error markers over bare `GET / 5xx` access lines so the excerpt
+ * includes the stack / prop-type message above the access log.
+ */
+export function extractPreviewError(content: string): string | null {
+  return (
+    extractErrorWithMarkers(content, PRIMARY_PREVIEW_ERROR_MARKERS) ??
+    extractErrorWithMarkers(content, [ACCESS_LOG_5XX], 8, 4)
+  );
+}
+
+/**
+ * True when the log shows Next already served a 5xx (access line), i.e. the
+ * process is up and answering — not a Daytona proxy cold-start 502.
+ */
+export function hasNextAccessLog5xx(content: string): boolean {
+  return /GET\s+\S+\s+5\d\d\b/.test(content);
+}
+
+/**
+ * Classify a 5xx probe: application error (fix) vs proxy / still booting.
+ * - HTTP 500 → application (Daytona boot hang maps to 502/503, not 500)
+ * - 502/503 → application only when the Next log shows a 5xx / error excerpt
+ */
+export function isApplicationPreviewFailure(
+  httpStatus: number,
+  logContent: string,
+): boolean {
+  if (httpStatus === 500) {
+    return true;
+  }
+  if (httpStatus < 500) {
+    return false;
+  }
+  return (
+    extractPreviewError(logContent) !== null || hasNextAccessLog5xx(logContent)
+  );
 }
 
 export async function httpStatus(

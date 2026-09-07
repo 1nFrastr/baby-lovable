@@ -120,7 +120,7 @@ export async function awaitRuntimeDesired(
 
 /**
  * Check app server health (HTTP readiness).
- * Daytona: does not read compile logs (those are on write/edit peek).
+ * Daytona: on HTTP 5xx may include a Next log excerpt as buildError.
  * Does not start sandbox or app server.
  */
 export async function checkAppServer(
@@ -136,8 +136,8 @@ export async function getBuildError(
 }
 
 /**
- * Cheap post-edit hint: only when app server is already ready, read compile
- * error from logs (no HTTP probe, settle, or retries). Returns null when
+ * Cheap post-edit hint: only when app server is already ready, read compile /
+ * runtime error from logs (no HTTP probe, settle, or retries). Returns null when
  * preview is still warming so bootstrap I/O is not slowed.
  */
 export async function peekCompileErrorIfPreviewReady(

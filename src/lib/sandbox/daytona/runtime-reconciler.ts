@@ -12,7 +12,11 @@ import {
   stopDevSession,
 } from "./app-server-boot";
 import {
+  extractPreviewError,
+  hasNextAccessLog5xx,
   httpStatus,
+  isApplicationPreviewFailure,
+  readDevLog,
   STARTING_DEV_HTTP_TIMEOUT_MS,
 } from "./app-server-health";
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
@@ -84,7 +88,8 @@ async function observeStartingDevLight(
     undefined,
     STARTING_DEV_HTTP_TIMEOUT_MS,
   );
-  const ready = probe >= 200 && probe < 400;
+  // HTTP 500 = Next answered with an app error (not proxy boot).
+  const ready = (probe >= 200 && probe < 400) || probe === 500;
   logDaytonaTiming(
     sessionId,
     "reconcile.lightProbe",
@@ -120,6 +125,43 @@ async function observeStartingDevLight(
     // httpStatus maps hang/abort → 503; treat like a soft miss.
     transient: probe === 503 || isStalePreviewLinkStatus(probe),
   };
+}
+
+/**
+ * When HTTP is 5xx, read the Next log to distinguish app/SSR failures from
+ * Daytona proxy boot (502/503 with no Next access line).
+ */
+async function diagnoseHttp5xx(
+  sessionId: string,
+  snapshot: DaytonaRuntimeSnapshot,
+  probe: number,
+): Promise<string | null> {
+  if (!snapshot.sandboxId) {
+    return null;
+  }
+  try {
+    const sdk = await reconnectSandbox(sessionId, snapshot.sandboxId, false);
+    if (!sdk) {
+      return null;
+    }
+    const project = wrapSandbox(sessionId, sdk);
+    const log = await readDevLog(project);
+    const excerpt = extractPreviewError(log);
+    if (excerpt) {
+      return excerpt;
+    }
+    if (isApplicationPreviewFailure(probe, log) || hasNextAccessLog5xx(log)) {
+      return `Preview returned HTTP ${probe} (Next access log shows a 5xx)`;
+    }
+    if (probe === 500) {
+      return `Preview returned HTTP 500 but no compile error was captured`;
+    }
+    return null;
+  } catch {
+    return probe === 500
+      ? `Preview returned HTTP 500 but no compile error was captured`
+      : null;
+  }
 }
 
 export interface EnsureDesiredOptions {
@@ -1051,6 +1093,8 @@ async function reconcileLoop(
     if (usedLightProbe) {
       observed = await observeStartingDevLight(sessionId, snapshot);
       // Stale proxy URL — refresh via full Daytona observe once.
+      // HTTP 500 already counts as ready in the light probe (Next answered).
+      // Boot-time 502/503 stay on the light path so we do not reconnect every tick.
       if (
         observed.httpStatus != null &&
         isStalePreviewLinkStatus(observed.httpStatus)
@@ -1544,11 +1588,12 @@ export async function readRuntimeAllStatus(sessionId: string) {
 /**
  * Health check for the agent tool.
  *
- * Compile diagnosis lives on write/edit (`compileError` via peekCompileError).
- * This probe only answers: is the preview URL up (HTTP < 500)?
+ * On healthy HTTP (< 500): readiness only — no remote log read.
+ * On HTTP 5xx: read the Next log when needed so a stable application 500
+ * surfaces as `ready` + `buildError` instead of endless `starting`.
+ * Compile diagnosis on write/edit still uses peekCompileError.
  *
- * Fast path (durable preview-ready + url): HTTP probe only — no Daytona
- * reconnect, no remote dev-log read.
+ * Fast path (durable preview-ready + url): HTTP probe; log read only on 5xx.
  * Full observe when embed is not fresh yet.
  */
 export async function checkRuntimePreview(sessionId: string) {
@@ -1572,13 +1617,37 @@ export async function checkRuntimePreview(sessionId: string) {
       `http=${probe}`,
     );
 
-    // 502/5xx: durable said ready but proxy still unhealthy — keep waiting.
     if (probe >= 500) {
+      const tLog = Date.now();
+      const buildError = await diagnoseHttp5xx(sessionId, snapshot, probe);
+      logDaytonaTiming(
+        sessionId,
+        "checkRuntimePreview.fast.diagnose5xx",
+        Date.now() - tLog,
+        `http=${probe} hasError=${Boolean(buildError)}`,
+      );
+
+      if (buildError) {
+        logDaytonaTiming(
+          sessionId,
+          "checkRuntimePreview.total",
+          Date.now() - t0,
+          "path=fast status=ready http>=500 app-error",
+        );
+        return {
+          status: "ready" as const,
+          url: snapshot.previewUrl,
+          buildError,
+          httpStatus: probe,
+        };
+      }
+
+      // 502/503 with no Next error evidence — still warming / proxy blip.
       logDaytonaTiming(
         sessionId,
         "checkRuntimePreview.total",
         Date.now() - t0,
-        "path=fast status=starting http>=500",
+        "path=fast status=starting http>=500 no-app-error",
       );
       return {
         status: "starting" as const,
@@ -1636,16 +1705,37 @@ export async function checkRuntimePreview(sessionId: string) {
     }
   }
 
-  // observeRuntime already probed HTTP when preview-ready (no compile log).
+  // observeRuntime already probed HTTP when preview-ready.
   if (observed.phase === "preview-ready") {
     const url = observed.previewUrl ?? snapshot.previewUrl ?? undefined;
     const probe = observed.httpStatus ?? undefined;
     if (probe !== undefined && probe >= 500) {
+      const merged: DaytonaRuntimeSnapshot = {
+        ...snapshot,
+        sandboxId: observed.sandboxId ?? snapshot.sandboxId,
+        previewUrl: url ?? snapshot.previewUrl,
+        previewPort: observed.previewPort ?? snapshot.previewPort,
+      };
+      const buildError = await diagnoseHttp5xx(sessionId, merged, probe);
+      if (buildError) {
+        logDaytonaTiming(
+          sessionId,
+          "checkRuntimePreview.total",
+          Date.now() - t0,
+          "path=observe status=ready http>=500 app-error",
+        );
+        return {
+          status: "ready" as const,
+          url,
+          buildError,
+          httpStatus: probe,
+        };
+      }
       logDaytonaTiming(
         sessionId,
         "checkRuntimePreview.total",
         Date.now() - t0,
-        "path=observe status=starting http>=500",
+        "path=observe status=starting http>=500 no-app-error",
       );
       return {
         status: "starting" as const,
@@ -1666,6 +1756,41 @@ export async function checkRuntimePreview(sessionId: string) {
       buildError: null,
       httpStatus: probe,
     };
+  }
+
+  // Full observe may leave us on workspace-ready with HTTP 500 when the probe
+  // path has not yet flipped (e.g. older observer). Still diagnose 5xx here.
+  if (
+    observed.httpStatus != null &&
+    observed.httpStatus >= 500 &&
+    (observed.previewUrl || snapshot.previewUrl)
+  ) {
+    const url = observed.previewUrl ?? snapshot.previewUrl ?? undefined;
+    const merged: DaytonaRuntimeSnapshot = {
+      ...snapshot,
+      sandboxId: observed.sandboxId ?? snapshot.sandboxId,
+      previewUrl: url ?? snapshot.previewUrl,
+      previewPort: observed.previewPort ?? snapshot.previewPort,
+    };
+    const buildError = await diagnoseHttp5xx(
+      sessionId,
+      merged,
+      observed.httpStatus,
+    );
+    if (buildError) {
+      logDaytonaTiming(
+        sessionId,
+        "checkRuntimePreview.total",
+        Date.now() - t0,
+        "path=observe-5xx status=ready app-error",
+      );
+      return {
+        status: "ready" as const,
+        url,
+        buildError,
+        httpStatus: observed.httpStatus,
+      };
+    }
   }
 
   const latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
