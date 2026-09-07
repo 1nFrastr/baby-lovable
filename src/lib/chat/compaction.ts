@@ -307,35 +307,13 @@ function lastRealUser(messages: UIMessage[]): UIMessage | undefined {
   return undefined;
 }
 
-function countMessagesSinceLastCompaction(
-  messages: UIMessage[],
-  currentUserId?: string,
-): number | undefined {
-  const completed = findLatestCompletedCompaction(messages);
-  if (!completed) {
-    return undefined;
-  }
-  return messages.slice(completed.summaryIndex + 1).filter((message) => {
-    if (isCompactionMessage(message)) {
-      return false;
-    }
-    return message.id !== currentUserId;
-  }).length;
-}
-
 /**
  * Split the filtered prompt view into a summarizable head and a verbatim tail.
  * Does not look at token counts — callers decide whether the budget is exceeded.
- *
- * `minNewSinceCompaction` is hysteresis for auto compaction: after a summary
- * already exists, wait until that many messages have arrived *after* it
- * (excluding the in-flight user turn) before folding the previous tail. Without
- * this, keepRecent=8 becomes a setpoint (8 → 9 every turn → summarize again).
  */
 export function planCompaction(
   messages: UIMessage[],
   keepRecent: number = CONTEXT_KEEP_RECENT_MESSAGES,
-  options?: { minNewSinceCompaction?: number },
 ): CompactionPlan {
   const filtered = filterCompacted(messages);
   const currentUser = lastRealUser(filtered);
@@ -344,27 +322,14 @@ export function planCompaction(
       ? filtered.slice(0, -1)
       : filtered;
 
-  const idle = (): CompactionPlan => ({
-    needed: false,
-    head: [],
-    tail: body,
-    currentUser,
-    previousSummary: latestSummaryText(filtered),
-  });
-
-  const minNew = options?.minNewSinceCompaction ?? 0;
-  if (minNew > 0) {
-    const sinceLast = countMessagesSinceLastCompaction(
-      messages,
-      currentUser?.id,
-    );
-    if (sinceLast != null && sinceLast < minNew) {
-      return idle();
-    }
-  }
-
   if (body.length <= keepRecent) {
-    return idle();
+    return {
+      needed: false,
+      head: [],
+      tail: body,
+      currentUser,
+      previousSummary: latestSummaryText(filtered),
+    };
   }
 
   const tail = body.slice(-keepRecent);
@@ -377,16 +342,6 @@ export function planCompaction(
     currentUser,
     previousSummary: latestSummaryText(head) ?? latestSummaryText(filtered),
   };
-}
-
-/** Auto turn compaction: keep N verbatim, and wait for a full new window after the last summary. */
-export function planAutoCompaction(
-  messages: UIMessage[],
-  keepRecent: number = CONTEXT_KEEP_RECENT_MESSAGES,
-): CompactionPlan {
-  return planCompaction(messages, keepRecent, {
-    minNewSinceCompaction: keepRecent,
-  });
 }
 
 function truncateChars(value: string, maxChars: number): string {

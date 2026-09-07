@@ -8,12 +8,7 @@ export const CONTEXT_COMPACT_TOKENS = Math.max(
   Number(process.env.AI_CONTEXT_COMPACT_TOKENS ?? 100_000),
 );
 
-/**
- * Verbatim window for the newest N messages (in-turn tool stubs + LLM summary tail).
- * This is a keep-count when compacting, not a setpoint to re-enforce every turn.
- * Auto session compaction also waits for this many *new* messages after the last
- * summary before compacting again, so 8 → 9 does not re-summarize on every turn.
- */
+/** Keep the newest N messages fully intact; older tool payloads are stubbed. */
 export const CONTEXT_KEEP_RECENT_MESSAGES = Math.max(
   2,
   Number(process.env.AI_CONTEXT_KEEP_RECENT ?? 8),

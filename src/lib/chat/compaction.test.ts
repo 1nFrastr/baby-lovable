@@ -10,7 +10,6 @@ import {
   insertCompactionBefore,
   isCompactionMessage,
   isSummaryMessage,
-  planAutoCompaction,
   planCompaction,
 } from "./compaction";
 
@@ -156,82 +155,6 @@ describe("planCompaction / insertCompactionBefore", () => {
     expect(plan.tailStartId).toBe("u2");
     expect(plan.currentUser?.id).toBe("u3");
     expect(plan.head.map((message) => message.id)).toEqual(["u1", "a1"]);
-  });
-
-  it("first auto compaction still triggers when history exceeds keepRecent", () => {
-    const messages = [
-      user("u1", "a"),
-      assistant("a1", "b"),
-      user("u2", "c"),
-      assistant("a2", "d"),
-      user("u3", "e"),
-    ];
-    const plan = planAutoCompaction(messages, 2);
-    expect(plan.needed).toBe(true);
-    expect(plan.tail.map((message) => message.id)).toEqual(["u2", "a2"]);
-    expect(plan.head.map((message) => message.id)).toEqual(["u1", "a1"]);
-  });
-
-  it("does not auto-recompact after one more turn once a tail of keepRecent exists", () => {
-    const messages = compactedLedger({
-      tailStartId: "u1",
-      extra: [
-        user("u5", "tweak spacing"),
-        assistant("a5", "tweaked"),
-        user("u6", "again"),
-      ],
-    });
-    // Without hysteresis this is 8 kept + 2 new → head overflows by 2 and would
-    // summarize every turn. Auto path must wait for a full new window.
-    expect(planCompaction(messages, 8).needed).toBe(true);
-    expect(planAutoCompaction(messages, 8).needed).toBe(false);
-  });
-
-  it("auto-recompacts once a full new keep window exists after the last summary", () => {
-    const extra: UIMessage[] = [];
-    for (let index = 5; index <= 8; index += 1) {
-      extra.push(user(`u${index}`, `user ${index}`));
-      extra.push(assistant(`a${index}`, `assistant ${index}`));
-    }
-    extra.push(user("u9", "current"));
-    const messages = compactedLedger({ tailStartId: "u1", extra });
-    const plan = planAutoCompaction(messages, 8);
-    expect(plan.needed).toBe(true);
-    expect(plan.tail.map((message) => message.id)).toEqual([
-      "u5",
-      "a5",
-      "u6",
-      "a6",
-      "u7",
-      "a7",
-      "u8",
-      "a8",
-    ]);
-    expect(plan.head.map((message) => message.id)).toEqual([
-      "csm_turn_1",
-      "u1",
-      "a1",
-      "u2",
-      "a2",
-      "u3",
-      "a3",
-      "u4",
-      "a4",
-    ]);
-  });
-
-  it("manual compaction can fold the previous tail without waiting for a full new window", () => {
-    const messages = compactedLedger({
-      tailStartId: "u1",
-      extra: [
-        user("u5", "tweak"),
-        assistant("a5", "done"),
-        user("u6", "now"),
-      ],
-    });
-    const plan = planCompaction(messages, 8);
-    expect(plan.needed).toBe(true);
-    expect(plan.head.map((message) => message.id)).toContain("u1");
   });
 
   it("inserts the nail and summary immediately before the current user", () => {
