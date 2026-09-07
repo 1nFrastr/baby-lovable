@@ -63,7 +63,7 @@ describe("canFastAttachSandbox", () => {
     ).toBe(false);
   });
 
-  it("allows attach once sandboxId exists during warm bootstrap/install", () => {
+  it("rejects attach during Freestyle restore (starter tree is not the session)", () => {
     expect(
       canFastAttachSandbox(
         snap({
@@ -72,7 +72,10 @@ describe("canFastAttachSandbox", () => {
           desired: "preview-ready",
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("allows attach once sandboxId exists during warm install/start", () => {
     expect(
       canFastAttachSandbox(
         snap({

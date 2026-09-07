@@ -1,6 +1,6 @@
 /**
  * Freestyle hydrate vs startDev ordering — new sessions defer hydrate;
- * recreate (remoteHeadSha set) still blocks before workspace-ready.
+ * recreate (remoteHeadSha set) still blocks pull+lockfile install before startDev.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -149,6 +149,11 @@ describe("runtime-reconciler Freestyle hydrate deferral", () => {
     deleteSandboxById.mockResolvedValue(undefined);
     sandboxRecordExists.mockResolvedValue(true);
     httpStatus.mockResolvedValue(200);
+    fakeProject.process.executeCommand.mockResolvedValue({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    });
     hydrateWorkspaceFromFreestyle.mockResolvedValue({
       ok: true,
       remoteHeadSha: "abc",
@@ -218,6 +223,7 @@ describe("runtime-reconciler Freestyle hydrate deferral", () => {
       const result = await ensurePromise;
       expect(result.observed).toBe("preview-ready");
       expect(result.sandboxId).toBe("sb_1");
+      expect(fakeProject.process.executeCommand).not.toHaveBeenCalled();
     });
   });
 
@@ -276,6 +282,12 @@ describe("runtime-reconciler Freestyle hydrate deferral", () => {
         }
         return observed({ phase: "missing" });
       });
+      fakeProject.process.executeCommand.mockImplementation(async (command: string) => {
+        if (String(command).includes("frozen-lockfile")) {
+          order.push("install");
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
       startDevSession.mockImplementation(async () => {
         order.push("startDev");
         started = true;
@@ -298,8 +310,15 @@ describe("runtime-reconciler Freestyle hydrate deferral", () => {
 
       const result = await ensurePromise;
       expect(result.observed).toBe("preview-ready");
-      expect(order.indexOf("hydrate-end")).toBeLessThan(order.indexOf("startDev"));
+      expect(order.indexOf("hydrate-end")).toBeLessThan(order.indexOf("install"));
+      expect(order.indexOf("install")).toBeLessThan(order.indexOf("startDev"));
       expect(order.indexOf("hydrate-start")).toBeLessThan(order.indexOf("hydrate-end"));
+      expect(fakeProject.process.executeCommand).toHaveBeenCalledWith(
+        "pnpm install --frozen-lockfile",
+        ".",
+        undefined,
+        expect.any(Number),
+      );
     });
   });
 });

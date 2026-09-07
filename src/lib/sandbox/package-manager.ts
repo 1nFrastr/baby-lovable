@@ -3,6 +3,8 @@ export type PackageManager = "pnpm" | "npm";
 export interface PackageManagerCommands {
   pm: PackageManager;
   install: string;
+  /** Recreate/restore — pin exact versions from the committed lockfile. */
+  installFrozen: string;
   add: (packages: string[], dev?: boolean) => string;
   remove: (packages: string[]) => string;
   dev: (port: number) => string;
@@ -13,6 +15,7 @@ function pnpmCommands(): PackageManagerCommands {
   return {
     pm: "pnpm",
     install: "pnpm install",
+    installFrozen: "pnpm install --frozen-lockfile",
     add: (packages, dev = false) =>
       dev ? `pnpm add -D ${packages.join(" ")}` : `pnpm add ${packages.join(" ")}`,
     remove: (packages) => `pnpm remove ${packages.join(" ")}`,
