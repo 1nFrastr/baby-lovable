@@ -3,9 +3,9 @@
  * Snapshot already has starter + pnpm + node_modules; no seed / package.json probe.
  */
 
-import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
-import { getDaytonaDevPort } from "./config";
-import { PREVIEW_HTTP_TIMEOUT_MS } from "./app-server-health";
+import {
+  PREVIEW_HTTP_TIMEOUT_MS,
+} from "./app-server-health";
 import type { DaytonaProjectSandbox } from "./provider";
 import {
   type DaytonaObservedPhase,
@@ -13,6 +13,8 @@ import {
 } from "./runtime-state";
 import { getRuntimeSnapshot } from "./runtime-store";
 import { ensureSandboxPublic, isAsleep, reconnectSandbox, wrapSandbox } from "./vm";
+import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
+import { getDaytonaDevPort } from "./config";
 
 /** Soft deadline for a full observe pass (reconnect + short HTTP). */
 const PROBE_TIMEOUT_MS = 8_000;
@@ -140,7 +142,10 @@ async function probeUrl(url: string): Promise<UrlProbe> {
     const http = res.status;
     await res.body?.cancel().catch(() => {});
 
-    if (http >= 200 && http < 400) {
+    // 2xx–3xx: healthy. HTTP 500: Next is up and returned an app/SSR error —
+    // treat as ready so durable observe leaves "starting" and the iframe can
+    // show the Next overlay. Daytona cold-start / proxy hangs are 502/503.
+    if ((http >= 200 && http < 400) || http === 500) {
       return { ready: true, http, lastError: null, transient: false };
     }
     if (http >= 500) {

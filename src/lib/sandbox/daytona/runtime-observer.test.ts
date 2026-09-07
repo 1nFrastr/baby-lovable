@@ -438,7 +438,7 @@ describe("observeRuntime soft deadline", () => {
     },
   );
 
-  it.each([429, 500, 502])(
+  it.each([429, 502])(
     "does not refresh a valid cached link after HTTP %i",
     async (status) => {
       const getPreviewLink = vi.fn(async () => ({
@@ -468,6 +468,33 @@ describe("observeRuntime soft deadline", () => {
       expect(getPreviewLink).not.toHaveBeenCalled();
     },
   );
+
+  it("treats HTTP 500 as preview-ready without refreshing the cached link", async () => {
+    const getPreviewLink = vi.fn(async () => ({
+      url: "https://preview.example/refreshed",
+    }));
+    reconnectSandbox.mockResolvedValue({
+      id: "sbx_1",
+      state: "started",
+      getPreviewLink,
+    });
+    const fetchMock = vi.fn(async () => ({ status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await observeRuntime("sess_obs", {
+      wake: true,
+      snapshot: snap(),
+    });
+
+    expect(result).toMatchObject({
+      phase: "preview-ready",
+      previewUrl: "https://preview.example/app",
+      httpStatus: 500,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(ensureSandboxPublic).not.toHaveBeenCalled();
+    expect(getPreviewLink).not.toHaveBeenCalled();
+  });
 
   it("keeps the cached URL when preview-link refresh fails", async () => {
     const getPreviewLink = vi.fn(async () => {

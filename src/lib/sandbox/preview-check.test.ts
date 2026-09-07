@@ -143,4 +143,36 @@ describe("runCheckPreviewProbe", () => {
     expect(sleeps[0]).toBe(1_000);
     expect(sleeps).toContain(2_000);
   });
+
+  it("ready + HTTP 500 is ok:false without warm retries", async () => {
+    const sleeps: number[] = [];
+    const checkAppServer = vi.fn(async (): Promise<AppServerCheck> => ({
+      status: "ready",
+      url: "http://localhost:3001",
+      httpStatus: 500,
+      buildError: null,
+    }));
+
+    getPreviewBackend.mockResolvedValue(
+      mockBackend({
+        checkAppServer,
+      }),
+    );
+
+    const result = await runCheckPreviewProbe("sess_test", {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: "ready",
+      httpStatus: 500,
+      buildError: null,
+      retried: false,
+    });
+    expect(checkAppServer).toHaveBeenCalledTimes(1);
+    expect(sleeps).toEqual([]);
+  });
 });

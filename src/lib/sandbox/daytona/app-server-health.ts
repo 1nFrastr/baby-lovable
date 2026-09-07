@@ -1,4 +1,4 @@
-/** App-server health: probe helpers and log / compile-error parsing. */
+/** App-server health: probe helpers and compile-error parsing. */
 import { isUnreliableCompileError } from "../preview-errors";
 import type { DaytonaProjectSandbox } from "./provider";
 
@@ -15,6 +15,11 @@ export const PREVIEW_HTTP_TIMEOUT_MS = 1_500;
  * Aborting early maps to 503 and the UI never leaves "starting".
  */
 export const STARTING_DEV_HTTP_TIMEOUT_MS = PREVIEW_HTTP_TIMEOUT_MS;
+
+/** Bounded tail for write/edit compile peek — not full-file download. */
+export const DEV_LOG_COMPILE_PEEK_LINES = 200;
+
+const DEV_LOG_PATH = ".next/dev/logs/next-development.log";
 
 const COMPILE_MARKERS = [
   /Parsing CSS source code failed/i,
@@ -41,12 +46,34 @@ export async function remoteFileExists(
   }
 }
 
-export async function readDevLog(sandbox: DaytonaProjectSandbox): Promise<string> {
+/**
+ * Read the last N lines of the Next development log via remote `tail -n`.
+ * Platform-side only — agents use the `readLog` tool, not raw paths under `.next`.
+ */
+export async function readDevLogLines(
+  sandbox: DaytonaProjectSandbox,
+  lines: number,
+): Promise<string> {
+  const n = Math.max(1, Math.floor(lines));
   try {
-    return await sandbox.fs.readTextFile(".next/dev/logs/next-development.log");
+    const tailed = await sandbox.process.executeCommand(
+      `tail -n ${n} -- ${DEV_LOG_PATH}`,
+      ".",
+      undefined,
+      15,
+    );
+    if (tailed.exitCode === 0) {
+      return tailed.stdout;
+    }
   } catch {
-    return "";
+    // missing log / sandbox hiccup
   }
+  return "";
+}
+
+/** Compile-peek helper: recent log lines only. */
+export async function readDevLog(sandbox: DaytonaProjectSandbox): Promise<string> {
+  return readDevLogLines(sandbox, DEV_LOG_COMPILE_PEEK_LINES);
 }
 
 export function extractCompileError(content: string): string | null {
