@@ -23,7 +23,8 @@ export type WorkspacePathOperation =
   | "edit"
   | "delete"
   | "list"
-  | "search";
+  | "search"
+  | "searchContent";
 
 export function isProtectedPath(rawPath: string): boolean {
   const normalized = normalizeWorkspacePath(rawPath);
@@ -76,6 +77,8 @@ function operationLabel(operation: WorkspacePathOperation): string {
       return "listFiles";
     case "search":
       return "searchFiles";
+    case "searchContent":
+      return "searchContent";
   }
 }
 
@@ -116,7 +119,8 @@ export function workspacePathViolation(
     return null;
   }
 
-  if (operation === "list") {
+  // Content query may literally contain ".next" etc. — only guard the directory.
+  if (operation === "searchContent" || operation === "list") {
     if (normalized !== "." && isProtectedPath(normalized)) {
       return protectedPathError(operationLabel(operation), normalized);
     }

@@ -1,6 +1,7 @@
 import type { Sandbox } from "@daytona/sdk";
 
 import {
+  type ContentSearchMatch,
   type ExecuteResult,
   type FileInfo,
   type ProjectSandbox,
@@ -104,6 +105,23 @@ class DaytonaSandboxFileSystem implements SandboxFileSystem {
     const result = await this.sdkSandbox.fs.searchFiles(absolute, pattern);
     const files = result.files ?? [];
     return files.map((file) => toRelativePath(file));
+  }
+
+  /**
+   * Text search via Daytona `findFiles` (not filename search).
+   * Maps `query` → SDK `pattern`; keep `findFiles` out of the public tool surface.
+   */
+  async searchContent(
+    targetPath: string,
+    query: string,
+  ): Promise<ContentSearchMatch[]> {
+    const absolute = normalizeRelativePath(targetPath);
+    const matches = await this.sdkSandbox.fs.findFiles(absolute, query);
+    return matches.map((match) => ({
+      path: toRelativePath(match.file),
+      line: match.line,
+      snippet: match.content,
+    }));
   }
 
   async getFileDetails(targetPath: string): Promise<FileInfo> {

@@ -89,7 +89,7 @@ export function buildAllowedShellCommand(
 }
 
 export const DISALLOWED_COMMAND_HINT =
-  "Only package-manager commands are allowed. Use listFiles/searchFiles/readFile for inspection, readLog for platform logs, checkPreview for preview health, and installPackage/installDependencies for dependencies. Never run curl, ls, find, grep, tail, or dev server commands.";
+  "Only package-manager commands are allowed. Use listFiles/searchFiles/searchContent/readFile for inspection, readLog for platform logs, checkPreview for preview health, and installPackage/installDependencies for dependencies. Never run curl, ls, find, grep, tail, or dev server commands.";
 
 
 export function validateRunCommand(

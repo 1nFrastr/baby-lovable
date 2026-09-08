@@ -285,6 +285,44 @@ export async function searchFilesStep(
   };
 }
 
+export async function searchContentStep(
+  input: { path?: string; query: string },
+  { context }: { context: ToolContext },
+) {
+  "use step";
+
+  const query = input.query.trim();
+  const targetPath = input.path ?? ".";
+
+  if (!query) {
+    return {
+      ok: false as const,
+      path: targetPath,
+      query: input.query,
+      error: "searchContent requires a non-empty query string.",
+    };
+  }
+
+  const blocked = pathGuard("searchContent", targetPath);
+  if (blocked) {
+    return { ...blocked, path: targetPath, query };
+  }
+
+  const { boundContentMatches } = await import("@/lib/sandbox/search-content");
+  const sandbox = await getSandboxFromContext(context);
+  const raw = await sandbox.fs.searchContent(targetPath, query);
+  const { matches, truncated, totalMatches } = boundContentMatches(raw);
+
+  return {
+    path: targetPath,
+    query,
+    matches,
+    matchCount: matches.length,
+    totalMatches,
+    truncated,
+  };
+}
+
 async function restartPreviewAfterInstall(context: ToolContext): Promise<void> {
   const { restartAppServer } = await import("@/lib/sandbox/preview");
   void restartAppServer(context.sessionId).catch(() => {

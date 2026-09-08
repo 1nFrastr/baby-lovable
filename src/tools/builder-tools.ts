@@ -16,6 +16,7 @@ import {
   readFileStep,
   readLogStep,
   runCommandStep,
+  searchContentStep,
   searchFilesStep,
   testPreviewStep,
   writeFileStep,
@@ -82,6 +83,7 @@ export function createToolsContext(
     editFile: context,
     listFiles: context,
     searchFiles: context,
+    searchContent: context,
     installPackage: context,
     installDependencies: context,
     runCommand: context,
@@ -266,7 +268,7 @@ export const builderTools = {
   }),
   searchFiles: tool({
     description:
-      "Search files in the workspace using a glob pattern. Cannot search inside .next, node_modules, or .git.",
+      "Match filenames by glob pattern (e.g. *.tsx, src/**/*.ts). Does not search file contents — use searchContent for that. Cannot search inside .next, node_modules, or .git.",
     inputSchema: z.object({
       path: z
         .string()
@@ -274,10 +276,27 @@ export const builderTools = {
         .describe("Relative directory path, defaults to workspace root"),
       pattern: z
         .string()
-        .describe("Glob pattern such as *.tsx or src/**/*.ts"),
+        .describe("Filename glob pattern such as *.tsx or src/**/*.ts"),
     }),
     contextSchema: toolContextSchema,
     execute: withTurnProgress("searchFiles", searchFilesStep),
+  }),
+  searchContent: tool({
+    description:
+      "Search text inside workspace files. Returns path, line, and a short snippet per match (capped). Query is a literal text substring via Daytona findFiles — not ripgrep flags or regex options. Use searchFiles for filename globs. Cannot search inside .next, node_modules, or .git.",
+    inputSchema: z.object({
+      path: z
+        .string()
+        .optional()
+        .describe("Relative directory path, defaults to workspace root"),
+      query: z
+        .string()
+        .describe(
+          "Literal text to find inside files (e.g. TodoItem, bg-foreground/5). Not a filename glob.",
+        ),
+    }),
+    contextSchema: toolContextSchema,
+    execute: withTurnProgress("searchContent", searchContentStep),
   }),
   installPackage: tool({
     description:
