@@ -19,6 +19,7 @@ const LARGE_RESULT_TOOLS = new Set([
   "readFile",
   "listFiles",
   "searchFiles",
+  "searchContent",
   "runCommand",
   "testPreview",
 ]);

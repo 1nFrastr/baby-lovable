@@ -14,8 +14,9 @@ const ACTIVITY_VERBS: Record<string, [running: string, done: string]> = {
   writeFile: ["Writing", "Wrote"],
   editFile: ["Editing", "Edited"],
   deleteFile: ["Deleting", "Deleted"],
-  listFiles: ["Listing files", "Listed files"],
-  searchFiles: ["Searching", "Searched"],
+  listFiles: ["Listing", "Listed"],
+  searchFiles: ["Searching filenames", "Searched filenames"],
+  searchContent: ["Searching content", "Searched content"],
   installPackage: ["Installing", "Installed"],
   installDependencies: ["Installing dependencies", "Installed dependencies"],
   checkPreview: ["Checking preview", "Checked preview"],
@@ -48,6 +49,20 @@ function activityVerb(name: string, running: boolean): string {
   return running ? name : name;
 }
 
+function withOptionalPath(
+  verb: string,
+  subject: string | undefined,
+  path: string | undefined,
+): string {
+  if (!subject) {
+    return verb;
+  }
+  if (path && path !== ".") {
+    return `${verb} ${subject} in ${path}`;
+  }
+  return `${verb} ${subject}`;
+}
+
 /**
  * Human-readable tool activity label for chat UI (Cursor-style).
  * Shows file paths as soon as partial JSON includes them (input-streaming).
@@ -69,12 +84,28 @@ export function formatToolPartLabel(
     return verb;
   }
 
-  if (name === "searchFiles") {
-    const pattern = readStringField(input, "pattern");
-    if (pattern) {
-      return `${verb} ${pattern}`;
+  if (name === "listFiles") {
+    const path = readStringField(input, "path");
+    if (path && path !== ".") {
+      return `${verb} ${path}`;
     }
-    return verb;
+    return running ? "Listing files" : "Listed files";
+  }
+
+  if (name === "searchFiles") {
+    return withOptionalPath(
+      verb,
+      readStringField(input, "pattern"),
+      readStringField(input, "path"),
+    );
+  }
+
+  if (name === "searchContent") {
+    return withOptionalPath(
+      verb,
+      readStringField(input, "query"),
+      readStringField(input, "path"),
+    );
   }
 
   if (name === "installPackage") {
@@ -104,7 +135,12 @@ export function formatToolPartLabel(
 }
 
 /** Inspection tools — label only; raw content floods the chat. */
-const HIDE_OUTPUT_TOOLS = new Set(["readFile", "listFiles", "searchFiles"]);
+const HIDE_OUTPUT_TOOLS = new Set([
+  "readFile",
+  "listFiles",
+  "searchFiles",
+  "searchContent",
+]);
 
 /** Compact result line for tool outputs (avoids dumping large JSON). */
 export function formatToolPartOutput(

@@ -34,6 +34,13 @@ export interface FileInfo {
   modifiedAt?: string;
 }
 
+/** One hit from workspace text search (`searchContent` → Daytona `findFiles`). */
+export interface ContentSearchMatch {
+  path: string;
+  line: number;
+  snippet: string;
+}
+
 export interface ExecuteResult {
   exitCode: number;
   stdout: string;
@@ -49,7 +56,10 @@ export interface SandboxFileSystem {
   createFolder(path: string, mode?: string): Promise<void>;
   deleteFile(path: string, recursive?: boolean): Promise<void>;
   moveFiles(source: string, destination: string): Promise<void>;
+  /** Filename glob match (Daytona `searchFiles`). */
   searchFiles(path: string, pattern: string): Promise<string[]>;
+  /** Text inside files (Daytona `findFiles`; public tool is `searchContent`). */
+  searchContent(path: string, query: string): Promise<ContentSearchMatch[]>;
   getFileDetails(path: string): Promise<FileInfo>;
 }
 
