@@ -49,6 +49,11 @@ import {
   sandboxRecordExists,
   wrapSandbox,
 } from "./vm";
+import {
+  clearWorkspaceRestoreForTests,
+  isWorkspaceRestoreInFlight,
+  restoreHydratedWorkspace,
+} from "./workspace-restore";
 
 const LEASE_TTL_MS = 45_000;
 const RECONCILE_TIMEOUT_MS = 180_000;
@@ -161,6 +166,7 @@ function applyObservation(
 
   const controllerPhases = new Set<string>([
     "creating-sandbox",
+    "bootstrapping-workspace",
     "starting-devserver",
     "stopping",
     "deleting",
@@ -174,12 +180,11 @@ function applyObservation(
   ) {
     phase = "preview-ready";
   } else if (
-    (snapshot.observed === "creating-sandbox" ||
-      snapshot.observed === "bootstrapping-workspace") &&
+    snapshot.observed === "creating-sandbox" &&
     observed.phase !== "missing" &&
     (observed.sandboxId ?? snapshot.sandboxId)
   ) {
-    // Snapshot ships the workspace — promote as soon as the VM exists.
+    // New session: snapshot ships the starter — promote as soon as the VM exists.
     phase =
       observed.phase === "preview-ready" ? "preview-ready" : "workspace-ready";
   } else if (
@@ -250,6 +255,7 @@ function shouldPreserveSnapshotOnObserveMiss(
     snapshot.observed === "preview-ready" ||
     snapshot.observed === "starting-devserver" ||
     snapshot.observed === "workspace-ready" ||
+    snapshot.observed === "bootstrapping-workspace" ||
     snapshot.desired === "preview-ready" ||
     hasFreshPreviewEmbed(snapshot)
   );
@@ -413,6 +419,7 @@ function trackEnsureInFlight(
 export function clearReconcileInFlightForTests(): void {
   ensureInFlight.clear();
   hydrateKicked.clear();
+  clearWorkspaceRestoreForTests();
 }
 
 /**
@@ -551,8 +558,8 @@ async function actionCreateSandbox(
       // iframe can wait until startDev; create still succeeds
     }
 
-    // Freestyle: recreate (remoteHeadSha set) blocks; new sessions defer hydrate
-    // so snapshot-baked workspace can start pnpm immediately.
+    // Freestyle: recreate (remoteHeadSha set) blocks pull+install; new sessions
+    // defer hydrate so snapshot-baked workspace can start pnpm immediately.
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
     if (isFreestyleConfigured()) {
       const { readGitRepository } = await import("@/lib/git/repository-store");
@@ -569,27 +576,22 @@ async function actionCreateSandbox(
           ...(previewUrl ? { previewUrl } : {}),
         });
 
-        const { hydrateWorkspaceFromFreestyle } = await import(
-          "@/lib/git/hydrate-workspace"
-        );
-        const tHydrate = Date.now();
-        const hydrate = await hydrateWorkspaceFromFreestyle(
+        const restore = await restoreHydratedWorkspace(
           sessionId,
           project,
           userId,
         );
-        logDaytonaTiming(
+        logDaytonaBootstrap(
           sessionId,
           "action.hydrateFreestyle",
-          Date.now() - tHydrate,
-          `ok=${hydrate.ok} mode=blocking`,
+          `ok=${restore.ok} mode=blocking+install`,
         );
-        if (!hydrate.ok) {
+        if (!restore.ok) {
           await upsertWithRetry(sessionId, {
             observed: "error",
-            lastError: hydrate.error ?? "Freestyle workspace hydrate failed",
+            lastError: restore.error,
           });
-          throw new Error(hydrate.error ?? "Freestyle workspace hydrate failed");
+          throw new Error(restore.error);
         }
         hydrateKicked.add(sessionId);
       } else {
@@ -865,7 +867,7 @@ async function reconcileOnce(
   }
 
   if (latest.observed === "creating-sandbox") {
-    // Wait only while create (and optional blocking hydrate) is still in-process.
+    // Wait only while create (and optional blocking restore) is still in-process.
     if (createInFlight.has(sessionId)) {
       return false;
     }
@@ -877,8 +879,11 @@ async function reconcileOnce(
   }
 
   if (latest.observed === "bootstrapping-workspace") {
-    // Blocking recreate hydrate (remoteHeadSha set) — wait for create/hydrate.
-    if (createInFlight.has(sessionId) || hydrateInFlight.has(sessionId)) {
+    if (
+      createInFlight.has(sessionId) ||
+      hydrateInFlight.has(sessionId) ||
+      isWorkspaceRestoreInFlight(sessionId)
+    ) {
       return false;
     }
     const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
@@ -898,10 +903,8 @@ async function reconcileOnce(
       });
       return true;
     }
-    if (
-      repo?.provisionStatus === "ready" ||
-      !needsBlockingFreestyleHydrate(repo?.remoteHeadSha)
-    ) {
+    // provisionStatus=ready means Freestyle has commits, not that this VM was pulled.
+    if (!needsBlockingFreestyleHydrate(repo?.remoteHeadSha)) {
       await upsertWithRetry(sessionId, {
         observed: "workspace-ready",
         lastError: null,
@@ -960,7 +963,10 @@ async function maybeKickBackgroundHydrate(
   }
   const { readGitRepository } = await import("@/lib/git/repository-store");
   const repo = await readGitRepository(sessionId, userId);
-  if (repo?.provisionStatus === "ready") {
+  if (
+    repo?.provisionStatus === "ready" &&
+    latest.observed !== "bootstrapping-workspace"
+  ) {
     hydrateKicked.add(sessionId);
     return "ok";
   }
@@ -978,20 +984,17 @@ async function maybeKickBackgroundHydrate(
       8,
       userId,
     );
-    const { hydrateWorkspaceFromFreestyle } = await import(
-      "@/lib/git/hydrate-workspace"
-    );
-    const hydrate = await hydrateWorkspaceFromFreestyle(
+    const restore = await restoreHydratedWorkspace(
       sessionId,
       project,
       userId,
     );
-    if (!hydrate.ok) {
+    if (!restore.ok) {
       await upsertWithRetry(
         sessionId,
         {
           observed: "error",
-          lastError: hydrate.error ?? "Freestyle hydrate failed",
+          lastError: restore.error,
         },
         8,
         userId,

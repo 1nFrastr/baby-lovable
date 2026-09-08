@@ -20,7 +20,7 @@ Every session uses Freestyle private-repo `main` as the durable source of truth 
 | Turn ends | Unlock UI → enqueue sync task → start durable `gitTurnCheckpointWorkflow` (do not wait for push) |
 | Next turn writes files | `awaitPreviousCheckpoint` only waits; on a dead worker, CAS kicks a background task once |
 | Delete sandbox | Flush unfinished checkpoint first (kick + wait for terminal state); refuse delete on failure |
-| Recreate sandbox | Pull/restore from Freestyle `main`; do not overwrite an existing repo with the starter |
+| Recreate sandbox | Pull/restore from Freestyle `main`; run `pnpm install --frozen-lockfile`; do not overwrite an existing repo with the starter |
 | VM deleted outside Console | observe confirms `confirmedAbsent` → clear zombie `sandboxId` → recreate and hydrate (unpushed changes are unrecoverable) |
 | Switch session preview | `ensureDesired(preview-ready)` HTTP-probes the cached URL first; reuse if healthy; on 502/4xx only relaunch `pnpm dev` (do not delete VM or hydrate) |
 | Export download | After checkpoint, use Freestyle `contents.downloadZip` (source tree at a revision; **does not** include `.git` history; does not include uncommitted sandbox changes) |

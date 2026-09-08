@@ -241,6 +241,7 @@ export function PreviewPanel({
   const prevAgentRunStatusRef = useRef<SessionRunStatus | null>(null);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const prevPreviewGenerationRef = useRef(previewGeneration);
 
   const [iframeLocation, setIframeLocation] =
     useState<PreviewBridgeLocation | null>(null);
@@ -369,6 +370,18 @@ export function PreviewPanel({
       }
     });
   }, [runStatus, readyPreviewUrl]);
+
+  // Sandbox recreate bumps generation — re-list after Freestyle restore, not starter.
+  useEffect(() => {
+    const previous = prevPreviewGenerationRef.current;
+    prevPreviewGenerationRef.current = previewGeneration;
+    if (previous === previewGeneration) {
+      return;
+    }
+    queueMicrotask(() => {
+      setFilesRefreshKey((key) => key + 1);
+    });
+  }, [previewGeneration]);
 
   // Checkpoint finishes after the chat unlocks — refresh History when save settles.
   useEffect(() => {

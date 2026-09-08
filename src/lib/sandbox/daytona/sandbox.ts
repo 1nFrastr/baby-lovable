@@ -37,8 +37,10 @@ function kickPreviewWarmIfNeeded(snapshot: DaytonaRuntimeSnapshot): void {
 
 /**
  * Snapshot already has a usable workspace — skip reconcile.
- * Once sandboxId is written, attach even while warm is still in
- * bootstrapping/install (prebuilt Daytona snapshot ships the starter).
+ * Once sandboxId is written, attach even while warm is still starting
+ * preview (prebuilt Daytona snapshot ships the starter).
+ * Do not attach during bootstrapping-workspace: that phase is Freestyle
+ * restore (git pull + lockfile install); the disk still has starter files.
  */
 export function canFastAttachSandbox(
   snapshot: DaytonaRuntimeSnapshot,
@@ -49,12 +51,14 @@ export function canFastAttachSandbox(
   if (snapshot.desired === "deleted") {
     return false;
   }
+  if (snapshot.observed === "bootstrapping-workspace") {
+    return false;
+  }
   if (isDesiredSatisfied({ ...snapshot, desired: "sandbox-ready" })) {
     return true;
   }
   return (
     snapshot.observed === "creating-sandbox" ||
-    snapshot.observed === "bootstrapping-workspace" ||
     snapshot.observed === "installing-deps" || // legacy persisted
     snapshot.observed === "starting-devserver" ||
     snapshot.observed === "workspace-ready" ||
