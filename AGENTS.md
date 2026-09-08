@@ -120,7 +120,7 @@ Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
 | Tool | Purpose |
 | --- | --- |
 | `readFile` / `writeFile` / `editFile` / `deleteFile` | Workspace file CRUD — **source only** (`src/**`, `public/**`, root configs); `.next`, `node_modules`, `.git` are blocked |
-| `listFiles` / `searchFiles` / `searchContent` | Discover structure (`listFiles`), match filenames (`searchFiles`), or search text inside files (`searchContent`) |
+| `listFiles` / `searchFiles` / `searchContent` | Discover structure (`listFiles`), match **filenames** (`searchFiles`: `path` + filename glob like `*.tsx`, not `src/**/*.tsx`), or search **text inside files** (`searchContent`) |
 | `installPackage` / `installDependencies` | Add/remove packages or run `pnpm install` (whitelisted; no arbitrary shell) |
 | `runCommand` | **Deprecated** — only `pnpm install/add/remove` allowed; rejects curl/ls/find/etc. |
 | `checkPreview` | **Readiness gate** — HTTP probe only (`{ ok, status, url, httpStatus }`); does not read compile logs. Optional `restart: true` restarts the managed dev server (never delete `.next` manually). Not required after every small HMR edit once preview is ready. |

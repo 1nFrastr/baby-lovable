@@ -268,15 +268,19 @@ export const builderTools = {
   }),
   searchFiles: tool({
     description:
-      "Match filenames by glob pattern (e.g. *.tsx, src/**/*.ts). Does not search file contents — use searchContent for that. Cannot search inside .next, node_modules, or .git.",
+      "Match filenames under a directory (recursive). Pattern is a filename glob only (*.tsx, *Button*) — put the folder in path, e.g. path: \"src\", pattern: \"*.tsx\". Do not pass src/**/*.tsx as pattern; that matches no files. Does not search file contents — use searchContent. Cannot search inside .next, node_modules, or .git.",
     inputSchema: z.object({
       path: z
         .string()
         .optional()
-        .describe("Relative directory path, defaults to workspace root"),
+        .describe(
+          'Directory to search under (recursive). Defaults to workspace root. Example: "src"',
+        ),
       pattern: z
         .string()
-        .describe("Filename glob pattern such as *.tsx or src/**/*.ts"),
+        .describe(
+          'Filename glob only, e.g. *.tsx or *.svg. Not a path like src/**/*.tsx — use path for the folder.',
+        ),
     }),
     contextSchema: toolContextSchema,
     execute: withTurnProgress("searchFiles", searchFilesStep),

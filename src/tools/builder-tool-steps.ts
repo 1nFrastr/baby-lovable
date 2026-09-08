@@ -265,23 +265,48 @@ export async function searchFilesStep(
 ) {
   "use step";
 
-  const targetPath = input.path ?? ".";
-  const blocked = pathGuard("search", targetPath, {
-    searchPattern: input.pattern,
+  const {
+    looksLikePathGlob,
+    normalizeFilenameSearch,
+    SEARCH_FILES_PATH_GLOB_HINT,
+  } = await import("@/lib/sandbox/search-files");
+
+  const requestedPath = input.path ?? ".";
+  const requestedPattern = input.pattern;
+  const blocked = pathGuard("search", requestedPath, {
+    searchPattern: requestedPattern,
   });
   if (blocked) {
-    return { ...blocked, path: targetPath, pattern: input.pattern };
+    return { ...blocked, path: requestedPath, pattern: requestedPattern };
+  }
+
+  const normalized = normalizeFilenameSearch(requestedPath, requestedPattern);
+  const rewrittenBlocked = pathGuard("search", normalized.path, {
+    searchPattern: normalized.pattern,
+  });
+  if (rewrittenBlocked) {
+    return {
+      ...rewrittenBlocked,
+      path: requestedPath,
+      pattern: requestedPattern,
+    };
   }
 
   const sandbox = await getSandboxFromContext(context);
   const files = (
-    await sandbox.fs.searchFiles(input.path ?? ".", input.pattern)
+    await sandbox.fs.searchFiles(normalized.path, normalized.pattern)
   ).filter((filePath) => !isProtectedPath(filePath));
 
   return {
-    path: input.path ?? ".",
-    pattern: input.pattern,
+    path: normalized.path,
+    pattern: normalized.pattern,
     files,
+    ...(normalized.rewritten
+      ? { requestedPath, requestedPattern }
+      : {}),
+    ...(files.length === 0 && looksLikePathGlob(requestedPattern)
+      ? { hint: SEARCH_FILES_PATH_GLOB_HINT }
+      : {}),
   };
 }
 
