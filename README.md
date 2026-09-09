@@ -181,7 +181,7 @@ Next, in order:
 
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
-- [ ] Multimodal input (screenshot / design → edit); pairs with visual picker
+- [ ] Multimodal input: images and documents in chat (screenshots, designs, PDFs, etc.)
 - [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - [ ] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries
@@ -196,7 +196,7 @@ Next, in order:
 **3. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.
 
 - [ ] Publish: one-click deploy from Freestyle `main` to a durable public URL
-- [ ] Generated-app backend: Auth, DB, Edge Functions
+- [ ] Generated-app backend: Auth, DB, Storage, Edge Functions
 - [ ] Payments (Stripe) so generated apps can charge money
 - [ ] Security gate before publish: secrets in git, `npm audit`, dangerous APIs (not a standalone scanner product)
 - Later: mobile (Expo / RN) as a second runtime — new snapshot, no iframe picker; do not start until Web can ship and take payment
