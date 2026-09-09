@@ -5,6 +5,7 @@ import { getWritable } from "workflow";
 import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
+import { expandAttachmentPartsForModel } from "@/lib/chat/attachments";
 import { toPromptUiMessages } from "@/lib/chat/compaction";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
@@ -57,7 +58,7 @@ export async function builderChat(
     "turn",
   );
   const modelMessages = await convertToModelMessages(
-    toPromptUiMessages(compactedMessages),
+    expandAttachmentPartsForModel(toPromptUiMessages(compactedMessages)),
     {
       ignoreIncompleteToolCalls: true,
     },

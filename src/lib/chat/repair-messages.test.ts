@@ -150,4 +150,30 @@ describe("repairUiMessages", () => {
     ]);
     expect(result.map((message) => message.id)).toEqual(["u1", "cmp_turn_1", "u2"]);
   });
+
+  it("keeps file parts when merging a file-only user with a later text user", () => {
+    const withFile: UIMessage = {
+      id: "u1",
+      role: "user",
+      parts: [
+        {
+          type: "file",
+          mediaType: "image/png",
+          filename: "mock.png",
+          url: "https://cdn.example/mock.png",
+        },
+      ],
+    };
+    const result = repairUiMessages([withFile, user("u2", "match this mockup")]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.parts).toEqual([
+      { type: "text", text: "match this mockup" },
+      {
+        type: "file",
+        mediaType: "image/png",
+        filename: "mock.png",
+        url: "https://cdn.example/mock.png",
+      },
+    ]);
+  });
 });

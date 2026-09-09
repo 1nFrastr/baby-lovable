@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 
+import { userMessagePreview } from "@/lib/chat/attachments";
 import {
   applyAssistantSnapshot,
   applyToolProgress,
@@ -57,17 +58,9 @@ export type TurnMutationResult =
 
 function titleFromFirstUser(messages: UIMessage[]): string | null {
   const firstUser = messages.find(
-    (message) =>
-      message.role === "user" &&
-      message.parts.some(
-        (part) => part.type === "text" && part.text.trim().length > 0,
-      ),
+    (message) => message.role === "user" && userMessagePreview(message).length > 0,
   );
-  const text = firstUser?.parts.find((part) => part.type === "text");
-  if (!text || text.type !== "text") {
-    return null;
-  }
-  const trimmed = text.text.trim();
+  const trimmed = firstUser ? userMessagePreview(firstUser) : "";
   if (!trimmed) {
     return null;
   }

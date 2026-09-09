@@ -215,6 +215,26 @@ describe("sanitizeModelMessages", () => {
     });
   });
 
+  it("keeps image parts when merging a media user with a later text user", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "image", image: "https://cdn.example/a.png" }],
+      },
+      { role: "user", content: "match this mockup" },
+    ];
+
+    const result = sanitizeModelMessages(messages);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.role).toBe("user");
+    if (result.messages[0]?.role === "user" && Array.isArray(result.messages[0].content)) {
+      expect(result.messages[0].content).toEqual([
+        { type: "image", image: "https://cdn.example/a.png" },
+        { type: "text", text: "match this mockup" },
+      ]);
+    }
+  });
+
   it("wraps invalid tool-result payloads so they match the schema", () => {
     const messages: ModelMessage[] = [
       {
@@ -375,6 +395,37 @@ describe("compactModelMessages", () => {
           ),
       ),
     ).toBe(false);
+  });
+
+  it("stubs image payloads on user turns older than keepRecent", () => {
+    const huge = `data:image/png;base64,${"A".repeat(8_000)}`;
+    const messages: ModelMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "match this" },
+          { type: "image", image: huge, mediaType: "image/png" },
+        ],
+      },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "now add a footer" },
+      { role: "assistant", content: "done" },
+    ];
+
+    const result = compactModelMessages(messages, { keepRecent: 2 });
+    const oldUser = result.messages[0];
+    expect(oldUser?.role).toBe("user");
+    if (oldUser?.role === "user" && Array.isArray(oldUser.content)) {
+      expect(oldUser.content.some((part) => part.type === "image")).toBe(false);
+      expect(
+        oldUser.content.some(
+          (part) =>
+            part.type === "text" &&
+            part.text.includes("omitted from older context"),
+        ),
+      ).toBe(true);
+    }
+    expect(JSON.stringify(result.messages[0])).not.toContain(huge);
   });
 });
 

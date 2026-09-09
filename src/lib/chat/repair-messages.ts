@@ -69,22 +69,47 @@ function isInterruptedAssistant(message: UIMessage): boolean {
   );
 }
 
+function filePartsOf(
+  message: UIMessage,
+): Extract<UIMessage["parts"][number], { type: "file" }>[] {
+  return message.parts.filter(
+    (part): part is Extract<UIMessage["parts"][number], { type: "file" }> =>
+      part.type === "file",
+  );
+}
+
 function mergeUserUiMessages(earlier: UIMessage, later: UIMessage): UIMessage {
   const earlierText = textOf(earlier);
   const laterText = textOf(later);
-  if (earlierText === laterText || earlierText.length === 0) {
-    return later;
-  }
-  if (laterText.length === 0) {
-    return { ...later, parts: earlier.parts };
+  const text =
+    !earlierText || earlierText === laterText
+      ? laterText
+      : laterText
+        ? `${earlierText}\n\n${laterText}`
+        : earlierText;
+
+  const seen = new Set<string>();
+  const files: Extract<UIMessage["parts"][number], { type: "file" }>[] = [];
+  for (const file of [...filePartsOf(earlier), ...filePartsOf(later)]) {
+    const key = `${file.mediaType}:${file.filename ?? ""}:${file.url}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    files.push(file);
   }
 
-  const nonText = [...earlier.parts, ...later.parts].filter(
-    (part) => part.type !== "text",
+  const rest = [...earlier.parts, ...later.parts].filter(
+    (part) => part.type !== "text" && part.type !== "file",
   );
+
   return {
     ...later,
-    parts: [{ type: "text", text: `${earlierText}\n\n${laterText}` }, ...nonText],
+    parts: [
+      ...(text ? [{ type: "text" as const, text }] : []),
+      ...files,
+      ...rest,
+    ],
   };
 }
 

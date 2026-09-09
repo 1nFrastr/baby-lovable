@@ -181,7 +181,7 @@ Next, in order:
 
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
-- [ ] Multimodal input (screenshot / design → edit); pairs with visual picker
+- [x] Multimodal input (images and documents in chat; screenshot / design → edit)
 - [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - [ ] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries

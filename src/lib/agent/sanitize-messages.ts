@@ -73,32 +73,39 @@ function isEmptyModelMessage(message: ModelMessage): boolean {
   return message.content.length === 0;
 }
 
+function partsOfUser(message: ModelMessage) {
+  if (typeof message.content === "string") {
+    return message.content.trim()
+      ? [{ type: "text" as const, text: message.content }]
+      : [];
+  }
+  return message.content;
+}
+
 function mergeUserModelMessages(
   earlier: ModelMessage,
   later: ModelMessage,
 ): ModelMessage {
+  const earlierParts = partsOfUser(earlier);
+  const laterParts = partsOfUser(later);
   const earlierText = modelText(earlier);
   const laterText = modelText(later);
-  if (earlierText === laterText || earlierText.length === 0) {
-    return later;
-  }
-  if (laterText.length === 0) {
-    return earlier;
-  }
-  if (typeof earlier.content === "string" && typeof later.content === "string") {
+  const earlierMedia = earlierParts.filter((part) => part.type !== "text");
+  const laterMedia = laterParts.filter((part) => part.type !== "text");
+
+  if (earlierMedia.length === 0 && laterMedia.length === 0) {
+    if (earlierText === laterText || earlierText.length === 0) {
+      return later;
+    }
+    if (laterText.length === 0) {
+      return earlier;
+    }
     return { role: "user", content: `${earlierText}\n\n${laterText}` };
   }
 
-  const partsOf = (message: ModelMessage) =>
-    typeof message.content === "string"
-      ? message.content.trim()
-        ? [{ type: "text" as const, text: message.content }]
-        : []
-      : message.content;
-
   return {
     role: "user",
-    content: [...partsOf(earlier), ...partsOf(later)],
+    content: [...earlierParts, ...laterParts],
   } as ModelMessage;
 }
 

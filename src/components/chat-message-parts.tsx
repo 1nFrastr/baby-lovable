@@ -14,6 +14,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
+import { isImageMediaType } from "@/lib/chat/attachments";
 import {
   compactToolInput,
   formatToolPartLabel,
@@ -28,6 +29,7 @@ import {
   type ToolUIPart,
   type UIMessage,
 } from "ai";
+import { FileIcon } from "lucide-react";
 import {
   useLayoutEffect,
   useRef,
@@ -109,6 +111,57 @@ function UserMessageText({ text }: { text: string }) {
   );
 }
 
+function UserMessageFiles({
+  parts,
+}: {
+  parts: UIMessage["parts"];
+}) {
+  const files = parts.filter(
+    (part): part is Extract<UIMessage["parts"][number], { type: "file" }> =>
+      part.type === "file",
+  );
+  if (files.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {files.map((file, index) => {
+        const label = file.filename?.trim() || "Attached file";
+        const key = `${file.filename ?? "file"}-${index}`;
+        if (isImageMediaType(file.mediaType) && file.url) {
+          return (
+            <a
+              className="block overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700"
+              href={file.url}
+              key={key}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {/* Stored as data/https URLs from the composer. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                alt={label}
+                className="max-h-48 max-w-full object-contain"
+                src={file.url}
+              />
+            </a>
+          );
+        }
+        return (
+          <div
+            className="flex max-w-full items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900/60"
+            key={key}
+          >
+            <FileIcon className="size-3.5 shrink-0 text-zinc-500" />
+            <span className="min-w-0 truncate">{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function BuilderToolPart({
   part,
 }: {
@@ -184,9 +237,11 @@ export function ChatMessageParts({
   activityLabel?: string | null;
 }) {
   if (message.role === "user") {
+    const text = collectTextParts(message);
     return (
-      <div className="flex flex-col gap-0.5">
-        <UserMessageText text={collectTextParts(message)} />
+      <div className="flex flex-col gap-2">
+        <UserMessageFiles parts={message.parts} />
+        {text ? <UserMessageText text={text} /> : null}
       </div>
     );
   }

@@ -12,6 +12,10 @@ import {
   cancelSessionRun,
   cancelWorkflowRun,
 } from "@/lib/chat/cancel-session-run";
+import {
+  latestUserMessage,
+  validateUserMessageAttachments,
+} from "@/lib/chat/attachments";
 import { capReasoningStream } from "@/lib/chat/cap-reasoning-stream";
 import { bindAssistantMessageId } from "@/lib/chat/stable-message-stream";
 import {
@@ -58,22 +62,6 @@ function emptyRunResponse(
   });
 }
 
-function latestUserMessage(messages: UIMessage[]): UIMessage | null {
-  const message = [...messages]
-    .reverse()
-    .find(
-      (candidate) =>
-        candidate.role === "user" &&
-        candidate.parts.some(
-          (part) => part.type === "text" && part.text.trim().length > 0,
-        ),
-    );
-  if (!message || !message.id) {
-    return null;
-  }
-  return message;
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -95,13 +83,18 @@ export async function POST(
 
   try {
     const body = (await request.json()) as { messages?: UIMessage[] };
-    const userMessage = latestUserMessage(body.messages ?? []);
-    if (!userMessage) {
+    const rawUserMessage = latestUserMessage(body.messages ?? []);
+    if (!rawUserMessage) {
       return NextResponse.json(
         { error: "A non-empty user message is required" },
         { status: 400 },
       );
     }
+    const attachments = validateUserMessageAttachments(rawUserMessage);
+    if (!attachments.ok) {
+      return NextResponse.json({ error: attachments.error }, { status: 400 });
+    }
+    const userMessage = attachments.message;
 
     let claimedSession = null as Awaited<
       ReturnType<typeof getSession>

@@ -205,10 +205,32 @@ function compactMessageParts(
   message: ModelMessage,
   mode: "truncate" | "drop",
 ): ModelMessage {
-  if (message.role !== "assistant" && message.role !== "tool") {
+  if (typeof message.content === "string") {
     return message;
   }
-  if (typeof message.content === "string") {
+
+  if (message.role === "user" && mode === "drop") {
+    let changed = false;
+    const content = message.content.map((part) => {
+      if (part.type !== "image" && part.type !== "file") {
+        return part;
+      }
+      changed = true;
+      const label =
+        part.type === "file" && "filename" in part && part.filename
+          ? String(part.filename)
+          : "mediaType" in part && part.mediaType
+            ? String(part.mediaType)
+            : part.type;
+      return {
+        type: "text" as const,
+        text: `[attached ${label} — omitted from older context]`,
+      };
+    });
+    return changed ? ({ ...message, content } as ModelMessage) : message;
+  }
+
+  if (message.role !== "assistant" && message.role !== "tool") {
     return message;
   }
 

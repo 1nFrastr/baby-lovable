@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 
+import { userMessagePreview } from "@/lib/chat/attachments";
 import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
 import type { GitTurnOutcome } from "./types";
 
@@ -96,9 +97,9 @@ export function deriveTurnCommitInput(
   const userMessages = messages.filter((message) => message.role === "user");
   const turnIndex = userMessages.length;
   const lastUser = userMessages.at(-1);
-  const textPart = lastUser?.parts.find((part) => part.type === "text");
-  const userPrompt =
-    textPart && textPart.type === "text" ? textPart.text : "turn complete";
+  const userPrompt = lastUser
+    ? userMessagePreview(lastUser) || "turn complete"
+    : "turn complete";
   const changedFiles = extractChangedFiles(messages);
 
   return {
