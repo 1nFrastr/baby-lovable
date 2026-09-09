@@ -182,10 +182,12 @@ Next, in order:
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
 - [ ] Multimodal input: images and documents in chat (screenshots, designs, PDFs, etc.)
-- [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
+- [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
+- [ ] Web search: look up current docs, APIs, and examples while building
 - [ ] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries
 - [ ] External context: pull in Google Docs, Drive, Notion (and similar) via connectors / MCP
+- [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - Later: subagents (explore / implement / verify) — highest cost on WorkflowAgent
 
 **2. Visual Edit** — Preview iframe bridge exists (location / back-forward); no inspect mode.
