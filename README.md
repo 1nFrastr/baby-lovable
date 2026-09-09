@@ -182,10 +182,12 @@ Next, in order:
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
 - [x] Multimodal input (images and documents in chat; screenshot / design → edit). Bytes go to Supabase Storage; messages keep `attachment://` URLs. Older turns omit attachment bytes from the model prompt; the chat UI still loads them.
-- [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
+- [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
+- [ ] Web search: look up current docs, APIs, and examples while building
 - [ ] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries
 - [ ] External context: pull in Google Docs, Drive, Notion (and similar) via connectors / MCP
+- [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - Later: subagents (explore / implement / verify) — highest cost on WorkflowAgent
 
 **2. Visual Edit** — Preview iframe bridge exists (location / back-forward); no inspect mode.
@@ -196,7 +198,7 @@ Next, in order:
 **3. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.
 
 - [ ] Publish: one-click deploy from Freestyle `main` to a durable public URL
-- [ ] Generated-app backend: Auth, DB, Edge Functions
+- [ ] Generated-app backend: Auth, DB, Storage, Edge Functions
 - [ ] Payments (Stripe) so generated apps can charge money
 - [ ] Security gate before publish: secrets in git, `npm audit`, dangerous APIs (not a standalone scanner product)
 - Later: mobile (Expo / RN) as a second runtime — new snapshot, no iframe picker; do not start until Web can ship and take payment
