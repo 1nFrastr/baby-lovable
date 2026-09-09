@@ -1064,6 +1064,7 @@ export const PromptInputTextarea = ({
     controlledValue !== undefined
       ? String(controlledValue).length === 0
       : uncontrolledEmpty;
+  const showPlaceholder = isEmpty && attachments.files.length === 0;
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
     (e) => {
@@ -1165,7 +1166,7 @@ export const PromptInputTextarea = ({
       };
 
   return (
-    <>
+    <div className="relative w-full min-w-0 flex-1">
       <InputGroupTextarea
         aria-label={ariaLabel ?? placeholder}
         className={cn("field-sizing-content max-h-48 min-h-16", className)}
@@ -1179,7 +1180,7 @@ export const PromptInputTextarea = ({
         {...props}
         {...controlledProps}
       />
-      {isEmpty ? (
+      {showPlaceholder ? (
         <span
           aria-hidden="true"
           className="pointer-events-none absolute top-0 right-0 left-0 select-none px-2.5 py-2 text-base text-muted-foreground md:text-sm"
@@ -1188,7 +1189,7 @@ export const PromptInputTextarea = ({
           {placeholder}
         </span>
       ) : null}
-    </>
+    </div>
   );
 };
 

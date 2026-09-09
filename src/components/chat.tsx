@@ -425,7 +425,7 @@ export function Chat({
     ? "Stopping… you can send again after cancel succeeds"
     : summarizing
       ? "Summarizing conversation…"
-      : "Describe the app you want to build… Attach a screenshot or type / for commands";
+      : "Describe the app you want…";
   const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop

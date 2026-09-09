@@ -181,7 +181,7 @@ Next, in order:
 
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
-- [x] Multimodal input (images and documents in chat; screenshot / design → edit). Bytes go to Supabase Storage; messages keep `attachment://` URLs. Older turns omit attachment bytes from the model prompt; the chat UI still loads them.
+- [x] Multimodal input (images and documents in chat; screenshot / design → edit)
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
 - [ ] Web search: look up current docs, APIs, and examples while building
 - [ ] Skills (session-level playbooks)
