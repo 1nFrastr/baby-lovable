@@ -172,6 +172,35 @@ See: [Local development guide](./docs/local-development.md) · [Local Supabase +
 
 ## Roadmap
 
-- [ ] Agent Runtime governance: long-context management, tool-result compression, etc.
-- [ ] Product experience: UI / UX improvements
-- [ ] Third-party connectors: Supabase BaaS, Vercel Deploy, image-generation MCP tools, etc.
+Done:
+
+- [x] Agent Runtime governance: long-context, tool-result compression, `/summarize`
+- [x] Product experience: chat, Preview, files, History (read-only), GitHub Sync
+
+Next, in order:
+
+**1. Agent capabilities** — Still a single builder with a fixed tool set.
+
+- [ ] Multimodal input (screenshot / design → edit); pairs with visual picker
+- [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
+- [ ] Skills (session-level playbooks)
+- [ ] Memory: durable session / user memory beyond compaction summaries
+- [ ] External context: pull in Google Docs, Drive, Notion (and similar) via connectors / MCP
+- Later: subagents (explore / implement / verify) — highest cost on WorkflowAgent
+
+**2. Visual Edit** — Preview iframe bridge exists (location / back-forward); no inspect mode.
+
+- [ ] Visual picker: click a DOM node in Preview → chip in the composer (pick-to-chat)
+- Later: screenshot of the node, DOM → source mapping, inline style edits
+
+**3. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.
+
+- [ ] Publish: one-click deploy from Freestyle `main` to a durable public URL
+- [ ] Generated-app backend: Auth, DB, Edge Functions
+- [ ] Payments (Stripe) so generated apps can charge money
+- [ ] Security gate before publish: secrets in git, `npm audit`, dangerous APIs (not a standalone scanner product)
+- Later: mobile (Expo / RN) as a second runtime — new snapshot, no iframe picker; do not start until Web can ship and take payment
+
+**4. Time travel** — Freestyle per-turn checkpoints already exist; History cannot restore yet.
+
+- [ ] Restore workspace + Preview from a checkpoint (code only; do not rewind chat)
