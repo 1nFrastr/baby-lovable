@@ -397,7 +397,7 @@ describe("compactModelMessages", () => {
     ).toBe(false);
   });
 
-  it("stubs image payloads on user turns older than keepRecent", () => {
+  it("keeps user image payloads even when older than keepRecent model messages", () => {
     const huge = `data:image/png;base64,${"A".repeat(8_000)}`;
     const messages: ModelMessage[] = [
       {
@@ -416,16 +416,9 @@ describe("compactModelMessages", () => {
     const oldUser = result.messages[0];
     expect(oldUser?.role).toBe("user");
     if (oldUser?.role === "user" && Array.isArray(oldUser.content)) {
-      expect(oldUser.content.some((part) => part.type === "image")).toBe(false);
-      expect(
-        oldUser.content.some(
-          (part) =>
-            part.type === "text" &&
-            part.text.includes("omitted from older context"),
-        ),
-      ).toBe(true);
+      expect(oldUser.content.some((part) => part.type === "image")).toBe(true);
     }
-    expect(JSON.stringify(result.messages[0])).not.toContain(huge);
+    expect(JSON.stringify(result.messages[0])).toContain(huge);
   });
 });
 

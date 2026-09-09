@@ -210,24 +210,11 @@ function compactMessageParts(
   }
 
   if (message.role === "user" && mode === "drop") {
-    let changed = false;
-    const content = message.content.map((part) => {
-      if (part.type !== "image" && part.type !== "file") {
-        return part;
-      }
-      changed = true;
-      const label =
-        part.type === "file" && "filename" in part && part.filename
-          ? String(part.filename)
-          : "mediaType" in part && part.mediaType
-            ? String(part.mediaType)
-            : part.type;
-      return {
-        type: "text" as const,
-        text: `[attached ${label} — omitted from older context]`,
-      };
-    });
-    return changed ? ({ ...message, content } as ModelMessage) : message;
+    // User images/files are stubbed at the UIMessage layer (keepRecent user
+    // turns). Model-message keepRecent is much shorter because one builder
+    // turn expands into many tool messages — dropping here made the next
+    // turn unable to see a screenshot from the previous user message.
+    return message;
   }
 
   if (message.role !== "assistant" && message.role !== "tool") {

@@ -76,11 +76,13 @@ function TimelineMessage({
   isLastMessage,
   isStreaming,
   activityLabel,
+  sessionId,
 }: {
   message: UIMessage;
   isLastMessage: boolean;
   isStreaming: boolean;
   activityLabel?: string | null;
+  sessionId: string;
 }) {
   return (
     <Message from={message.role}>
@@ -90,13 +92,20 @@ function TimelineMessage({
           isLastMessage={isLastMessage}
           isStreaming={isStreaming}
           message={message}
+          sessionId={sessionId}
         />
       </MessageContent>
     </Message>
   );
 }
 
-function SealedLayer({ messages }: { messages: UIMessage[] }) {
+function SealedLayer({
+  messages,
+  sessionId,
+}: {
+  messages: UIMessage[];
+  sessionId: string;
+}) {
   const count = messages.length;
 
   return (
@@ -116,6 +125,7 @@ function SealedLayer({ messages }: { messages: UIMessage[] }) {
             isStreaming={false}
             item={sealedDisplayItem(message)}
             key={`${message.id}-${index}`}
+            sessionId={sessionId}
           />
         ))}
       </CollapsibleContent>
@@ -145,14 +155,16 @@ function DisplayItemView({
   isLastMessage,
   isStreaming,
   activityLabel,
+  sessionId,
 }: {
   item: ChatDisplayItem;
   isLastMessage: boolean;
   isStreaming: boolean;
   activityLabel?: string | null;
+  sessionId: string;
 }) {
   if (item.type === "sealed") {
-    return <SealedLayer messages={item.messages} />;
+    return <SealedLayer messages={item.messages} sessionId={sessionId} />;
   }
   if (item.type === "divider") {
     return <CompactionDivider />;
@@ -172,6 +184,7 @@ function DisplayItemView({
       isLastMessage={isLastMessage}
       isStreaming={isStreaming}
       message={item.message}
+      sessionId={sessionId}
     />
   );
 }
@@ -180,10 +193,12 @@ export function ChatTimeline({
   messages,
   isStreaming,
   activityLabel,
+  sessionId,
 }: {
   messages: UIMessage[];
   isStreaming: boolean;
   activityLabel?: string | null;
+  sessionId: string;
 }) {
   const items = useMemo(
     () => groupMessagesForDisplay(messages),
@@ -207,6 +222,7 @@ export function ChatTimeline({
             isStreaming={isStreaming}
             item={item}
             key={displayItemKey(item, index)}
+            sessionId={sessionId}
           />
         );
       })}

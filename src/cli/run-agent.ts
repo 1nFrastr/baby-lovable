@@ -7,9 +7,10 @@ import {
 } from "ai";
 
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
+import { resolveBuilderModelId } from "@/lib/agent/builder-model";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
-import { expandAttachmentPartsForModel } from "@/lib/chat/attachments";
+import { hydrateAndExpandAttachmentsForModel } from "@/lib/chat/attachment-storage";
 import { toPromptUiMessages } from "@/lib/chat/compaction";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
@@ -54,20 +55,26 @@ export async function runAgentTurn({
     repaired,
     "replace",
   );
-  const modelMessages = await convertToModelMessages(
-    expandAttachmentPartsForModel(toPromptUiMessages(compactedMessages)),
-    {
-      ignoreIncompleteToolCalls: true,
-    },
+  const promptMessages = await hydrateAndExpandAttachmentsForModel(
+    sessionId,
+    toPromptUiMessages(compactedMessages),
   );
+  const modelMessages = await convertToModelMessages(promptMessages, {
+    ignoreIncompleteToolCalls: true,
+  });
 
   // Non-blocking prelude: preview-ready via reconciler (same as web chat).
   const { kickRuntimeDesired } = await import("@/lib/sandbox/preview");
   await kickRuntimeDesired(sessionId, "preview-ready");
 
   const previousModelCount = modelMessages.length;
+  const modelId = resolveBuilderModelId(promptMessages);
 
-  const { agent, toolsContext, runtimeContext } = createBuilderAgent(sessionId);
+  const { agent, toolsContext, runtimeContext } = createBuilderAgent(
+    sessionId,
+    undefined,
+    { modelId },
+  );
 
   const trace = createCliAgentTrace({
     sessionId,
@@ -76,7 +83,6 @@ export async function runAgentTurn({
   });
   const startedAt = Date.now();
   const writable = trace.createWritable();
-  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
   const maxOutputTokens = resolveMaxOutputTokens(modelId);
 
   const result = await runAgentStreamWithAutoContinue({

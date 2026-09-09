@@ -16,6 +16,7 @@ import {
   latestUserMessage,
   validateUserMessageAttachments,
 } from "@/lib/chat/attachments";
+import { persistUserMessageAttachments } from "@/lib/chat/attachment-storage";
 import { capReasoningStream } from "@/lib/chat/cap-reasoning-stream";
 import { bindAssistantMessageId } from "@/lib/chat/stable-message-stream";
 import {
@@ -90,11 +91,34 @@ export async function POST(
         { status: 400 },
       );
     }
-    const attachments = validateUserMessageAttachments(rawUserMessage);
+    const attachments = validateUserMessageAttachments(
+      rawUserMessage,
+      sessionId,
+    );
     if (!attachments.ok) {
       return NextResponse.json({ error: attachments.error }, { status: 400 });
     }
-    const userMessage = attachments.message;
+
+    const existing = await getSession(sessionId, auth);
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 },
+      );
+    }
+    if (!existing.userId) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    const persisted = await persistUserMessageAttachments({
+      sessionId,
+      userId: existing.userId,
+      message: attachments.message,
+    });
+    if (!persisted.ok) {
+      return NextResponse.json({ error: persisted.error }, { status: 400 });
+    }
+    const userMessage = persisted.message;
 
     let claimedSession = null as Awaited<
       ReturnType<typeof getSession>

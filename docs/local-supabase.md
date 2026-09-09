@@ -29,7 +29,7 @@ Typical ports (see `supabase/config.toml`):
 | Studio (Table Editor) | http://127.0.0.1:54323 |
 | DB (direct) | postgresql://postgres:postgres@127.0.0.1:54322/postgres |
 
-Open **Studio** → **Table Editor** to inspect `sessions`, `session_messages`, and related tables.
+Open **Studio** → **Table Editor** to inspect `sessions`, `session_messages`, `session_attachments`, and related tables. Chat file bytes live in the private `chat-attachments` Storage bucket.
 
 ## Point the app / CLI at local
 

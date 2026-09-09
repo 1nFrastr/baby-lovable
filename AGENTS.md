@@ -169,7 +169,7 @@ For host-app code changes (not generated apps), also run `npm run lint` and `npm
 See `.env.example`:
 
 - `AI_GATEWAY_API_KEY` — Vercel AI Gateway (or `VERCEL_OIDC_TOKEN`)
-- `AI_MODEL` — default `deepseek/deepseek-v4-flash`
+- `AI_MODEL` — default `zai/glm-5.3-flash`
 - `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend. Local Host: `.env.local` → Docker Supabase (`docs/local-supabase.md`). Production: Vercel Dashboard only.
 - `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs (local seed: `11111111-1111-1111-1111-111111111111`)
 - `DAYTONA_API_KEY` — required remote workspace

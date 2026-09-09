@@ -1,6 +1,7 @@
 import { WorkflowAgent } from "@ai-sdk/workflow";
 import type { ModelMessage } from "ai";
 
+import { DEFAULT_BUILDER_MODEL } from "@/lib/agent/builder-model";
 import {
   compactModelMessages,
   CONTEXT_COMPACT_TOKENS,
@@ -71,13 +72,15 @@ export interface BuilderTurnIdentity {
 export function createBuilderAgent(
   sessionId: string,
   turn?: BuilderTurnIdentity,
+  options?: { modelId?: string },
 ): BuilderAgentBundle {
   const toolsContext = createToolsContext(sessionId, turn);
   const runtimeContext: BuilderAgentContext = {
     sessionId,
     ...turn,
   };
-  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
+  const modelId =
+    options?.modelId ?? process.env.AI_MODEL ?? DEFAULT_BUILDER_MODEL;
 
   const agent = new WorkflowAgent({
     model: modelId,

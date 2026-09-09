@@ -46,6 +46,7 @@ import {
   CHAT_ATTACHMENT_ACCEPT,
   CHAT_ATTACHMENT_MAX_BYTES,
   CHAT_ATTACHMENT_MAX_FILES,
+  uploadSessionAttachments,
 } from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
@@ -293,30 +294,43 @@ export function Chat({
   );
 
   const handleSubmit = useCallback(
-    (message: PromptInputMessage) => {
-      const files = message.files ?? [];
+    async (message: PromptInputMessage) => {
+      if (composerLocked) {
+        return;
+      }
+      const incoming = message.files ?? [];
       const parsed = resolveSubmit(message.text);
       if (parsed.kind === "empty") {
-        if (files.length === 0) {
+        if (incoming.length === 0) {
           return;
         }
-        sendUserMessage("", files);
+      } else if (parsed.kind === "slash-draft") {
         return;
-      }
-      if (parsed.kind === "slash-draft") {
-        return;
-      }
-      if (parsed.kind === "unknown-command") {
+      } else if (parsed.kind === "unknown-command") {
         setCommandError(`Unknown command: /${parsed.name}`);
         return;
-      }
-      if (parsed.kind === "command") {
+      } else if (parsed.kind === "command") {
         void runSlashCommand(parsed.command, parsed.args);
         return;
       }
-      sendUserMessage(parsed.text, files);
+
+      let files = incoming;
+      if (incoming.length > 0) {
+        try {
+          files = await uploadSessionAttachments(sessionId, incoming);
+          setCommandError(null);
+        } catch (cause) {
+          setCommandError(
+            cause instanceof Error ? cause.message : "Could not upload files",
+          );
+          throw cause;
+        }
+      }
+
+      const text = parsed.kind === "empty" ? "" : parsed.text;
+      sendUserMessage(text, files);
     },
-    [resolveSubmit, runSlashCommand, sendUserMessage],
+    [composerLocked, resolveSubmit, runSlashCommand, sendUserMessage, sessionId],
   );
 
   const handleRunAppTest = useCallback(() => {
@@ -450,6 +464,7 @@ export function Chat({
               activityLabel={activityLabel}
               isStreaming={localStreamAnimating}
               messages={chatMessages}
+              sessionId={sessionId}
             />
           )}
 

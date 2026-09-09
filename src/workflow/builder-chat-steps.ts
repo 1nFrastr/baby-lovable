@@ -89,6 +89,18 @@ export async function getSessionStep(sessionId: string) {
   return session;
 }
 
+export async function expandAttachmentPartsForModelStep(
+  sessionId: string,
+  messages: UIMessage[],
+): Promise<UIMessage[]> {
+  "use step";
+
+  const { hydrateAndExpandAttachmentsForModel } = await import(
+    "@/lib/chat/attachment-storage"
+  );
+  return hydrateAndExpandAttachmentsForModel(sessionId, messages);
+}
+
 /** Close the agent writable stream — must run as a step inside workflows. */
 export async function closeAgentWritableStep(
   writable: WritableStream<import("@ai-sdk/workflow").ModelCallStreamPart>,

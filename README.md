@@ -181,7 +181,7 @@ Next, in order:
 
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
-- [x] Multimodal input (images and documents in chat; screenshot / design → edit)
+- [x] Multimodal input (images and documents in chat; screenshot / design → edit). Bytes go to Supabase Storage; messages keep `attachment://` URLs. Older turns omit attachment bytes from the model prompt; the chat UI still loads them.
 - [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - [ ] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries

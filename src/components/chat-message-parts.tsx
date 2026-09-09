@@ -14,7 +14,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
-import { isImageMediaType } from "@/lib/chat/attachments";
+import { isImageMediaType, attachmentDisplayUrl } from "@/lib/chat/attachments";
 import {
   compactToolInput,
   formatToolPartLabel,
@@ -112,8 +112,10 @@ function UserMessageText({ text }: { text: string }) {
 }
 
 function UserMessageFiles({
+  sessionId,
   parts,
 }: {
+  sessionId: string;
   parts: UIMessage["parts"];
 }) {
   const files = parts.filter(
@@ -126,38 +128,57 @@ function UserMessageFiles({
 
   return (
     <div className="flex flex-wrap gap-2">
-      {files.map((file, index) => {
-        const label = file.filename?.trim() || "Attached file";
-        const key = `${file.filename ?? "file"}-${index}`;
-        if (isImageMediaType(file.mediaType) && file.url) {
-          return (
-            <a
-              className="block overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700"
-              href={file.url}
-              key={key}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {/* Stored as data/https URLs from the composer. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                alt={label}
-                className="max-h-48 max-w-full object-contain"
-                src={file.url}
-              />
-            </a>
-          );
-        }
-        return (
-          <div
-            className="flex max-w-full items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900/60"
-            key={key}
-          >
-            <FileIcon className="size-3.5 shrink-0 text-zinc-500" />
-            <span className="min-w-0 truncate">{label}</span>
-          </div>
-        );
-      })}
+      {files.map((file, index) => (
+        <UserMessageFile
+          file={file}
+          key={`${file.filename ?? "file"}-${index}`}
+          sessionId={sessionId}
+        />
+      ))}
+    </div>
+  );
+}
+
+function UserMessageFile({
+  sessionId,
+  file,
+}: {
+  sessionId: string;
+  file: Extract<UIMessage["parts"][number], { type: "file" }>;
+}) {
+  const label = file.filename?.trim() || "Attached file";
+  const src = attachmentDisplayUrl(sessionId, file.url);
+  const [failed, setFailed] = useState(false);
+  const showImage =
+    Boolean(src) && isImageMediaType(file.mediaType) && !failed;
+
+  if (showImage && src) {
+    return (
+      <a
+        className="block overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700"
+        href={src}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {/* Stored attachments are served by the session-scoped host API. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          alt={label}
+          className="max-h-48 max-w-full object-contain"
+          onError={() => setFailed(true)}
+          src={src}
+        />
+      </a>
+    );
+  }
+
+  return (
+    <div className="flex max-w-full items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900/60">
+      <FileIcon className="size-3.5 shrink-0 text-zinc-500" />
+      <span className="min-w-0 truncate">{label}</span>
+      {!src || failed ? (
+        <span className="shrink-0 text-zinc-400">unavailable</span>
+      ) : null}
     </div>
   );
 }
@@ -229,18 +250,20 @@ export function ChatMessageParts({
   isLastMessage,
   isStreaming,
   activityLabel,
+  sessionId,
 }: {
   message: UIMessage;
   isLastMessage: boolean;
   isStreaming: boolean;
   /** Idle planning label; rendered in the same column/gap as tool rows. */
   activityLabel?: string | null;
+  sessionId: string;
 }) {
   if (message.role === "user") {
     const text = collectTextParts(message);
     return (
       <div className="flex flex-col gap-2">
-        <UserMessageFiles parts={message.parts} />
+        <UserMessageFiles parts={message.parts} sessionId={sessionId} />
         {text ? <UserMessageText text={text} /> : null}
       </div>
     );

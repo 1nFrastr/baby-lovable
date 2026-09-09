@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { UIMessage } from "ai";
 
 import {
+  attachmentDisplayUrl,
   buildUserMessageParts,
   CHAT_ATTACHMENT_MAX_FILES,
   collectFileParts,
+  collectStoredAttachmentIds,
   estimateDataUrlBytes,
   expandAttachmentPartsForModel,
   isSendableUserMessage,
   latestUserMessage,
   normalizeAttachmentMediaType,
+  parseAttachmentId,
+  storedAttachmentUrl,
+  stubOlderUserFileParts,
   userMessagePreview,
   validateUserMessageAttachments,
 } from "./attachments";
@@ -178,6 +183,33 @@ describe("validateUserMessageAttachments", () => {
     expect(validateUserMessageAttachments(user(many)).ok).toBe(false);
   });
 
+  it("rejects arbitrary https URLs", () => {
+    expect(
+      validateUserMessageAttachments(
+        user([
+          {
+            type: "file",
+            mediaType: "image/png",
+            filename: "a.png",
+            url: "https://evil.example/a.png",
+          },
+        ]),
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("accepts stored attachment URLs", () => {
+    const message = user([
+      {
+        type: "file",
+        mediaType: "image/png",
+        filename: "a.png",
+        url: storedAttachmentUrl("att_abc123"),
+      },
+    ]);
+    expect(validateUserMessageAttachments(message, "sess_1").ok).toBe(true);
+  });
+
   it("estimates base64 payload size", () => {
     const url = dataUrl("text/plain", "hello");
     expect(estimateDataUrlBytes(url)).toBe(5);
@@ -228,5 +260,78 @@ describe("expandAttachmentPartsForModel", () => {
     expect(
       expanded?.parts[0]?.type === "text" && expanded.parts[0].text,
     ).toContain("use a navy header");
+  });
+
+  it("stubs stored URLs that were not materialized into data URLs", () => {
+    const message = user([
+      {
+        type: "file",
+        mediaType: "image/png",
+        filename: "hero.png",
+        url: storedAttachmentUrl("att_hero"),
+      },
+    ]);
+    const [expanded] = expandAttachmentPartsForModel([message]);
+    expect(expanded?.parts).toEqual([
+      {
+        type: "text",
+        text: "[attached hero.png — omitted from older context]",
+      },
+    ]);
+  });
+});
+
+describe("stored attachment URLs", () => {
+  it("parses attachment ids from stored and proxy URLs", () => {
+    expect(parseAttachmentId("attachment://att_abc")).toBe("att_abc");
+    expect(
+      parseAttachmentId(
+        "/api/sessions/sess_1/attachments/att_abc",
+        "sess_1",
+      ),
+    ).toBe("att_abc");
+    expect(
+      parseAttachmentId(
+        "https://app.local/api/sessions/sess_1/attachments/att_abc",
+        "sess_1",
+      ),
+    ).toBe("att_abc");
+    expect(
+      parseAttachmentId(
+        "/api/sessions/sess_other/attachments/att_abc",
+        "sess_1",
+      ),
+    ).toBeNull();
+    expect(parseAttachmentId("https://cdn.example/a.png")).toBeNull();
+    expect(
+      attachmentDisplayUrl("sess_1", storedAttachmentUrl("att_abc")),
+    ).toBe("/api/sessions/sess_1/attachments/att_abc");
+    expect(
+      attachmentDisplayUrl("sess_1", "attachment://dropped/att_abc"),
+    ).toBeNull();
+  });
+
+  it("stubs file parts on older user turns", () => {
+    const older = user(
+      [
+        {
+          type: "file",
+          mediaType: "image/png",
+          filename: "old.png",
+          url: storedAttachmentUrl("att_old"),
+        },
+      ],
+      "u-old",
+    );
+    const recent = user([{ type: "text", text: "keep going" }], "u-new");
+    const result = stubOlderUserFileParts([older, recent], 1);
+    expect(result[0]?.parts).toEqual([
+      {
+        type: "text",
+        text: "[attached old.png — omitted from older context]",
+      },
+    ]);
+    expect(result[1]).toEqual(recent);
+    expect(collectStoredAttachmentIds([older, recent])).toEqual(["att_old"]);
   });
 });

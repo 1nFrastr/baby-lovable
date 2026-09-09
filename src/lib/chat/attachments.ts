@@ -112,8 +112,139 @@ export function isTextMediaType(
   return normalized != null && TEXT_MEDIA_TYPES.has(normalized);
 }
 
-export function isAllowedAttachmentUrl(url: string): boolean {
-  return url.startsWith("data:") || url.startsWith("https://");
+/** Persisted file-part URL. Bytes live in Storage, not in message JSON. */
+export const ATTACHMENT_URL_PREFIX = "attachment://";
+
+const ATTACHMENT_ID_RE = /^att_[A-Za-z0-9_-]+$/;
+
+export function storedAttachmentUrl(id: string): string {
+  return `${ATTACHMENT_URL_PREFIX}${id}`;
+}
+
+export function isDroppedAttachmentUrl(url: string): boolean {
+  return url.trim().startsWith(`${ATTACHMENT_URL_PREFIX}dropped/`);
+}
+
+export function isStoredAttachmentId(id: string): boolean {
+  return ATTACHMENT_ID_RE.test(id);
+}
+
+/**
+ * Parse a stored `attachment://` URL or the host proxy path.
+ * Rejects arbitrary https URLs so the model path cannot fetch attacker-controlled hosts.
+ */
+export function parseAttachmentId(
+  url: string,
+  sessionId?: string,
+): string | null {
+  const trimmed = url.trim();
+  if (trimmed.startsWith(ATTACHMENT_URL_PREFIX)) {
+    const rest = trimmed.slice(ATTACHMENT_URL_PREFIX.length);
+    const id = rest.startsWith("dropped/") ? rest.slice("dropped/".length) : rest;
+    return isStoredAttachmentId(id) ? id : null;
+  }
+
+  let path = trimmed;
+  if (!trimmed.startsWith("/")) {
+    try {
+      path = new URL(trimmed).pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  const match = path.match(
+    /^\/api\/sessions\/([^/]+)\/attachments\/([^/]+)$/,
+  );
+  if (!match) {
+    return null;
+  }
+  const [, pathSessionId, id] = match;
+  if (sessionId && pathSessionId !== sessionId) {
+    return null;
+  }
+  return id && isStoredAttachmentId(id) ? id : null;
+}
+
+export function collectStoredAttachmentIds(messages: UIMessage[]): string[] {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const part of collectFileParts(message)) {
+      const id = parseAttachmentId(part.url);
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  return [...ids];
+}
+
+/** Browser `src` for a stored attachment. `null` when the object was dropped. */
+export function attachmentDisplayUrl(
+  sessionId: string,
+  url: string,
+): string | null {
+  const trimmed = url.trim();
+  if (!trimmed || isDroppedAttachmentUrl(trimmed)) {
+    return null;
+  }
+  if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+    return trimmed;
+  }
+  const id = parseAttachmentId(trimmed, sessionId);
+  if (!id) {
+    return null;
+  }
+  return `/api/sessions/${sessionId}/attachments/${id}`;
+}
+
+export function isAllowedAttachmentUrl(
+  url: string,
+  sessionId?: string,
+): boolean {
+  if (url.startsWith("data:")) {
+    return true;
+  }
+  return parseAttachmentId(url, sessionId) != null;
+}
+
+export function omittedAttachmentText(
+  filename: string | undefined,
+  mediaType: string | undefined,
+): string {
+  const label = filename?.trim() || mediaType?.trim() || "file";
+  return `[attached ${label} — omitted from older context]`;
+}
+
+/** Replace file parts on user turns older than `keepRecent` with a one-line stub. */
+export function stubOlderUserFileParts(
+  messages: UIMessage[],
+  keepRecent: number,
+): UIMessage[] {
+  const keepFrom = Math.max(0, messages.length - keepRecent);
+  if (keepFrom === 0) {
+    return messages;
+  }
+
+  return messages.map((message, index) => {
+    if (index >= keepFrom || message.role !== "user") {
+      return message;
+    }
+    let changed = false;
+    const parts: UIMessage["parts"] = [];
+    for (const part of message.parts) {
+      if (part.type !== "file") {
+        parts.push(part);
+        continue;
+      }
+      changed = true;
+      parts.push({
+        type: "text",
+        text: omittedAttachmentText(part.filename, part.mediaType),
+      });
+    }
+    return changed ? { ...message, parts } : message;
+  });
 }
 
 export function estimateDataUrlBytes(url: string): number {
@@ -221,8 +352,9 @@ export type AttachmentValidationResult =
   | { ok: true; message: UIMessage }
   | { ok: false; error: string };
 
-function normalizeFilePart(
+export function normalizeFilePart(
   part: Extract<UIMessage["parts"][number], { type: "file" }>,
+  sessionId?: string,
 ): Extract<UIMessage["parts"][number], { type: "file" }> | { error: string } {
   const filename = sanitizeAttachmentFilename(part.filename);
   const mediaType = normalizeAttachmentMediaType(part.mediaType, filename);
@@ -234,7 +366,7 @@ function normalizeFilePart(
     };
   }
   const url = part.url?.trim() ?? "";
-  if (!url || !isAllowedAttachmentUrl(url)) {
+  if (!url || !isAllowedAttachmentUrl(url, sessionId)) {
     return {
       error: filename
         ? `Could not read ${filename}. Attach the file again.`
@@ -261,6 +393,7 @@ function normalizeFilePart(
  */
 export function validateUserMessageAttachments(
   message: UIMessage,
+  sessionId?: string,
 ): AttachmentValidationResult {
   const files = collectFileParts(message);
   if (files.length === 0) {
@@ -277,7 +410,7 @@ export function validateUserMessageAttachments(
     [];
   let totalBytes = 0;
   for (const file of files) {
-    const next = normalizeFilePart(file);
+    const next = normalizeFilePart(file, sessionId);
     if ("error" in next) {
       return { ok: false, error: next.error };
     }
@@ -306,7 +439,9 @@ export function validateUserMessageAttachments(
   return { ok: true, message: { ...message, parts } };
 }
 
-function decodeTextDataUrl(url: string): string | null {
+export function decodeDataUrl(
+  url: string,
+): { mediaType: string; bytes: Uint8Array } | null {
   if (!url.startsWith("data:")) {
     return null;
   }
@@ -316,23 +451,31 @@ function decodeTextDataUrl(url: string): string | null {
   }
   const header = url.slice(5, comma);
   const data = url.slice(comma + 1);
+  const mediaType =
+    header.split(";")[0]?.trim() || "application/octet-stream";
   try {
     if (header.toLowerCase().includes(";base64")) {
-      return decodeBase64Utf8(data);
+      if (typeof Buffer !== "undefined") {
+        return { mediaType, bytes: new Uint8Array(Buffer.from(data, "base64")) };
+      }
+      const binary = atob(data);
+      return {
+        mediaType,
+        bytes: Uint8Array.from(binary, (char) => char.charCodeAt(0)),
+      };
     }
-    return decodeURIComponent(data);
+    return { mediaType, bytes: new TextEncoder().encode(decodeURIComponent(data)) };
   } catch {
     return null;
   }
 }
 
-function decodeBase64Utf8(data: string): string {
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(data, "base64").toString("utf8");
+function decodeTextDataUrl(url: string): string | null {
+  const decoded = decodeDataUrl(url);
+  if (!decoded) {
+    return null;
   }
-  const binary = atob(data);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return new TextDecoder().decode(decoded.bytes);
 }
 
 function formatAttachedText(filename: string | undefined, text: string): string {
@@ -370,6 +513,13 @@ export function expandAttachmentPartsForModel(
           continue;
         }
       }
+      if (!part.url.startsWith("data:")) {
+        parts.push({
+          type: "text",
+          text: omittedAttachmentText(part.filename, part.mediaType),
+        });
+        continue;
+      }
       parts.push(part);
     }
 
@@ -393,4 +543,51 @@ export function expandAttachmentPartsForModel(
 
     return { ...message, parts };
   });
+}
+
+/**
+ * Upload composer files (blob or data URLs) to Storage. The chat POST then
+ * carries `attachment://` URLs only.
+ */
+export async function uploadSessionAttachments(
+  sessionId: string,
+  files: FileUIPart[],
+): Promise<FileUIPart[]> {
+  if (files.length === 0) {
+    return [];
+  }
+
+  const form = new FormData();
+  for (const file of files) {
+    const response = await fetch(file.url);
+    if (!response.ok) {
+      throw new Error(
+        file.filename
+          ? `Could not read ${file.filename}. Attach the file again.`
+          : "Could not read an attached file. Attach it again.",
+      );
+    }
+    const blob = await response.blob();
+    form.append(
+      "file",
+      new File([blob], file.filename ?? "file", {
+        type: file.mediaType || blob.type,
+      }),
+    );
+  }
+
+  const response = await fetch(`/api/sessions/${sessionId}/attachments`, {
+    method: "POST",
+    body: form,
+  });
+  const data = (await response.json().catch(() => null)) as
+    | { error?: string; files?: FileUIPart[] }
+    | null;
+  if (!response.ok) {
+    throw new Error(data?.error ?? `Upload failed (${response.status})`);
+  }
+  if (!data?.files || data.files.length !== files.length) {
+    throw new Error("Upload did not return every attached file.");
+  }
+  return data.files;
 }
