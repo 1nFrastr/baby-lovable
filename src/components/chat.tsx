@@ -2,8 +2,8 @@
 
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
-import { generateId, type UIMessage } from "ai";
-import { FlaskConical, MessageSquare } from "lucide-react";
+import { generateId, type FileUIPart, type UIMessage } from "ai";
+import { FlaskConical, MessageSquare, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -24,12 +24,15 @@ import {
 } from "@/components/ai-elements/message";
 import {
   PromptInput,
+  PromptInputAttachment,
+  PromptInputAttachments,
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
+  usePromptInputAttachments,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
@@ -38,6 +41,13 @@ import { SlashCommandMenu } from "@/components/slash-command-menu";
 import { useSlashCommandComposer } from "@/hooks/use-slash-command-composer";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
+import {
+  buildUserMessageParts,
+  CHAT_ATTACHMENT_ACCEPT,
+  CHAT_ATTACHMENT_MAX_BYTES,
+  CHAT_ATTACHMENT_MAX_FILES,
+  uploadSessionAttachments,
+} from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
 import {
@@ -210,9 +220,14 @@ export function Chat({
     onAppTestStatus(extractAppTestStatusFromMessages(chatMessages));
   }, [chatMessages, onAppTestStatus]);
 
-  const sendUserText = useCallback(
-    (text: string) => {
+  const sendUserMessage = useCallback(
+    (text: string, files: FileUIPart[] = []) => {
       if (composerLocked) {
+        return;
+      }
+
+      const parts = buildUserMessageParts(text, files);
+      if (parts.length === 0) {
         return;
       }
 
@@ -227,7 +242,7 @@ export function Chat({
       void sendMessage({
         id: userMessageId,
         role: "user",
-        parts: [{ type: "text", text }],
+        parts,
       }).finally(() => {
         onSessionRefresh?.();
       });
@@ -279,27 +294,48 @@ export function Chat({
   );
 
   const handleSubmit = useCallback(
-    (message: PromptInputMessage) => {
-      const parsed = resolveSubmit(message.text);
-      if (parsed.kind === "empty" || parsed.kind === "slash-draft") {
+    async (message: PromptInputMessage) => {
+      if (composerLocked) {
         return;
       }
-      if (parsed.kind === "unknown-command") {
+      const incoming = message.files ?? [];
+      const parsed = resolveSubmit(message.text);
+      if (parsed.kind === "empty") {
+        if (incoming.length === 0) {
+          return;
+        }
+      } else if (parsed.kind === "slash-draft") {
+        return;
+      } else if (parsed.kind === "unknown-command") {
         setCommandError(`Unknown command: /${parsed.name}`);
         return;
-      }
-      if (parsed.kind === "command") {
+      } else if (parsed.kind === "command") {
         void runSlashCommand(parsed.command, parsed.args);
         return;
       }
-      sendUserText(parsed.text);
+
+      let files = incoming;
+      if (incoming.length > 0) {
+        try {
+          files = await uploadSessionAttachments(sessionId, incoming);
+          setCommandError(null);
+        } catch (cause) {
+          setCommandError(
+            cause instanceof Error ? cause.message : "Could not upload files",
+          );
+          throw cause;
+        }
+      }
+
+      const text = parsed.kind === "empty" ? "" : parsed.text;
+      sendUserMessage(text, files);
     },
-    [resolveSubmit, runSlashCommand, sendUserText],
+    [composerLocked, resolveSubmit, runSlashCommand, sendUserMessage, sessionId],
   );
 
   const handleRunAppTest = useCallback(() => {
-    sendUserText(APP_TEST_USER_PROMPT);
-  }, [sendUserText]);
+    sendUserMessage(APP_TEST_USER_PROMPT);
+  }, [sendUserMessage]);
 
   const handleStop = useCallback(() => {
     if (stopping || !showStop) {
@@ -389,7 +425,7 @@ export function Chat({
     ? "Stopping… you can send again after cancel succeeds"
     : summarizing
       ? "Summarizing conversation…"
-      : "Describe the app you want to build… Type / for commands";
+      : "Describe the app you want…";
   const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop
@@ -428,6 +464,7 @@ export function Chat({
               activityLabel={activityLabel}
               isStreaming={localStreamAnimating}
               messages={chatMessages}
+              sessionId={sessionId}
             />
           )}
 
@@ -456,8 +493,20 @@ export function Chat({
               }}
             />
           ) : null}
-          <PromptInput onSubmit={handleSubmit}>
+          <PromptInput
+            accept={CHAT_ATTACHMENT_ACCEPT}
+            maxFileSize={CHAT_ATTACHMENT_MAX_BYTES}
+            maxFiles={CHAT_ATTACHMENT_MAX_FILES}
+            multiple
+            onError={(error) => setCommandError(error.message)}
+            onSubmit={handleSubmit}
+          >
             <PromptInputBody>
+              <PromptInputAttachments>
+                {(attachment) => (
+                  <PromptInputAttachment data={attachment} />
+                )}
+              </PromptInputAttachments>
               <PromptInputTextarea
                 aria-activedescendant={
                   slash.menuOpen && slash.highlighted
@@ -494,6 +543,7 @@ export function Chat({
             </PromptInputBody>
             <PromptInputFooter>
               <PromptInputTools>
+                <AttachFilesButton disabled={composerLocked} />
                 {showAppTestButton ? (
                   <PromptInputButton
                     disabled={composerLocked}
@@ -515,5 +565,18 @@ export function Chat({
         </div>
       </div>
     </div>
+  );
+}
+
+function AttachFilesButton({ disabled }: { disabled: boolean }) {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton
+      disabled={disabled}
+      onClick={() => attachments.openFileDialog()}
+      tooltip="Attach images or documents"
+    >
+      <Paperclip className="size-4" />
+    </PromptInputButton>
   );
 }

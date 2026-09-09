@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
+  FileIcon,
   ImageIcon,
   Monitor,
   PlusIcon,
@@ -66,6 +67,7 @@ import type {
 import {
   Children,
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -77,25 +79,6 @@ import {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    // FileReader uses callback-based API, wrapping in Promise is necessary
-    // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
-      reader.onloadend = () => resolve(reader.result as string);
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-};
 
 const captureScreenshot = async (): Promise<File | null> => {
   if (
@@ -563,14 +546,23 @@ export const PromptInput = ({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+      const mime = f.type.toLowerCase();
+      const dot = f.name.lastIndexOf(".");
+      const ext =
+        dot > 0 && dot < f.name.length - 1
+          ? f.name.slice(dot).toLowerCase()
+          : "";
 
       return patterns.some((pattern) => {
-        if (pattern.endsWith("/*")) {
-          // e.g: image/* -> image/
-          const prefix = pattern.slice(0, -1);
-          return f.type.startsWith(prefix);
+        const normalized = pattern.toLowerCase();
+        if (normalized.startsWith(".")) {
+          return ext === normalized;
         }
-        return f.type === pattern;
+        if (normalized.endsWith("/*")) {
+          const prefix = normalized.slice(0, -1);
+          return mime.startsWith(prefix);
+        }
+        return mime === normalized;
       });
     },
     [accept]
@@ -855,30 +847,19 @@ export const PromptInput = ({
           })();
 
       // Reset form immediately after capturing text to avoid race condition
-      // where user input during async blob conversion would be lost
+      // where user input during async submit would be lost
       if (!usingProvider) {
         form.reset();
       }
 
       try {
-        // Convert blob URLs to data URLs asynchronously
-        const convertedFiles: FileUIPart[] = await Promise.all(
-          files.map(async (file) => {
-            const { id, ...item } = file;
-            void id;
-            if (item.url?.startsWith("blob:")) {
-              const dataUrl = await convertBlobUrlToDataUrl(item.url);
-              // If conversion failed, keep the original blob URL
-              return {
-                ...item,
-                url: dataUrl ?? item.url,
-              };
-            }
-            return item;
-          })
-        );
+        const submittedFiles: FileUIPart[] = files.map((file) => {
+          const { id, ...item } = file;
+          void id;
+          return item;
+        });
 
-        const result = onSubmit({ files: convertedFiles, text }, event);
+        const result = onSubmit({ files: submittedFiles, text }, event);
 
         // Handle both sync and async onSubmit
         if (result instanceof Promise) {
@@ -971,6 +952,91 @@ export const PromptInputBody = ({
   <div className={cn("contents", className)} {...props} />
 );
 
+export type PromptInputAttachmentsProps = Omit<
+  HTMLAttributes<HTMLDivElement>,
+  "children"
+> & {
+  children: (attachment: FileUIPart & { id: string }) => ReactNode;
+};
+
+export const PromptInputAttachments = ({
+  children,
+  className,
+  ...props
+}: PromptInputAttachmentsProps) => {
+  const attachments = usePromptInputAttachments();
+  if (attachments.files.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn("flex w-full flex-wrap gap-2 px-2.5 pt-2", className)}
+      data-slot="prompt-input-attachments"
+      {...props}
+    >
+      {attachments.files.map((file) => (
+        <Fragment key={file.id}>{children(file)}</Fragment>
+      ))}
+    </div>
+  );
+};
+
+export type PromptInputAttachmentProps = HTMLAttributes<HTMLDivElement> & {
+  data: FileUIPart & { id: string };
+};
+
+export const PromptInputAttachment = ({
+  data,
+  className,
+  ...props
+}: PromptInputAttachmentProps) => {
+  const attachments = usePromptInputAttachments();
+  const isImage = data.mediaType.startsWith("image/") && Boolean(data.url);
+  const label = data.filename?.trim() || "Attached file";
+
+  return (
+    <div
+      className={cn(
+        "group relative flex max-w-full items-center gap-2 rounded-md border border-border bg-background",
+        isImage ? "h-16 w-16 overflow-hidden p-0" : "max-w-48 px-2 py-1.5",
+        className,
+      )}
+      data-slot="prompt-input-attachment"
+      {...props}
+    >
+      {isImage ? (
+        // Blob/data URLs are local preview only; next/image is not used.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          alt={label}
+          className="size-full object-cover"
+          height={64}
+          src={data.url}
+          width={64}
+        />
+      ) : (
+        <>
+          <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 truncate text-xs">{label}</span>
+        </>
+      )}
+      <button
+        aria-label={`Remove ${label}`}
+        className="absolute top-0.5 right-0.5 flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          attachments.remove(data.id);
+        }}
+        type="button"
+      >
+        <XIcon className="size-3" />
+      </button>
+    </div>
+  );
+};
+
 export type PromptInputTextareaProps = ComponentProps<
   typeof InputGroupTextarea
 >;
@@ -998,6 +1064,7 @@ export const PromptInputTextarea = ({
     controlledValue !== undefined
       ? String(controlledValue).length === 0
       : uncontrolledEmpty;
+  const showPlaceholder = isEmpty && attachments.files.length === 0;
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
     (e) => {
@@ -1099,7 +1166,7 @@ export const PromptInputTextarea = ({
       };
 
   return (
-    <>
+    <div className="relative w-full min-w-0 flex-1">
       <InputGroupTextarea
         aria-label={ariaLabel ?? placeholder}
         className={cn("field-sizing-content max-h-48 min-h-16", className)}
@@ -1113,7 +1180,7 @@ export const PromptInputTextarea = ({
         {...props}
         {...controlledProps}
       />
-      {isEmpty ? (
+      {showPlaceholder ? (
         <span
           aria-hidden="true"
           className="pointer-events-none absolute top-0 right-0 left-0 select-none px-2.5 py-2 text-base text-muted-foreground md:text-sm"
@@ -1122,7 +1189,7 @@ export const PromptInputTextarea = ({
           {placeholder}
         </span>
       ) : null}
-    </>
+    </div>
   );
 };
 

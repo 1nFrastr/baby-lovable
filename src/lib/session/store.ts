@@ -1,6 +1,10 @@
 import type { UIMessage } from "ai";
 
 import {
+  isSendableUserMessage,
+  userMessagePreview,
+} from "@/lib/chat/attachments";
+import {
   type SessionAuthContext,
 } from "./auth-context";
 import {
@@ -90,23 +94,12 @@ export async function replaceMessages(
 }
 
 export function deriveSessionTitle(messages: UIMessage[]): string | undefined {
-  const firstUserMessage = messages.find(
-    (message) =>
-      message.role === "user" &&
-      message.parts.some(
-        (part) => part.type === "text" && part.text.trim().length > 0,
-      ),
-  );
+  const firstUserMessage = messages.find(isSendableUserMessage);
   if (!firstUserMessage) {
     return undefined;
   }
 
-  const textPart = firstUserMessage.parts.find((part) => part.type === "text");
-  if (!textPart || textPart.type !== "text") {
-    return undefined;
-  }
-
-  const trimmed = textPart.text.trim();
+  const trimmed = userMessagePreview(firstUserMessage);
   if (!trimmed) {
     return undefined;
   }

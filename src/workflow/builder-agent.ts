@@ -1,6 +1,7 @@
 import { WorkflowAgent } from "@ai-sdk/workflow";
 import type { ModelMessage } from "ai";
 
+import { DEFAULT_BUILDER_MODEL } from "@/lib/agent/builder-model";
 import {
   compactModelMessages,
   CONTEXT_COMPACT_TOKENS,
@@ -16,6 +17,7 @@ const BUILDER_BASE_PROMPT = `You are baby-lovable, an expert Next.js app builder
 Your job is to help the user create and iterate on a self-contained Next.js application inside the current workspace.
 
 Rules:
+- The user may attach images (screenshots, mockups) and documents (PDF, Markdown, text, CSV, JSON, HTML). Treat attachments as part of the request: inspect them before editing. Do not claim you cannot see an attached file.
 - Use the provided tools to inspect, create, edit, and delete files in the workspace.
 - Only modify source files: \`src/**\`, \`public/**\`, and root config files (\`package.json\`, \`tsconfig.json\`, \`next.config.ts\`, \`postcss.config.mjs\`, \`eslint.config.mjs\`, \`.gitignore\`, \`pnpm-lock.yaml\`). Never read, write, edit, delete, or search inside \`.next/\`, \`node_modules/\`, or \`.git/\` — those are managed by the platform. Use \`installPackage\` / \`installDependencies\` for dependencies and \`checkPreview({ restart: true })\` for preview cache issues.
 - Prefer \`editFile\` for targeted changes to existing files. Use \`writeFile\` when creating a file or when replacing the entire file is truly clearer.
@@ -70,13 +72,15 @@ export interface BuilderTurnIdentity {
 export function createBuilderAgent(
   sessionId: string,
   turn?: BuilderTurnIdentity,
+  options?: { modelId?: string },
 ): BuilderAgentBundle {
   const toolsContext = createToolsContext(sessionId, turn);
   const runtimeContext: BuilderAgentContext = {
     sessionId,
     ...turn,
   };
-  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
+  const modelId =
+    options?.modelId ?? process.env.AI_MODEL ?? DEFAULT_BUILDER_MODEL;
 
   const agent = new WorkflowAgent({
     model: modelId,

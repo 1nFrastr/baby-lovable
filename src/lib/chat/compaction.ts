@@ -356,6 +356,11 @@ function partTranscript(part: UIMessage["parts"][number]): string | undefined {
     const text = part.text.trim();
     return text || undefined;
   }
+  if (part.type === "file") {
+    const name = part.filename?.trim();
+    const media = part.mediaType?.trim();
+    return `[attached ${[media, name].filter(Boolean).join(" ")}]`;
+  }
   if (part.type === "reasoning") {
     return undefined;
   }

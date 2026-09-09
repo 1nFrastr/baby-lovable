@@ -3,6 +3,7 @@ import { convertToModelMessages, isStepCount, type UIMessage } from "ai";
 import { getWritable } from "workflow";
 
 import { createAgentTrace, formatTraceStdout } from "@/lib/agent/agent-trace";
+import { resolveBuilderModelId } from "@/lib/agent/builder-model";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { toPromptUiMessages } from "@/lib/chat/compaction";
@@ -14,12 +15,12 @@ import {
   type ToolCompletion,
 } from "@/lib/chat/turn-progress";
 import { createBuilderAgent } from "./builder-agent";
-import { ensureCompactionStep } from "./compaction-step";
-
 import {
   closeAgentWritableStep,
+  expandAttachmentPartsForModelStep,
   getSessionStep,
 } from "./builder-chat-steps";
+import { ensureCompactionStep } from "./compaction-step";
 import {
   failTurnStep,
   finishTurnStep,
@@ -56,20 +57,22 @@ export async function builderChat(
     repairedMessages,
     "turn",
   );
-  const modelMessages = await convertToModelMessages(
+  const promptMessages = await expandAttachmentPartsForModelStep(
+    sessionId,
     toPromptUiMessages(compactedMessages),
-    {
-      ignoreIncompleteToolCalls: true,
-    },
   );
+  const modelMessages = await convertToModelMessages(promptMessages, {
+    ignoreIncompleteToolCalls: true,
+  });
+  const modelId = resolveBuilderModelId(promptMessages);
 
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(
     sessionId,
     { turnId, assistantMessageId },
+    { modelId },
   );
 
   const maxSteps = 30;
-  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
   const maxOutputTokens = resolveMaxOutputTokens(modelId);
   const trace = createAgentTrace({
     sessionId,

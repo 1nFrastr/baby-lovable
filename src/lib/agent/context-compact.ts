@@ -205,10 +205,19 @@ function compactMessageParts(
   message: ModelMessage,
   mode: "truncate" | "drop",
 ): ModelMessage {
-  if (message.role !== "assistant" && message.role !== "tool") {
+  if (typeof message.content === "string") {
     return message;
   }
-  if (typeof message.content === "string") {
+
+  if (message.role === "user" && mode === "drop") {
+    // User images/files are stubbed at the UIMessage layer (keepRecent user
+    // turns). Model-message keepRecent is much shorter because one builder
+    // turn expands into many tool messages — dropping here made the next
+    // turn unable to see a screenshot from the previous user message.
+    return message;
+  }
+
+  if (message.role !== "assistant" && message.role !== "tool") {
     return message;
   }
 

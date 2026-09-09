@@ -181,7 +181,7 @@ Next, in order:
 
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
-- [ ] Multimodal input: images and documents in chat (screenshots, designs, PDFs, etc.)
+- [x] Multimodal input (images and documents in chat; screenshot / design → edit)
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
 - [ ] Web search: look up current docs, APIs, and examples while building
 - [ ] Skills (session-level playbooks)

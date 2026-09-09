@@ -1,5 +1,6 @@
 import { convertToModelMessages, generateText, type UIMessage } from "ai";
 
+import { DEFAULT_BUILDER_MODEL } from "@/lib/agent/builder-model";
 import {
   CONTEXT_COMPACT_TOKENS,
   estimateTokens,
@@ -65,7 +66,7 @@ export async function generateCompactionSummary(input: {
   previousSummary?: string;
   guidance?: string;
 }): Promise<string> {
-  const modelId = process.env.AI_MODEL ?? "deepseek/deepseek-v4-flash";
+  const modelId = process.env.AI_MODEL ?? DEFAULT_BUILDER_MODEL;
   const result = await generateText({
     model: modelId,
     system: COMPACTION_SYSTEM_PROMPT,
