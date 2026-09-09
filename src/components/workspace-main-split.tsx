@@ -36,7 +36,10 @@ export function WorkspaceMainSplit({
       >
         {left}
         {isDragging ? (
-          <div className="absolute inset-0 z-10" aria-hidden="true" />
+          <div
+            className="absolute inset-0 z-20 bg-black/0"
+            aria-hidden="true"
+          />
         ) : null}
       </div>
       <ResizeHandle
@@ -56,7 +59,10 @@ export function WorkspaceMainSplit({
       >
         {right}
         {isDragging ? (
-          <div className="absolute inset-0 z-10" aria-hidden="true" />
+          <div
+            className="absolute inset-0 z-20 bg-black/0"
+            aria-hidden="true"
+          />
         ) : null}
       </div>
     </div>

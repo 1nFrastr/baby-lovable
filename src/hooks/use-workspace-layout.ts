@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 
 import {
   SIDEBAR_COLLAPSE_SNAP,
@@ -26,7 +27,9 @@ export function useWorkspaceLayout() {
   );
 
   const beginDrag = useCallback(() => {
-    setIsDragging(true);
+    flushSync(() => {
+      setIsDragging(true);
+    });
   }, []);
 
   const endDrag = useCallback(() => {
