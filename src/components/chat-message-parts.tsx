@@ -14,7 +14,13 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
-import { isImageMediaType, attachmentDisplayUrl } from "@/lib/chat/attachments";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { isRasterImageMediaType, attachmentDisplayUrl } from "@/lib/chat/attachments";
 import {
   compactToolInput,
   formatToolPartLabel,
@@ -22,6 +28,10 @@ import {
 } from "@/lib/chat/format-tool-label";
 import { truncateReasoningText } from "@/lib/chat/reasoning-text";
 import { joinReasoningText } from "@/lib/chat/turn-progress";
+import {
+  USER_MESSAGE_IMAGE_FRAME_CLASS,
+  USER_MESSAGE_IMAGE_TILE_CLASS,
+} from "@/lib/chat/user-message-gallery";
 import { cn } from "@/lib/utils";
 import {
   isToolUIPart,
@@ -29,11 +39,14 @@ import {
   type ToolUIPart,
   type UIMessage,
 } from "ai";
-import { FileIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, FileIcon } from "lucide-react";
 import {
+  useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 
@@ -111,6 +124,14 @@ function UserMessageText({ text }: { text: string }) {
   );
 }
 
+type UserFilePart = Extract<UIMessage["parts"][number], { type: "file" }>;
+
+type PreviewImage = {
+  key: string;
+  label: string;
+  src: string;
+};
+
 function UserMessageFiles({
   sessionId,
   parts,
@@ -119,67 +140,246 @@ function UserMessageFiles({
   parts: UIMessage["parts"];
 }) {
   const files = parts.filter(
-    (part): part is Extract<UIMessage["parts"][number], { type: "file" }> =>
-      part.type === "file",
+    (part): part is UserFilePart => part.type === "file",
   );
+  const [failedKeys, setFailedKeys] = useState<Set<string>>(() => new Set());
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+
+  const classified = useMemo(() => {
+    const images: PreviewImage[] = [];
+    const documents: UserFilePart[] = [];
+    files.forEach((file, index) => {
+      const key = `${file.url}-${index}`;
+      const src = attachmentDisplayUrl(sessionId, file.url);
+      if (
+        src &&
+        isRasterImageMediaType(file.mediaType) &&
+        !failedKeys.has(key)
+      ) {
+        images.push({
+          key,
+          label: file.filename?.trim() || "Attached image",
+          src,
+        });
+        return;
+      }
+      documents.push(file);
+    });
+    return { documents, images };
+  }, [failedKeys, files, sessionId]);
+
+  const markFailed = useCallback((key: string) => {
+    setFailedKeys((prev) => {
+      if (prev.has(key)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  }, []);
+
   if (files.length === 0) {
     return null;
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {files.map((file, index) => (
-        <UserMessageFile
-          file={file}
-          key={`${file.filename ?? "file"}-${index}`}
-          sessionId={sessionId}
+    <div className="flex min-w-0 flex-col gap-2">
+      {classified.images.length > 0 ? (
+        <UserMessageImageGallery
+          images={classified.images}
+          onFail={markFailed}
+          onOpen={setPreviewIndex}
         />
+      ) : null}
+      {classified.documents.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {classified.documents.map((file, index) => (
+            <UserMessageFileChip
+              file={file}
+              key={`${file.filename ?? "file"}-${index}`}
+              sessionId={sessionId}
+            />
+          ))}
+        </div>
+      ) : null}
+      <UserMessageImagePreview
+        images={classified.images}
+        onClose={() => setPreviewIndex(null)}
+        onIndexChange={setPreviewIndex}
+        previewIndex={previewIndex}
+      />
+    </div>
+  );
+}
+
+function UserMessageImageGallery({
+  images,
+  onFail,
+  onOpen,
+}: {
+  images: PreviewImage[];
+  onFail: (key: string) => void;
+  onOpen: (index: number) => void;
+}) {
+  return (
+    <div className={USER_MESSAGE_IMAGE_FRAME_CLASS}>
+      {images.map((image, index) => (
+        <button
+          aria-label={`View ${image.label}`}
+          className={cn("relative block", USER_MESSAGE_IMAGE_TILE_CLASS)}
+          key={image.key}
+          onClick={() => onOpen(index)}
+          type="button"
+        >
+          {/* Stored attachments are served by the session-scoped host API. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            alt={image.label}
+            className="size-full object-cover"
+            onError={() => onFail(image.key)}
+            src={image.src}
+          />
+        </button>
       ))}
     </div>
   );
 }
 
-function UserMessageFile({
+function UserMessageImagePreview({
+  images,
+  previewIndex,
+  onClose,
+  onIndexChange,
+}: {
+  images: PreviewImage[];
+  previewIndex: number | null;
+  onClose: () => void;
+  onIndexChange: (index: number) => void;
+}) {
+  const current =
+    previewIndex != null ? images[previewIndex] : undefined;
+  const open = Boolean(current);
+  const hasSeveral = images.length > 1;
+
+  const go = useCallback(
+    (direction: -1 | 1) => {
+      if (previewIndex == null || images.length === 0) {
+        return;
+      }
+      const next =
+        (previewIndex + direction + images.length) % images.length;
+      onIndexChange(next);
+    },
+    [images.length, onIndexChange, previewIndex],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        go(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        go(1);
+      }
+    },
+    [go],
+  );
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose();
+        }
+      }}
+      open={open}
+    >
+      <DialogContent
+        className="max-h-[90vh] w-fit max-w-[min(96vw,52rem)] gap-3 overflow-hidden p-3 sm:max-w-[min(96vw,52rem)]"
+        onKeyDown={hasSeveral ? handleKeyDown : undefined}
+      >
+        <DialogTitle className="truncate pr-8 text-sm">
+          {current?.label ?? "Image"}
+        </DialogTitle>
+        <DialogDescription className="sr-only">
+          {hasSeveral && previewIndex != null
+            ? `Image ${previewIndex + 1} of ${images.length}`
+            : "Attached image preview"}
+        </DialogDescription>
+        {current ? (
+          <div className="relative flex items-center justify-center">
+            {/* Stored attachments are served by the session-scoped host API. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              alt={current.label}
+              className="max-h-[min(75vh,40rem)] w-auto max-w-full object-contain"
+              src={current.src}
+            />
+            {hasSeveral ? (
+              <>
+                <button
+                  aria-label="Previous image"
+                  className="absolute left-1 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white"
+                  onClick={() => go(-1)}
+                  type="button"
+                >
+                  <ChevronLeftIcon className="size-4" />
+                </button>
+                <button
+                  aria-label="Next image"
+                  className="absolute right-1 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white"
+                  onClick={() => go(1)}
+                  type="button"
+                >
+                  <ChevronRightIcon className="size-4" />
+                </button>
+                <p className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white">
+                  {previewIndex != null ? previewIndex + 1 : 0} / {images.length}
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserMessageFileChip({
   sessionId,
   file,
 }: {
   sessionId: string;
-  file: Extract<UIMessage["parts"][number], { type: "file" }>;
+  file: UserFilePart;
 }) {
   const label = file.filename?.trim() || "Attached file";
   const src = attachmentDisplayUrl(sessionId, file.url);
-  const [failed, setFailed] = useState(false);
-  const showImage =
-    Boolean(src) && isImageMediaType(file.mediaType) && !failed;
 
-  if (showImage && src) {
-    return (
-      <a
-        className="block overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700"
-        href={src}
-        rel="noreferrer"
-        target="_blank"
-      >
-        {/* Stored attachments are served by the session-scoped host API. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          alt={label}
-          className="max-h-48 max-w-full object-contain"
-          onError={() => setFailed(true)}
-          src={src}
-        />
-      </a>
-    );
-  }
-
-  return (
+  const chip = (
     <div className="flex max-w-full items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900/60">
       <FileIcon className="size-3.5 shrink-0 text-zinc-500" />
       <span className="min-w-0 truncate">{label}</span>
-      {!src || failed ? (
+      {!src ? (
         <span className="shrink-0 text-zinc-400">unavailable</span>
       ) : null}
     </div>
+  );
+
+  if (!src) {
+    return chip;
+  }
+
+  return (
+    <a
+      className="max-w-full"
+      download={file.filename ?? undefined}
+      href={src}
+      rel="noreferrer"
+    >
+      {chip}
+    </a>
   );
 }
 

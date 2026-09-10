@@ -24,6 +24,11 @@ import {
 } from "@/components/ai-elements/message";
 import {
   PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionAddScreenshot,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
   PromptInputAttachment,
   PromptInputAttachments,
   PromptInputBody,
@@ -32,7 +37,6 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-  usePromptInputAttachments,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
@@ -46,6 +50,7 @@ import {
   CHAT_ATTACHMENT_ACCEPT,
   CHAT_ATTACHMENT_MAX_BYTES,
   CHAT_ATTACHMENT_MAX_FILES,
+  CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
   uploadSessionAttachments,
 } from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
@@ -133,6 +138,9 @@ export function Chat({
   const [stopError, setStopError] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const submitInFlightRef = useRef(false);
+  const dropTargetRef = useRef<HTMLDivElement>(null);
   const lastSyncedRevisionRef = useRef(conversationRevision);
 
   const serverTurnActive =
@@ -190,11 +198,12 @@ export function Chat({
     status,
   ]);
 
-  const composerLocked =
+  const turnLocked =
     stopping ||
     summarizing ||
     Boolean(pendingUserMessageId) ||
     serverTurnActive;
+  const composerLocked = turnLocked || uploadingAttachments;
   const slash = useSlashCommandComposer({
     disabled: composerLocked,
     surface: "web",
@@ -222,7 +231,7 @@ export function Chat({
 
   const sendUserMessage = useCallback(
     (text: string, files: FileUIPart[] = []) => {
-      if (composerLocked) {
+      if (turnLocked) {
         return;
       }
 
@@ -248,7 +257,7 @@ export function Chat({
       });
       onSessionRefresh?.();
     },
-    [composerLocked, onSessionRefresh, sendMessage, clearSlash],
+    [turnLocked, onSessionRefresh, sendMessage, clearSlash],
   );
 
   const runSlashCommand = useCallback(
@@ -295,42 +304,54 @@ export function Chat({
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
-      if (composerLocked) {
-        return;
+      if (turnLocked || submitInFlightRef.current) {
+        throw new Error("Composer is busy");
       }
-      const incoming = message.files ?? [];
-      const parsed = resolveSubmit(message.text);
-      if (parsed.kind === "empty") {
-        if (incoming.length === 0) {
+      submitInFlightRef.current = true;
+
+      try {
+        const incoming = message.files ?? [];
+        const parsed = resolveSubmit(message.text);
+        if (parsed.kind === "empty") {
+          if (incoming.length === 0) {
+            return;
+          }
+        } else if (parsed.kind === "slash-draft") {
+          return;
+        } else if (parsed.kind === "unknown-command") {
+          setCommandError(`Unknown command: /${parsed.name}`);
+          throw new Error(`Unknown command: /${parsed.name}`);
+        } else if (parsed.kind === "command") {
+          void runSlashCommand(parsed.command, parsed.args);
           return;
         }
-      } else if (parsed.kind === "slash-draft") {
-        return;
-      } else if (parsed.kind === "unknown-command") {
-        setCommandError(`Unknown command: /${parsed.name}`);
-        return;
-      } else if (parsed.kind === "command") {
-        void runSlashCommand(parsed.command, parsed.args);
-        return;
-      }
 
-      let files = incoming;
-      if (incoming.length > 0) {
-        try {
+        if (incoming.length > 0) {
+          setUploadingAttachments(true);
+        }
+
+        let files = incoming;
+        if (incoming.length > 0) {
           files = await uploadSessionAttachments(sessionId, incoming);
           setCommandError(null);
-        } catch (cause) {
-          setCommandError(
-            cause instanceof Error ? cause.message : "Could not upload files",
-          );
-          throw cause;
         }
-      }
 
-      const text = parsed.kind === "empty" ? "" : parsed.text;
-      sendUserMessage(text, files);
+        const text = parsed.kind === "empty" ? "" : parsed.text;
+        sendUserMessage(text, files);
+      } catch (cause) {
+        if (
+          cause instanceof Error &&
+          cause.message !== "Composer is busy"
+        ) {
+          setCommandError(cause.message);
+        }
+        throw cause;
+      } finally {
+        submitInFlightRef.current = false;
+        setUploadingAttachments(false);
+      }
     },
-    [composerLocked, resolveSubmit, runSlashCommand, sendUserMessage, sessionId],
+    [resolveSubmit, runSlashCommand, sendUserMessage, sessionId, turnLocked],
   );
 
   const handleRunAppTest = useCallback(() => {
@@ -402,7 +423,11 @@ export function Chat({
   ]);
 
   const activityLabel = resolveChatActivityLabel({
-    live: (serverTurnActive || Boolean(pendingUserMessageId)) && !stopping,
+    live:
+      (serverTurnActive ||
+        Boolean(pendingUserMessageId) ||
+        uploadingAttachments) &&
+      !stopping,
     lastMessage: chatMessages[chatMessages.length - 1],
   });
   const lastDisplayMessage = chatMessages[chatMessages.length - 1];
@@ -418,26 +443,26 @@ export function Chat({
     ? "streaming"
     : status === "error"
       ? "error"
-      : summarizing || pendingUserMessageId
+      : summarizing || pendingUserMessageId || uploadingAttachments
         ? "submitted"
         : "ready";
   const composerPlaceholder = stopping
     ? "Stopping… you can send again after cancel succeeds"
     : summarizing
       ? "Summarizing conversation…"
-      : "Describe the app you want…";
+      : "Describe the app, or paste / drop a screenshot";
   const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop
       ? " - Generating…"
-      : pendingUserMessageId
+      : pendingUserMessageId || uploadingAttachments
         ? " - Sending…"
         : cancelledHint
           ? " - Stopped"
           : "";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col" ref={dropTargetRef}>
       <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
           Project Chat
@@ -447,7 +472,6 @@ export function Chat({
           {sessionStatusHint}
           {error ? ` - ${error.message}` : ""}
           {stopError ? ` - ${stopError}` : ""}
-          {commandError ? ` - ${commandError}` : ""}
         </p>
       </div>
 
@@ -457,7 +481,7 @@ export function Chat({
             <ConversationEmptyState
               icon={<MessageSquare className="size-10" />}
               title="Describe the app you want to build"
-              description=""
+              description="Paste or drop a screenshot, or attach files from the paperclip."
             />
           ) : (
             <ChatTimeline
@@ -493,12 +517,23 @@ export function Chat({
               }}
             />
           ) : null}
+          {commandError ? (
+            <p
+              className="mb-2 text-xs text-red-600 dark:text-red-400"
+              role="alert"
+            >
+              {commandError}
+            </p>
+          ) : null}
           <PromptInput
             accept={CHAT_ATTACHMENT_ACCEPT}
+            disabled={composerLocked}
+            dropTargetRef={dropTargetRef}
             maxFileSize={CHAT_ATTACHMENT_MAX_BYTES}
             maxFiles={CHAT_ATTACHMENT_MAX_FILES}
+            maxTotalFileSize={CHAT_ATTACHMENT_MAX_TOTAL_BYTES}
             multiple
-            onError={(error) => setCommandError(error.message)}
+            onError={(error) => setCommandError(error.message || null)}
             onSubmit={handleSubmit}
           >
             <PromptInputBody>
@@ -556,6 +591,7 @@ export function Chat({
                 ) : null}
               </PromptInputTools>
               <PromptInputSubmit
+                disabled={composerLocked && !showStop}
                 onStop={showStop ? handleStop : undefined}
                 status={submitStatus}
                 stopping={stopping}
@@ -569,14 +605,19 @@ export function Chat({
 }
 
 function AttachFilesButton({ disabled }: { disabled: boolean }) {
-  const attachments = usePromptInputAttachments();
   return (
-    <PromptInputButton
-      disabled={disabled}
-      onClick={() => attachments.openFileDialog()}
-      tooltip="Attach images or documents"
-    >
-      <Paperclip className="size-4" />
-    </PromptInputButton>
+    <PromptInputActionMenu>
+      <PromptInputActionMenuTrigger
+        aria-label="Attach images or documents"
+        disabled={disabled}
+        title="Attach images or documents"
+      >
+        <Paperclip className="size-4" />
+      </PromptInputActionMenuTrigger>
+      <PromptInputActionMenuContent>
+        <PromptInputActionAddAttachments />
+        <PromptInputActionAddScreenshot />
+      </PromptInputActionMenuContent>
+    </PromptInputActionMenu>
   );
 }
