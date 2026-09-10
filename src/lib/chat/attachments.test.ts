@@ -2,17 +2,26 @@ import { describe, expect, it } from "vitest";
 import type { UIMessage } from "ai";
 
 import {
+  attachmentCountLimitMessage,
   attachmentDisplayUrl,
+  attachmentSizeLimitMessage,
+  attachmentTotalSizeLimitMessage,
+  attachmentUnsupportedTypeMessage,
   buildUserMessageParts,
+  CHAT_ATTACHMENT_MAX_BYTES,
   CHAT_ATTACHMENT_MAX_FILES,
+  CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
   collectFileParts,
   collectStoredAttachmentIds,
   estimateDataUrlBytes,
   expandAttachmentPartsForModel,
+  filterComposerFiles,
+  isRasterImageMediaType,
   isSendableUserMessage,
   latestUserMessage,
   normalizeAttachmentMediaType,
   parseAttachmentId,
+  pastedAttachmentFilename,
   storedAttachmentUrl,
   stubOlderUserFileParts,
   userMessagePreview,
@@ -333,5 +342,97 @@ describe("stored attachment URLs", () => {
     ]);
     expect(result[1]).toEqual(recent);
     expect(collectStoredAttachmentIds([older, recent])).toEqual(["att_old"]);
+  });
+});
+
+describe("composer file filter", () => {
+  const acceptImages = (file: { type: string; name: string }) =>
+    normalizeAttachmentMediaType(file.type, file.name) != null;
+
+  it("keeps valid files and reports the first rejection", () => {
+    const result = filterComposerFiles(
+      [
+        { name: "shot.png", size: 10, type: "image/png" },
+        { name: "notes.zip", size: 10, type: "application/zip" },
+      ],
+      {
+        currentBytes: 0,
+        currentCount: 0,
+        isAccepted: acceptImages,
+      },
+    );
+    expect(result.acceptedIndexes).toEqual([0]);
+    expect(result.error).toEqual({
+      code: "accept",
+      message: attachmentUnsupportedTypeMessage("notes.zip"),
+    });
+  });
+
+  it("rejects oversized files with the server limit copy", () => {
+    const result = filterComposerFiles(
+      [{ name: "hero.png", size: CHAT_ATTACHMENT_MAX_BYTES + 1, type: "image/png" }],
+      {
+        currentBytes: 0,
+        currentCount: 0,
+        isAccepted: acceptImages,
+      },
+    );
+    expect(result.acceptedIndexes).toEqual([]);
+    expect(result.error).toEqual({
+      code: "max_file_size",
+      message: attachmentSizeLimitMessage("hero.png"),
+    });
+  });
+
+  it("enforces count and combined size before send", () => {
+    const overCount = filterComposerFiles(
+      [{ name: "extra.png", size: 10, type: "image/png" }],
+      {
+        currentBytes: 0,
+        currentCount: CHAT_ATTACHMENT_MAX_FILES,
+        isAccepted: acceptImages,
+      },
+    );
+    expect(overCount.acceptedIndexes).toEqual([]);
+    expect(overCount.error).toEqual({
+      code: "max_files",
+      message: attachmentCountLimitMessage(),
+    });
+
+    const overTotal = filterComposerFiles(
+      [{ name: "more.png", size: 20, type: "image/png" }],
+      {
+        currentBytes: CHAT_ATTACHMENT_MAX_TOTAL_BYTES - 10,
+        currentCount: 1,
+        isAccepted: acceptImages,
+      },
+    );
+    expect(overTotal.acceptedIndexes).toEqual([]);
+    expect(overTotal.error).toEqual({
+      code: "max_total_file_size",
+      message: attachmentTotalSizeLimitMessage(),
+    });
+  });
+});
+
+describe("pasted attachment names", () => {
+  it("keeps a real filename and names unnamed clipboard images", () => {
+    expect(
+      pastedAttachmentFilename({ name: "mockup.png", type: "image/png" }),
+    ).toBe("mockup.png");
+    expect(
+      pastedAttachmentFilename({ name: "", type: "image/png" }),
+    ).toMatch(/^screenshot-.+\.png$/);
+    expect(
+      pastedAttachmentFilename({ name: "", type: "application/pdf" }),
+    ).toBe("pasted-file");
+  });
+});
+
+describe("raster preview types", () => {
+  it("treats SVG as a download chip, not an inline image", () => {
+    expect(isRasterImageMediaType("image/png")).toBe(true);
+    expect(isRasterImageMediaType("image/svg+xml")).toBe(false);
+    expect(isRasterImageMediaType("application/pdf")).toBe(false);
   });
 });

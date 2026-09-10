@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { isImageMediaType, isStoredAttachmentId } from "@/lib/chat/attachments";
+import { isRasterImageMediaType, isStoredAttachmentId } from "@/lib/chat/attachments";
 import { downloadSessionAttachment } from "@/lib/chat/attachment-storage";
 import {
   requireSessionAuth,
@@ -61,9 +61,7 @@ export async function GET(
       return jsonError(result.error, result.status);
     }
 
-    const inline =
-      isImageMediaType(result.row.media_type) &&
-      result.row.media_type !== "image/svg+xml";
+    const inline = isRasterImageMediaType(result.row.media_type);
     return new NextResponse(Buffer.from(result.bytes), {
       headers: {
         "Content-Type": result.row.media_type,

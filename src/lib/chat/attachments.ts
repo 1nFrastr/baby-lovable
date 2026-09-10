@@ -104,6 +104,150 @@ export function isImageMediaType(mediaType: string | undefined): boolean {
   return (mediaType ?? "").toLowerCase().startsWith("image/");
 }
 
+/** Raster images that are safe to render with `<img>` (SVG is served as a download). */
+export function isRasterImageMediaType(
+  mediaType: string | undefined,
+): boolean {
+  const normalized = (mediaType ?? "").toLowerCase().split(";")[0]?.trim();
+  return (
+    Boolean(normalized?.startsWith("image/")) &&
+    normalized !== "image/svg+xml"
+  );
+}
+
+export function attachmentSizeLimitMessage(filename?: string): string {
+  const label = sanitizeAttachmentFilename(filename) ?? "File";
+  return `${label} is larger than ${Math.floor(CHAT_ATTACHMENT_MAX_BYTES / (1024 * 1024))}MB.`;
+}
+
+export function attachmentCountLimitMessage(
+  maxFiles = CHAT_ATTACHMENT_MAX_FILES,
+): string {
+  return `You can attach up to ${maxFiles} files. Some were not added.`;
+}
+
+export function attachmentTotalSizeLimitMessage(): string {
+  return "Attached files are too large together. Remove some and retry.";
+}
+
+export function attachmentUnsupportedTypeMessage(filename?: string): string {
+  const label = sanitizeAttachmentFilename(filename);
+  return label ? `Unsupported file type: ${label}` : "Unsupported file type";
+}
+
+export type ComposerFileInput = {
+  name: string;
+  size: number;
+  type: string;
+};
+
+export type ComposerFileFilterError = {
+  code: "accept" | "max_file_size" | "max_files" | "max_total_file_size";
+  message: string;
+};
+
+export type ComposerFileFilterResult = {
+  acceptedIndexes: number[];
+  error: ComposerFileFilterError | null;
+};
+
+/** Keep accepted files; report the first rejection so the composer can show it. */
+export function filterComposerFiles(
+  incoming: ComposerFileInput[],
+  options: {
+    currentCount: number;
+    currentBytes: number;
+    isAccepted: (file: ComposerFileInput) => boolean;
+    maxFiles?: number;
+    maxFileSize?: number;
+    maxTotalBytes?: number;
+  },
+): ComposerFileFilterResult {
+  const maxFiles = options.maxFiles ?? CHAT_ATTACHMENT_MAX_FILES;
+  const maxFileSize = options.maxFileSize ?? CHAT_ATTACHMENT_MAX_BYTES;
+  const maxTotalBytes = options.maxTotalBytes ?? CHAT_ATTACHMENT_MAX_TOTAL_BYTES;
+
+  const acceptedIndexes: number[] = [];
+  let count = options.currentCount;
+  let bytes = options.currentBytes;
+  let error: ComposerFileFilterError | null = null;
+
+  for (const [index, file] of incoming.entries()) {
+    if (!options.isAccepted(file)) {
+      error ??= {
+        code: "accept",
+        message: attachmentUnsupportedTypeMessage(file.name),
+      };
+      continue;
+    }
+    if (file.size > maxFileSize) {
+      error ??= {
+        code: "max_file_size",
+        message: attachmentSizeLimitMessage(file.name),
+      };
+      continue;
+    }
+    if (count >= maxFiles) {
+      error ??= {
+        code: "max_files",
+        message: attachmentCountLimitMessage(maxFiles),
+      };
+      continue;
+    }
+    if (bytes + file.size > maxTotalBytes) {
+      error ??= {
+        code: "max_total_file_size",
+        message: attachmentTotalSizeLimitMessage(),
+      };
+      continue;
+    }
+    acceptedIndexes.push(index);
+    count += 1;
+    bytes += file.size;
+  }
+
+  return { acceptedIndexes, error };
+}
+
+export function pastedAttachmentFilename(file: {
+  name: string;
+  type: string;
+}): string {
+  const cleaned = sanitizeAttachmentFilename(file.name);
+  if (cleaned) {
+    return cleaned;
+  }
+  const media = normalizeAttachmentMediaType(file.type, file.name);
+  if (media?.startsWith("image/")) {
+    const ext =
+      media === "image/jpeg"
+        ? "jpg"
+        : media === "image/svg+xml"
+          ? "svg"
+          : media.slice("image/".length) || "png";
+    const stamp = new Date()
+      .toISOString()
+      .replaceAll(/[:.]/g, "-")
+      .replace("T", "_")
+      .replace("Z", "");
+    return `screenshot-${stamp}.${ext}`;
+  }
+  return "pasted-file";
+}
+
+export function renamePastedFile(file: File): File {
+  const filename = pastedAttachmentFilename(file);
+  const type =
+    file.type || normalizeAttachmentMediaType("", filename) || file.type;
+  if (filename === file.name && type === file.type) {
+    return file;
+  }
+  return new File([file], filename, {
+    lastModified: file.lastModified,
+    type,
+  });
+}
+
 export function isTextMediaType(
   mediaType: string | undefined,
   filename?: string,

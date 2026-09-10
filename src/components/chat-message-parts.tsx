@@ -14,7 +14,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
-import { isImageMediaType, attachmentDisplayUrl } from "@/lib/chat/attachments";
+import { isRasterImageMediaType, attachmentDisplayUrl } from "@/lib/chat/attachments";
 import {
   compactToolInput,
   formatToolPartLabel,
@@ -150,7 +150,7 @@ function UserMessageFile({
   const src = attachmentDisplayUrl(sessionId, file.url);
   const [failed, setFailed] = useState(false);
   const showImage =
-    Boolean(src) && isImageMediaType(file.mediaType) && !failed;
+    Boolean(src) && isRasterImageMediaType(file.mediaType) && !failed;
 
   if (showImage && src) {
     return (
@@ -172,7 +172,7 @@ function UserMessageFile({
     );
   }
 
-  return (
+  const chip = (
     <div className="flex max-w-full items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900/60">
       <FileIcon className="size-3.5 shrink-0 text-zinc-500" />
       <span className="min-w-0 truncate">{label}</span>
@@ -180,6 +180,21 @@ function UserMessageFile({
         <span className="shrink-0 text-zinc-400">unavailable</span>
       ) : null}
     </div>
+  );
+
+  if (!src || failed) {
+    return chip;
+  }
+
+  return (
+    <a
+      className="max-w-full"
+      download={file.filename ?? undefined}
+      href={src}
+      rel="noreferrer"
+    >
+      {chip}
+    </a>
   );
 }
 

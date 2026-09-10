@@ -39,6 +39,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  filterComposerFiles,
+  isRasterImageMediaType,
+  renamePastedFile,
+} from "@/lib/chat/attachments";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
@@ -75,6 +80,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 // ============================================================================
 // Helpers
@@ -161,8 +167,13 @@ const captureScreenshot = async (): Promise<File | null> => {
 // Provider Context & Types
 // ============================================================================
 
+export type PromptInputAttachmentFile = FileUIPart & {
+  id: string;
+  byteSize?: number;
+};
+
 export interface AttachmentsContext {
-  files: (FileUIPart & { id: string })[];
+  files: PromptInputAttachmentFile[];
   add: (files: File[] | FileList) => void;
   remove: (id: string) => void;
   clear: () => void;
@@ -238,7 +249,7 @@ export const PromptInputProvider = ({
 
   // ----- attachments state (global when wrapped)
   const [attachmentFiles, setAttachmentFiles] = useState<
-    (FileUIPart & { id: string })[]
+    PromptInputAttachmentFile[]
   >([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // oxlint-disable-next-line eslint(no-empty-function)
@@ -253,6 +264,7 @@ export const PromptInputProvider = ({
     setAttachmentFiles((prev) => [
       ...prev,
       ...incoming.map((file) => ({
+        byteSize: file.size,
         filename: file.name,
         id: nanoid(),
         mediaType: file.type,
@@ -478,14 +490,18 @@ export type PromptInputProps = Omit<
   multiple?: boolean;
   // When true, accepts drops anywhere on document. Default false (opt-in).
   globalDrop?: boolean;
+  /** Attach drop listeners and overlay to this node instead of the form. */
+  dropTargetRef?: RefObject<HTMLElement | null>;
   // Render a hidden input with given name and keep it in sync for native form posts. Default false.
   syncHiddenInput?: boolean;
+  disabled?: boolean;
   // Minimal constraints
   maxFiles?: number;
   // bytes
   maxFileSize?: number;
+  maxTotalFileSize?: number;
   onError?: (err: {
-    code: "max_files" | "max_file_size" | "accept";
+    code: "max_files" | "max_file_size" | "max_total_file_size" | "accept";
     message: string;
   }) => void;
   onSubmit: (
@@ -499,9 +515,12 @@ export const PromptInput = ({
   accept,
   multiple,
   globalDrop,
+  dropTargetRef,
   syncHiddenInput,
+  disabled = false,
   maxFiles,
   maxFileSize,
+  maxTotalFileSize,
   onError,
   onSubmit,
   onPointerDown,
@@ -517,8 +536,12 @@ export const PromptInput = ({
   const formRef = useRef<HTMLFormElement | null>(null);
 
   // ----- Local attachments (only used when no provider)
-  const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
+  const [items, setItems] = useState<PromptInputAttachmentFile[]>([]);
   const files = usingProvider ? controller.attachments.files : items;
+  const [dropOverlayHost, setDropOverlayHost] = useState<HTMLElement | null>(
+    null,
+  );
+  const dragDepthRef = useRef(0);
 
   // ----- Local referenced sources (always local to PromptInput)
   const [referencedSources, setReferencedSources] = useState<
@@ -537,7 +560,7 @@ export const PromptInput = ({
   }, []);
 
   const matchesAccept = useCallback(
-    (f: File) => {
+    (f: { name: string; type: string }) => {
       if (!accept || accept.trim() === "") {
         return true;
       }
@@ -568,55 +591,77 @@ export const PromptInput = ({
     [accept]
   );
 
-  const addLocal = useCallback(
+  const currentBytes = files.reduce(
+    (sum, file) => sum + (file.byteSize ?? 0),
+    0,
+  );
+
+  const addValidated = useCallback(
     (fileList: File[] | FileList) => {
-      const incoming = [...fileList];
-      const accepted = incoming.filter((f) => matchesAccept(f));
-      if (incoming.length && accepted.length === 0) {
-        onError?.({
-          code: "accept",
-          message: "No files match the accepted types.",
-        });
+      if (disabled) {
         return;
       }
-      const withinSize = (f: File) =>
-        maxFileSize ? f.size <= maxFileSize : true;
-      const sized = accepted.filter(withinSize);
-      if (accepted.length > 0 && sized.length === 0) {
-        onError?.({
-          code: "max_file_size",
-          message: "All files exceed the maximum size.",
-        });
+      const incoming = [...fileList];
+      if (incoming.length === 0) {
         return;
       }
 
-      setItems((prev) => {
-        const capacity =
-          typeof maxFiles === "number"
-            ? Math.max(0, maxFiles - prev.length)
-            : undefined;
-        const capped =
-          typeof capacity === "number" ? sized.slice(0, capacity) : sized;
-        if (typeof capacity === "number" && sized.length > capacity) {
-          onError?.({
-            code: "max_files",
-            message: "Too many files. Some were not added.",
-          });
-        }
-        const next: (FileUIPart & { id: string })[] = [];
-        for (const file of capped) {
-          next.push({
-            filename: file.name,
-            id: nanoid(),
-            mediaType: file.type,
-            type: "file",
-            url: URL.createObjectURL(file),
-          });
-        }
-        return [...prev, ...next];
-      });
+      const result = filterComposerFiles(
+        incoming.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+        {
+          currentBytes,
+          currentCount: files.length,
+          isAccepted: matchesAccept,
+          maxFileSize,
+          maxFiles,
+          maxTotalBytes: maxTotalFileSize,
+        },
+      );
+      const capped = result.acceptedIndexes
+        .map((index) => incoming[index])
+        .filter((file): file is File => file != null);
+      if (result.error) {
+        onError?.(result.error);
+      } else if (capped.length > 0) {
+        onError?.({ code: "accept", message: "" });
+      }
+      if (capped.length === 0) {
+        return;
+      }
+
+      if (usingProvider) {
+        controller?.attachments.add(capped);
+        return;
+      }
+
+      setItems((prev) => [
+        ...prev,
+        ...capped.map((file) => ({
+          byteSize: file.size,
+          filename: file.name,
+          id: nanoid(),
+          mediaType: file.type,
+          type: "file" as const,
+          url: URL.createObjectURL(file),
+        })),
+      ]);
     },
-    [matchesAccept, maxFiles, maxFileSize, onError]
+    [
+      controller,
+      currentBytes,
+      disabled,
+      files.length,
+      matchesAccept,
+      maxFileSize,
+      maxFiles,
+      maxTotalFileSize,
+      onError,
+      usingProvider,
+    ],
   );
 
   const removeLocal = useCallback(
@@ -629,50 +674,6 @@ export const PromptInput = ({
         return prev.filter((file) => file.id !== id);
       }),
     []
-  );
-
-  // Wrapper that validates files before calling provider's add
-  const addWithProviderValidation = useCallback(
-    (fileList: File[] | FileList) => {
-      const incoming = [...fileList];
-      const accepted = incoming.filter((f) => matchesAccept(f));
-      if (incoming.length && accepted.length === 0) {
-        onError?.({
-          code: "accept",
-          message: "No files match the accepted types.",
-        });
-        return;
-      }
-      const withinSize = (f: File) =>
-        maxFileSize ? f.size <= maxFileSize : true;
-      const sized = accepted.filter(withinSize);
-      if (accepted.length > 0 && sized.length === 0) {
-        onError?.({
-          code: "max_file_size",
-          message: "All files exceed the maximum size.",
-        });
-        return;
-      }
-
-      const currentCount = files.length;
-      const capacity =
-        typeof maxFiles === "number"
-          ? Math.max(0, maxFiles - currentCount)
-          : undefined;
-      const capped =
-        typeof capacity === "number" ? sized.slice(0, capacity) : sized;
-      if (typeof capacity === "number" && sized.length > capacity) {
-        onError?.({
-          code: "max_files",
-          message: "Too many files. Some were not added.",
-        });
-      }
-
-      if (capped.length > 0) {
-        controller?.attachments.add(capped);
-      }
-    },
-    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller]
   );
 
   const clearAttachments = useCallback(
@@ -695,7 +696,7 @@ export const PromptInput = ({
     []
   );
 
-  const add = usingProvider ? addWithProviderValidation : addLocal;
+  const add = addValidated;
   const remove = usingProvider ? controller.attachments.remove : removeLocal;
   const openFileDialog = usingProvider
     ? controller.attachments.openFileDialog
@@ -722,63 +723,75 @@ export const PromptInput = ({
     }
   }, [files, syncHiddenInput]);
 
-  // Attach drop handlers on nearest form and document (opt-in)
+  // Attach drop handlers on the chat column, the form, or the document (opt-in).
   useEffect(() => {
-    const form = formRef.current;
-    if (!form) {
-      return;
-    }
-    if (globalDrop) {
-      // when global drop is on, let the document-level handler own drops
+    const overlayHost = dropTargetRef?.current ?? formRef.current;
+    const target: EventTarget | null = globalDrop
+      ? document
+      : overlayHost;
+    if (!target) {
       return;
     }
 
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
+    const isFileDrag = (event: DragEvent) =>
+      Boolean(event.dataTransfer?.types?.includes("Files"));
+
+    const onDragEnter = (event: Event) => {
+      const dragEvent = event as DragEvent;
+      if (!isFileDrag(dragEvent)) {
+        return;
+      }
+      dragEvent.preventDefault();
+      dragDepthRef.current += 1;
+      if (!globalDrop && overlayHost) {
+        setDropOverlayHost(overlayHost);
       }
     };
-    const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
+    const onDragOver = (event: Event) => {
+      const dragEvent = event as DragEvent;
+      if (!isFileDrag(dragEvent)) {
+        return;
       }
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-        add(e.dataTransfer.files);
+      dragEvent.preventDefault();
+      if (dragEvent.dataTransfer) {
+        dragEvent.dataTransfer.dropEffect = "copy";
       }
     };
-    form.addEventListener("dragover", onDragOver);
-    form.addEventListener("drop", onDrop);
+    const onDragLeave = (event: Event) => {
+      const dragEvent = event as DragEvent;
+      if (!isFileDrag(dragEvent)) {
+        return;
+      }
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setDropOverlayHost(null);
+      }
+    };
+    const onDrop = (event: Event) => {
+      const dragEvent = event as DragEvent;
+      if (!isFileDrag(dragEvent)) {
+        return;
+      }
+      dragEvent.preventDefault();
+      dragDepthRef.current = 0;
+      setDropOverlayHost(null);
+      if (dragEvent.dataTransfer?.files && dragEvent.dataTransfer.files.length > 0) {
+        add(dragEvent.dataTransfer.files);
+      }
+    };
+
+    target.addEventListener("dragenter", onDragEnter);
+    target.addEventListener("dragover", onDragOver);
+    target.addEventListener("dragleave", onDragLeave);
+    target.addEventListener("drop", onDrop);
     return () => {
-      form.removeEventListener("dragover", onDragOver);
-      form.removeEventListener("drop", onDrop);
+      target.removeEventListener("dragenter", onDragEnter);
+      target.removeEventListener("dragover", onDragOver);
+      target.removeEventListener("dragleave", onDragLeave);
+      target.removeEventListener("drop", onDrop);
+      dragDepthRef.current = 0;
     };
-  }, [add, globalDrop]);
-
-  useEffect(() => {
-    if (!globalDrop) {
-      return;
-    }
-
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-    };
-    const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-        add(e.dataTransfer.files);
-      }
-    };
-    document.addEventListener("dragover", onDragOver);
-    document.addEventListener("drop", onDrop);
-    return () => {
-      document.removeEventListener("dragover", onDragOver);
-      document.removeEventListener("drop", onDrop);
-    };
-  }, [add, globalDrop]);
+  }, [add, dropTargetRef, globalDrop]);
 
   useEffect(
     () => () => {
@@ -853,11 +866,12 @@ export const PromptInput = ({
       }
 
       try {
-        const submittedFiles: FileUIPart[] = files.map((file) => {
-          const { id, ...item } = file;
-          void id;
-          return item;
-        });
+        const submittedFiles: FileUIPart[] = files.map((file) => ({
+          filename: file.filename,
+          mediaType: file.mediaType,
+          type: "file",
+          url: file.url,
+        }));
 
         const result = onSubmit({ files: submittedFiles, text }, event);
 
@@ -900,7 +914,7 @@ export const PromptInput = ({
         type="file"
       />
       <form
-        className={cn("w-full", className)}
+        className={cn("relative w-full", className)}
         onPointerDown={(event) => {
           onPointerDown?.(event);
           if (event.defaultPrevented) {
@@ -926,6 +940,19 @@ export const PromptInput = ({
       >
         <InputGroup className="cursor-text overflow-hidden">{children}</InputGroup>
       </form>
+      {dropOverlayHost
+        ? createPortal(
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-zinc-950/40"
+            >
+              <p className="rounded-md border border-zinc-200 bg-background px-3 py-2 text-sm font-medium text-zinc-900 shadow-sm dark:border-zinc-700 dark:text-zinc-100">
+                Drop images or documents
+              </p>
+            </div>,
+            dropOverlayHost,
+          )
+        : null}
     </>
   );
 
@@ -956,7 +983,7 @@ export type PromptInputAttachmentsProps = Omit<
   HTMLAttributes<HTMLDivElement>,
   "children"
 > & {
-  children: (attachment: FileUIPart & { id: string }) => ReactNode;
+  children: (attachment: PromptInputAttachmentFile) => ReactNode;
 };
 
 export const PromptInputAttachments = ({
@@ -983,7 +1010,7 @@ export const PromptInputAttachments = ({
 };
 
 export type PromptInputAttachmentProps = HTMLAttributes<HTMLDivElement> & {
-  data: FileUIPart & { id: string };
+  data: PromptInputAttachmentFile;
 };
 
 export const PromptInputAttachment = ({
@@ -992,14 +1019,16 @@ export const PromptInputAttachment = ({
   ...props
 }: PromptInputAttachmentProps) => {
   const attachments = usePromptInputAttachments();
-  const isImage = data.mediaType.startsWith("image/") && Boolean(data.url);
+  const isImage = isRasterImageMediaType(data.mediaType) && Boolean(data.url);
   const label = data.filename?.trim() || "Attached file";
 
   return (
     <div
       className={cn(
         "group relative flex max-w-full items-center gap-2 rounded-md border border-border bg-background",
-        isImage ? "h-16 w-16 overflow-hidden p-0" : "max-w-48 px-2 py-1.5",
+        isImage
+          ? "h-20 w-20 overflow-hidden bg-zinc-100 p-0 dark:bg-zinc-900"
+          : "max-w-48 px-2 py-1.5",
         className,
       )}
       data-slot="prompt-input-attachment"
@@ -1010,10 +1039,10 @@ export const PromptInputAttachment = ({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           alt={label}
-          className="size-full object-cover"
-          height={64}
+          className="size-full object-contain"
+          height={80}
           src={data.url}
-          width={64}
+          width={80}
         />
       ) : (
         <>
@@ -1023,7 +1052,7 @@ export const PromptInputAttachment = ({
       )}
       <button
         aria-label={`Remove ${label}`}
-        className="absolute top-0.5 right-0.5 flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        className="absolute top-0.5 right-0.5 flex size-5 items-center justify-center rounded-full bg-black/70 text-white"
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -1115,27 +1144,46 @@ export const PromptInputTextarea = ({
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = useCallback(
     (event) => {
-      const items = event.clipboardData?.items;
-
-      if (!items) {
+      const clipboard = event.clipboardData;
+      if (!clipboard) {
         return;
       }
 
       const files: File[] = [];
-
-      for (const item of items) {
-        if (item.kind === "file") {
-          const file = item.getAsFile();
-          if (file) {
-            files.push(file);
-          }
+      for (const item of clipboard.items) {
+        if (item.kind !== "file") {
+          continue;
+        }
+        const file = item.getAsFile();
+        if (file) {
+          files.push(renamePastedFile(file));
         }
       }
 
-      if (files.length > 0) {
-        event.preventDefault();
-        attachments.add(files);
+      if (files.length === 0) {
+        return;
       }
+
+      event.preventDefault();
+      attachments.add(files);
+
+      const text = clipboard.getData("text/plain");
+      if (!text) {
+        return;
+      }
+
+      const el = event.currentTarget;
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      const next = `${el.value.slice(0, start)}${text}${el.value.slice(end)}`;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(el, next);
+      el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      const cursor = start + text.length;
+      el.setSelectionRange(cursor, cursor);
     },
     [attachments]
   );
