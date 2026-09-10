@@ -47,9 +47,11 @@ The focus of this project is not only to recreate a Lovable-style product, but t
 
 Ordinary request lifecycles are a poor fit for long-running Agent tasks.
 
-BabyLovable uses Vercel AI SDK v7 `WorkflowAgent` to orchestrate Agent execution, splitting work into observable, recoverable, and retryable steps.
+BabyLovable uses Vercel AI SDK v7 `WorkflowAgent` to orchestrate Agent execution, splitting work into recoverable and retryable steps.
 
 Even if the page refreshes, the connection drops, or a step fails, the system can recover from durable state instead of depending on a single HTTP request to finish all logic.
+
+Workflow observability here is **run/step durability** (resume, retry, inspect whether a step succeeded). It is not agent-quality eval: it does not tell you whether the turn actually finished the user's task, which tools mattered, or how a prompt/model change compares to a baseline. Today that gap is only partly covered by `[agent-trace]` stdout and CLI `agent.log`. A dedicated eval observability layer is on the roadmap.
 
 See: [Workflow Agent design](./docs/workflow-agent.md)
 
@@ -206,3 +208,10 @@ Next, in order:
 **4. Time travel** — Freestyle per-turn checkpoints already exist; History cannot restore yet.
 
 - [ ] Restore workspace + Preview from a checkpoint (code only; do not rewind chat)
+
+**5. Eval observability** — Vercel Workflow's own observability is still too weak for this product. The dashboard and step UI show that a workflow ran or retried; they do not score agent quality, persist structured traces, or compare prompt / model / tool-set changes. `[agent-trace]` stdout and CLI `agent.log` are grep-friendly, but they are not an eval system.
+
+- [ ] Persist structured turn traces independently of Workflow (steps, tools, tokens, preview / browser outcomes)
+- [ ] Turn-level scores: task completion, compile health, `checkPreview`, browser accept, incomplete turns
+- [ ] Offline eval from production traces: prompt / model / tool-set diffs vs a baseline
+- [ ] Online monitoring of live sessions (not only local CLI logs)
