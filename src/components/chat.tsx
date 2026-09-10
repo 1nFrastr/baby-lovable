@@ -56,8 +56,10 @@ import {
 } from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
-import { mergeTextWithPreviewPicks } from "@/lib/preview/format-preview-pick";
-import type { PreviewElementPick } from "@/lib/preview/format-preview-pick";
+import {
+  mergeTextWithPreviewPicks,
+  type PreviewElementPick,
+} from "@/lib/preview/format-preview-pick";
 import {
   isActiveRunStatus,
   type Session,
