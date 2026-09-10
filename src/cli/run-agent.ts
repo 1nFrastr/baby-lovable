@@ -6,11 +6,13 @@ import {
   type UIMessage,
 } from "ai";
 
+import { formatTraceStdout } from "@/lib/agent/agent-trace";
 import { createCliAgentTrace } from "@/lib/agent/agent-trace-cli";
 import { resolveBuilderModelId } from "@/lib/agent/builder-model";
 import { runAgentStreamWithAutoContinue } from "@/lib/agent/auto-continue";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { hydrateAndExpandAttachmentsForModel } from "@/lib/chat/attachment-storage";
+import { describeLastUserPrompt } from "@/lib/chat/attachments";
 import { toPromptUiMessages } from "@/lib/chat/compaction";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
@@ -62,6 +64,9 @@ export async function runAgentTurn({
   const modelMessages = await convertToModelMessages(promptMessages, {
     ignoreIncompleteToolCalls: true,
   });
+  console.log(
+    formatTraceStdout(sessionId, "INFO", describeLastUserPrompt(promptMessages)),
+  );
 
   // Non-blocking prelude: preview-ready via reconciler (same as web chat).
   const { kickRuntimeDesired } = await import("@/lib/sandbox/preview");

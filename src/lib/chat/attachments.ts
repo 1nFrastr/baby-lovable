@@ -256,6 +256,10 @@ export function isTextMediaType(
   return normalized != null && TEXT_MEDIA_TYPES.has(normalized);
 }
 
+export function isPdfMediaType(mediaType: string | undefined): boolean {
+  return (mediaType ?? "").toLowerCase().split(";")[0]?.trim() === "application/pdf";
+}
+
 /** Persisted file-part URL. Bytes live in Storage, not in message JSON. */
 export const ATTACHMENT_URL_PREFIX = "attachment://";
 
@@ -430,6 +434,19 @@ export function collectUserText(message: UIMessage): string {
     .map((part) => part.text)
     .join("\n")
     .trim();
+}
+
+/** One-line prompt inventory for `[agent-trace]` (no attachment bytes). */
+export function describeLastUserPrompt(messages: UIMessage[]): string {
+  const message = [...messages]
+    .reverse()
+    .find((candidate) => candidate.role === "user");
+  if (!message) {
+    return "last-user=none";
+  }
+  const files = collectFileParts(message);
+  const media = files.map((file) => file.mediaType).join(",") || "none";
+  return `last-user textChars=${collectUserText(message).length} fileParts=${files.length} media=[${media}]`;
 }
 
 /** Short label for titles, git trailers, and file-only bubbles. */
@@ -631,9 +648,40 @@ function formatAttachedText(filename: string | undefined, text: string): string 
   return `Attached file \`${label}\`:\n\`\`\`\n${truncated}\n\`\`\``;
 }
 
+function formatByteSize(byteSize: number): string {
+  if (byteSize <= 0) {
+    return "";
+  }
+  if (byteSize < 1024) {
+    return ` · ${byteSize} bytes`;
+  }
+  return ` · ${Math.round(byteSize / 1024)} KB`;
+}
+
+function formatAttachedPdf(
+  filename: string | undefined,
+  byteSize: number,
+): string {
+  const label = filename?.trim() || "document.pdf";
+  return `Attached PDF \`${label}\`${formatByteSize(byteSize)}. PDF pages are not rendered in this prompt — only this filename and size are visible.`;
+}
+
+function formatAttachedBinary(
+  filename: string | undefined,
+  mediaType: string | undefined,
+  byteSize: number,
+): string {
+  const label = filename?.trim() || mediaType?.trim() || "attached file";
+  return `Attached file \`${label}\` (${mediaType ?? "unknown"}${formatByteSize(byteSize)}). This type is not inlined into the prompt.`;
+}
+
 /**
  * Model-facing copy of UI messages: decode text documents into prompt text
- * (widely supported) and leave images/PDFs as file parts for vision models.
+ * (widely supported) and leave raster images as file parts for vision models.
+ *
+ * PDFs and other non-image binaries must not stay as `file` parts: GLM / the
+ * gateway can drop the entire user turn when it sees an unsupported media type,
+ * including the user's text sitting next to a PDF.
  */
 export function expandAttachmentPartsForModel(
   messages: UIMessage[],
@@ -662,6 +710,22 @@ export function expandAttachmentPartsForModel(
           type: "text",
           text: omittedAttachmentText(part.filename, part.mediaType),
         });
+        continue;
+      }
+      if (isPdfMediaType(part.mediaType)) {
+        extracted.push(
+          formatAttachedPdf(part.filename, estimateDataUrlBytes(part.url)),
+        );
+        continue;
+      }
+      if (!isRasterImageMediaType(part.mediaType)) {
+        extracted.push(
+          formatAttachedBinary(
+            part.filename,
+            part.mediaType,
+            estimateDataUrlBytes(part.url),
+          ),
+        );
         continue;
       }
       parts.push(part);

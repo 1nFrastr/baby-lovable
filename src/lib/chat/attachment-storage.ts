@@ -380,8 +380,9 @@ async function materializeStoredFileParts(
 
 /**
  * Prompt copy: download Storage bytes for user file parts still in the
- * prompt view, then inline text documents. Images stay as file parts.
- * Sealed/summarized turns are already removed by `toPromptUiMessages`.
+ * prompt view, then inline text documents and PDF filenames. Raster images
+ * stay as file parts. Sealed/summarized turns are already removed by
+ * `toPromptUiMessages`.
  */
 export async function hydrateAndExpandAttachmentsForModel(
   sessionId: string,

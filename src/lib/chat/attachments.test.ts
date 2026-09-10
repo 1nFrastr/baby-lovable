@@ -271,6 +271,43 @@ describe("expandAttachmentPartsForModel", () => {
     ).toContain("use a navy header");
   });
 
+  it("inlines markdown and turns PDF into text so the user turn cannot go empty", () => {
+    const message = user([
+      { type: "text", text: "看到文件了吗" },
+      {
+        type: "file",
+        mediaType: "application/pdf",
+        filename: "出售冰箱与转租房源文档制作请求.pdf",
+        url: dataUrl("application/pdf", "%PDF-1.4 stub"),
+      },
+      {
+        type: "file",
+        mediaType: "text/markdown",
+        filename:
+          "dropbrain-exposing-an-external-ip-address-to-access-an-app-2026-08-19.md",
+        url: dataUrl(
+          "text/markdown",
+          "# Dropbrain\nExpose an external IP to access an app.",
+        ),
+      },
+    ]);
+
+    const [expanded] = expandAttachmentPartsForModel([message]);
+    expect(
+      expanded?.parts.filter((part) => part.type === "file"),
+    ).toHaveLength(0);
+    const text = expanded?.parts.find((part) => part.type === "text");
+    expect(text?.type === "text" && text.text).toContain("看到文件了吗");
+    expect(text?.type === "text" && text.text).toContain(
+      "出售冰箱与转租房源文档制作请求.pdf",
+    );
+    expect(text?.type === "text" && text.text).toContain("Attached PDF");
+    expect(text?.type === "text" && text.text).toContain("Dropbrain");
+    expect(text?.type === "text" && text.text).toContain(
+      "dropbrain-exposing-an-external-ip-address-to-access-an-app-2026-08-19.md",
+    );
+  });
+
   it("stubs stored URLs that were not materialized into data URLs", () => {
     const message = user([
       {
