@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   House,
+  MousePointer2,
   RefreshCcw,
   RefreshCw,
   RotateCcw,
@@ -14,6 +15,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  isPreviewBridgeMessage,
+  isPreviewElementPickPayload,
+  PREVIEW_BRIDGE_SOURCE,
+  type PreviewElementPickPayload,
+} from "@/lib/preview/bridge-protocol";
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import {
   type SessionRuntimeProjection,
@@ -58,6 +65,8 @@ interface PreviewPanelProps {
   chatAppTest?: AppTestLatestStatus | null;
   /** True after Chat has reported an extract for this session (including none). */
   chatAppTestReady?: boolean;
+  /** Visual Picker: DOM pick from Preview → composer chip. */
+  onElementPicked?: (element: PreviewElementPickPayload) => void;
 }
 
 /** Keep PiP visible briefly after the run ends so the final frame is usable. */
@@ -67,23 +76,11 @@ const READY_EMBED_RELOAD_DELAY_MS = 1_000;
 
 type PreviewPanelTab = "preview" | "files" | "history";
 
-/** Must match templates/nextjs-starter/src/instrumentation-client.ts */
-const PREVIEW_BRIDGE_SOURCE = "baby-lovable-preview";
-
 interface PreviewBridgeLocation {
   href: string;
   path: string;
   canGoBack: boolean;
   canGoForward: boolean;
-}
-
-interface PreviewBridgeLocationMessage {
-  source: typeof PREVIEW_BRIDGE_SOURCE;
-  type: "location";
-  href: string;
-  path: string;
-  canGoBack?: boolean;
-  canGoForward?: boolean;
 }
 
 function previewOrigin(url: string | undefined): string | null {
@@ -193,6 +190,7 @@ export function PreviewPanel({
   runtimeError = null,
   chatAppTest = null,
   chatAppTestReady = false,
+  onElementPicked,
 }: PreviewPanelProps) {
   const invalidateRuntime = useInvalidateSessionRuntime();
   const projection = runtimeProjection;
@@ -245,6 +243,18 @@ export function PreviewPanel({
 
   const [iframeLocation, setIframeLocation] =
     useState<PreviewBridgeLocation | null>(null);
+  /** Visual Picker (pick-to-chat) — posts inspect toggle into the iframe bridge. */
+  const [inspectMode, setInspectMode] = useState(false);
+  const inspectModeRef = useRef(false);
+  const onElementPickedRef = useRef(onElementPicked);
+
+  useEffect(() => {
+    inspectModeRef.current = inspectMode;
+  }, [inspectMode]);
+
+  useEffect(() => {
+    onElementPickedRef.current = onElementPicked;
+  }, [onElementPicked]);
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -305,7 +315,7 @@ export function PreviewPanel({
     setIframeLocation(null);
   }, [previewIframeKey]);
 
-  // Cross-origin preview: location + history only via postMessage bridge.
+  // Cross-origin preview: location, inspect-state, and element picks via bridge.
   useEffect(() => {
     const expectedOrigin = previewOrigin(readyPreviewUrl);
     if (!expectedOrigin) {
@@ -319,34 +329,109 @@ export function PreviewPanel({
       if (event.source !== previewIframeRef.current?.contentWindow) {
         return;
       }
-      const data = event.data as PreviewBridgeLocationMessage | null;
-      if (
-        !data ||
-        typeof data !== "object" ||
-        data.source !== PREVIEW_BRIDGE_SOURCE ||
-        data.type !== "location" ||
-        typeof data.path !== "string"
-      ) {
+      if (!isPreviewBridgeMessage(event.data)) {
         return;
       }
 
-      setIframeLocation((prev) => ({
-        href: typeof data.href === "string" ? data.href : data.path,
-        path: data.path || "/",
-        canGoBack:
-          typeof data.canGoBack === "boolean"
-            ? data.canGoBack
-            : (prev?.canGoBack ?? false),
-        canGoForward:
-          typeof data.canGoForward === "boolean"
-            ? data.canGoForward
-            : (prev?.canGoForward ?? false),
-      }));
+      if (event.data.type === "location") {
+        const data = event.data as {
+          href?: unknown;
+          path?: unknown;
+          canGoBack?: unknown;
+          canGoForward?: unknown;
+        };
+        if (typeof data.path !== "string") {
+          return;
+        }
+        const path = data.path || "/";
+        const href = typeof data.href === "string" ? data.href : path;
+        setIframeLocation((prev) => ({
+          href,
+          path,
+          canGoBack:
+            typeof data.canGoBack === "boolean"
+              ? data.canGoBack
+              : (prev?.canGoBack ?? false),
+          canGoForward:
+            typeof data.canGoForward === "boolean"
+              ? data.canGoForward
+              : (prev?.canGoForward ?? false),
+        }));
+        return;
+      }
+
+      if (event.data.type === "inspect-state") {
+        const enabled = (event.data as { enabled?: unknown }).enabled;
+        if (typeof enabled === "boolean") {
+          setInspectMode(enabled);
+        }
+        return;
+      }
+
+      if (event.data.type === "element-picked") {
+        const element = (event.data as { element?: unknown }).element;
+        if (isPreviewElementPickPayload(element)) {
+          onElementPickedRef.current?.(element);
+        }
+      }
     };
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [readyPreviewUrl]);
+
+  const postInspectMode = useCallback(
+    (enabled: boolean) => {
+      const win = previewIframeRef.current?.contentWindow;
+      const targetOrigin = previewOrigin(readyPreviewUrl);
+      if (!win || !targetOrigin) {
+        return;
+      }
+      try {
+        win.postMessage(
+          {
+            source: PREVIEW_BRIDGE_SOURCE,
+            type: "inspect",
+            enabled,
+          },
+          targetOrigin,
+        );
+      } catch {
+        // ignore
+      }
+    },
+    [readyPreviewUrl],
+  );
+
+  const setInspectModeAndBridge = useCallback(
+    (enabled: boolean) => {
+      setInspectMode(enabled);
+      postInspectMode(enabled);
+    },
+    [postInspectMode],
+  );
+
+  // Leave pick mode when leaving the Preview tab or losing the embed.
+  useEffect(() => {
+    if (panelTab !== "preview" || !readyPreviewUrl) {
+      if (inspectModeRef.current) {
+        setInspectMode(false);
+        postInspectMode(false);
+      }
+    }
+  }, [panelTab, readyPreviewUrl, postInspectMode]);
+
+  useEffect(() => {
+    setInspectMode(false);
+  }, [sessionId]);
+
+  // Re-assert inspect after soft remount / navigation so the new document matches toolbar.
+  useEffect(() => {
+    if (!iframeLoaded || !inspectModeRef.current) {
+      return;
+    }
+    postInspectMode(true);
+  }, [iframeLoaded, previewIframeKey, postInspectMode]);
 
   // After each agent turn: sync Files explorer, but do not remount the iframe
   // (that interrupts in-iframe interaction). Offer a soft refresh prompt instead.
@@ -926,6 +1011,29 @@ export function PreviewPanel({
             >
               <House className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
+            <button
+              type="button"
+              onClick={() => setInspectModeAndBridge(!inspectMode)}
+              disabled={!iframeLoaded}
+              aria-pressed={inspectMode}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition disabled:opacity-40 ${
+                inspectMode
+                  ? "bg-blue-600 text-white hover:bg-blue-500"
+                  : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              }`}
+              title={
+                inspectMode
+                  ? "Stop picking elements (Esc)"
+                  : "Pick an element for chat"
+              }
+              aria-label={
+                inspectMode
+                  ? "Stop picking elements"
+                  : "Pick an element for chat"
+              }
+            >
+              <MousePointer2 className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
           </div>
           <p
             className="min-w-0 flex-1 truncate rounded-md border border-zinc-200 bg-white px-2.5 py-1 font-mono text-[11px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
@@ -933,6 +1041,11 @@ export function PreviewPanel({
           >
             {addressBarPath}
           </p>
+          {inspectMode ? (
+            <p className="shrink-0 px-1 text-[11px] text-blue-600 dark:text-blue-400">
+              Click an element
+            </p>
+          ) : null}
         </div>
       ) : null}
 

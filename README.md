@@ -192,9 +192,9 @@ Next, in order:
 - [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - Later: subagents (explore / implement / verify) — highest cost on WorkflowAgent
 
-**2. Visual Edit** — Preview iframe bridge exists (location / back-forward); no inspect mode.
+**2. Visual Edit** — Preview iframe bridge exists (location / back-forward / Visual Picker).
 
-- [ ] Visual picker: click a DOM node in Preview → chip in the composer (pick-to-chat)
+- [x] Visual picker: click a DOM node in Preview → chip in the composer (pick-to-chat)
 - Later: screenshot of the node, DOM → source mapping, inline style edits
 
 **3. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.

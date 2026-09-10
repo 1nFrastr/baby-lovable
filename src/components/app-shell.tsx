@@ -8,6 +8,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { nanoid } from "nanoid";
 
 import {
   useCreateSessionMutation,
@@ -18,6 +19,10 @@ import {
   useSyncSessionSummary,
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
+import type { PreviewElementPickPayload } from "@/lib/preview/bridge-protocol";
+import {
+  type PreviewElementPick,
+} from "@/lib/preview/format-preview-pick";
 import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
 import { useInvalidateSessionRuntime, useSessionRuntime } from "@/lib/session/runtime-query";
 import { cn } from "@/lib/utils";
@@ -35,6 +40,7 @@ import { SessionSidebar } from "./session-sidebar";
 import { WorkspaceMainSplit } from "./workspace-main-split";
 
 const GITHUB_REPO_URL = "https://github.com/1nFrastr/baby-lovable";
+const MAX_PREVIEW_PICKS = 8;
 
 /** Lucide dropped brand icons; keep a minimal GitHub mark here. */
 function GitHubIcon({ className }: { className?: string }) {
@@ -135,6 +141,8 @@ export function AppShell() {
   );
   /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
+  /** Visual Picker chips: Preview DOM picks awaiting send in the composer. */
+  const [previewPicks, setPreviewPicks] = useState<PreviewElementPick[]>([]);
   const {
     containerRef,
     mainRef,
@@ -162,6 +170,7 @@ export function AppShell() {
   useEffect(() => {
     setChatAppTest(null);
     setChatAppTestReady(false);
+    setPreviewPicks([]);
   }, [activeSessionId]);
 
   const handleAppTestStatus = useCallback(
@@ -171,6 +180,28 @@ export function AppShell() {
     },
     [],
   );
+
+  const handleElementPicked = useCallback((element: PreviewElementPickPayload) => {
+    setPreviewPicks((prev) => {
+      const duplicate = prev.some(
+        (pick) =>
+          pick.selector === element.selector && pick.path === element.path,
+      );
+      if (duplicate) {
+        return prev;
+      }
+      const next: PreviewElementPick = { ...element, id: nanoid() };
+      return [...prev, next].slice(-MAX_PREVIEW_PICKS);
+    });
+  }, []);
+
+  const handleRemovePreviewPick = useCallback((id: string) => {
+    setPreviewPicks((prev) => prev.filter((pick) => pick.id !== id));
+  }, []);
+
+  const handleClearPreviewPicks = useCallback(() => {
+    setPreviewPicks([]);
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -422,6 +453,9 @@ export function AppShell() {
                   runStatus={activeSession.runStatus}
                   onSessionRefresh={handleSessionRefresh}
                   onAppTestStatus={handleAppTestStatus}
+                  previewPicks={previewPicks}
+                  onRemovePreviewPick={handleRemovePreviewPick}
+                  onClearPreviewPicks={handleClearPreviewPicks}
                 />
               }
               right={
@@ -443,6 +477,7 @@ export function AppShell() {
                   }
                   chatAppTest={chatAppTest}
                   chatAppTestReady={chatAppTestReady}
+                  onElementPicked={handleElementPicked}
                 />
               }
             />
