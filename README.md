@@ -184,6 +184,7 @@ Next, in order:
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
 - [x] Multimodal input (images and documents in chat; screenshot / design → edit)
+- [ ] Human-in-the-loop: pause the same turn when the user must intervene (clarify, choose, paste a secret, approve a plan / publish / destructive tool, or complete a login in a browser test), then resume. Plan mode, connectors, and ship reuse this.
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
 - [ ] Web search: look up current docs, APIs, and examples while building
 - [ ] Skills (session-level playbooks)
@@ -192,12 +193,16 @@ Next, in order:
 - [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
 - Later: subagents (explore / implement / verify) — highest cost on WorkflowAgent
 
-**2. Visual Edit** — Preview iframe bridge exists (location / back-forward / Visual Picker).
+**2. Host UI/UX** — Functional workspace exists; the host app itself is not yet a design system.
+
+- [ ] Lovable-class host UI: interaction, layout, and a shared design system (tokens + components) for the editor chrome, not the generated apps
+
+**3. Visual Edit** — Preview iframe bridge exists (location / back-forward / Visual Picker).
 
 - [x] Visual picker: click a DOM node in Preview → chip in the composer (pick-to-chat)
 - Later: screenshot of the node, DOM → source mapping, inline style edits
 
-**3. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.
+**4. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.
 
 - [ ] Publish: one-click deploy from Freestyle `main` to a durable public URL
 - [ ] Generated-app backend: Auth, DB, Storage, Edge Functions
@@ -205,11 +210,11 @@ Next, in order:
 - [ ] Security gate before publish: secrets in git, `npm audit`, dangerous APIs (not a standalone scanner product)
 - Later: mobile (Expo / RN) as a second runtime — new snapshot, no iframe picker; do not start until Web can ship and take payment
 
-**4. Time travel** — Freestyle per-turn checkpoints already exist; History cannot restore yet.
+**5. Time travel** — Freestyle per-turn checkpoints already exist; History cannot restore yet.
 
 - [ ] Restore workspace + Preview from a checkpoint (code only; do not rewind chat)
 
-**5. Eval observability** — Vercel Workflow's own observability is still too weak for this product. The dashboard and step UI show that a workflow ran or retried; they do not score agent quality, persist structured traces, or compare prompt / model / tool-set changes. `[agent-trace]` stdout and CLI `agent.log` are grep-friendly, but they are not an eval system.
+**6. Eval observability** — Vercel Workflow's own observability is still too weak for this product. The dashboard and step UI show that a workflow ran or retried; they do not score agent quality, persist structured traces, or compare prompt / model / tool-set changes. `[agent-trace]` stdout and CLI `agent.log` are grep-friendly, but they are not an eval system.
 
 - [ ] Persist structured turn traces independently of Workflow (steps, tools, tokens, preview / browser outcomes)
 - [ ] Turn-level scores: task completion, compile health, `checkPreview`, browser accept, incomplete turns
