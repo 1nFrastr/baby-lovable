@@ -90,6 +90,8 @@ interface ChatProps {
   previewPicks?: PreviewElementPick[];
   onRemovePreviewPick?: (id: string) => void;
   onClearPreviewPicks?: () => void;
+  /** Exit Visual Picker when the composer is focused. */
+  onComposerFocus?: () => void;
 }
 
 export function Chat({
@@ -104,6 +106,7 @@ export function Chat({
   previewPicks = [],
   onRemovePreviewPick,
   onClearPreviewPicks,
+  onComposerFocus,
 }: ChatProps) {
   const transport = useMemo(
     () =>
@@ -585,6 +588,7 @@ export function Chat({
                     ? "cursor-not-allowed text-muted-foreground"
                     : undefined
                 }
+                onFocus={() => onComposerFocus?.()}
                 onChange={(event) => setSlashValue(event.target.value)}
                 onKeyDown={(event) => {
                   if (handleSlashKeyDown(event)) {

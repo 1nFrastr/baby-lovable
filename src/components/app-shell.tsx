@@ -40,7 +40,6 @@ import { SessionSidebar } from "./session-sidebar";
 import { WorkspaceMainSplit } from "./workspace-main-split";
 
 const GITHUB_REPO_URL = "https://github.com/1nFrastr/baby-lovable";
-const MAX_PREVIEW_PICKS = 8;
 
 /** Lucide dropped brand icons; keep a minimal GitHub mark here. */
 function GitHubIcon({ className }: { className?: string }) {
@@ -141,8 +140,10 @@ export function AppShell() {
   );
   /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
-  /** Visual Picker chips: Preview DOM picks awaiting send in the composer. */
+  /** Visual Picker: at most one chip in the composer (latest pick wins). */
   const [previewPicks, setPreviewPicks] = useState<PreviewElementPick[]>([]);
+  /** Bumped when the composer gains focus — Preview exits inspect mode. */
+  const [inspectExitKey, setInspectExitKey] = useState(0);
   const {
     containerRef,
     mainRef,
@@ -182,17 +183,7 @@ export function AppShell() {
   );
 
   const handleElementPicked = useCallback((element: PreviewElementPickPayload) => {
-    setPreviewPicks((prev) => {
-      const duplicate = prev.some(
-        (pick) =>
-          pick.selector === element.selector && pick.path === element.path,
-      );
-      if (duplicate) {
-        return prev;
-      }
-      const next: PreviewElementPick = { ...element, id: nanoid() };
-      return [...prev, next].slice(-MAX_PREVIEW_PICKS);
-    });
+    setPreviewPicks([{ ...element, id: nanoid() }]);
   }, []);
 
   const handleRemovePreviewPick = useCallback((id: string) => {
@@ -201,6 +192,10 @@ export function AppShell() {
 
   const handleClearPreviewPicks = useCallback(() => {
     setPreviewPicks([]);
+  }, []);
+
+  const handleComposerFocus = useCallback(() => {
+    setInspectExitKey((key) => key + 1);
   }, []);
 
   useEffect(() => {
@@ -456,6 +451,7 @@ export function AppShell() {
                   previewPicks={previewPicks}
                   onRemovePreviewPick={handleRemovePreviewPick}
                   onClearPreviewPicks={handleClearPreviewPicks}
+                  onComposerFocus={handleComposerFocus}
                 />
               }
               right={
@@ -478,6 +474,7 @@ export function AppShell() {
                   chatAppTest={chatAppTest}
                   chatAppTestReady={chatAppTestReady}
                   onElementPicked={handleElementPicked}
+                  inspectExitKey={inspectExitKey}
                 />
               }
             />

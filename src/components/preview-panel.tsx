@@ -67,6 +67,8 @@ interface PreviewPanelProps {
   chatAppTestReady?: boolean;
   /** Visual Picker: DOM pick from Preview → composer chip. */
   onElementPicked?: (element: PreviewElementPickPayload) => void;
+  /** Bumped by AppShell when the chat composer is focused — exit inspect. */
+  inspectExitKey?: number;
 }
 
 /** Keep PiP visible briefly after the run ends so the final frame is usable. */
@@ -191,6 +193,7 @@ export function PreviewPanel({
   chatAppTest = null,
   chatAppTestReady = false,
   onElementPicked,
+  inspectExitKey = 0,
 }: PreviewPanelProps) {
   const invalidateRuntime = useInvalidateSessionRuntime();
   const projection = runtimeProjection;
@@ -424,6 +427,17 @@ export function PreviewPanel({
   useEffect(() => {
     setInspectMode(false);
   }, [sessionId]);
+
+  // Composer focus (or any host request) leaves pick mode so typing is not blocked.
+  useEffect(() => {
+    if (inspectExitKey <= 0) {
+      return;
+    }
+    if (!inspectModeRef.current) {
+      return;
+    }
+    setInspectModeAndBridge(false);
+  }, [inspectExitKey, setInspectModeAndBridge]);
 
   // Re-assert inspect after soft remount / navigation so the new document matches toolbar.
   useEffect(() => {
