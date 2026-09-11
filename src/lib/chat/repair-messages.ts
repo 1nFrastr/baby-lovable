@@ -1,5 +1,7 @@
 import { isToolUIPart, type UIMessage } from "ai";
 
+import { isPreviewPickPart } from "@/lib/preview/bridge-protocol";
+
 import { isCompactionMessage, isSummaryMessage, summaryText } from "./compaction";
 
 function textOf(message: UIMessage): string {
@@ -35,6 +37,9 @@ export function isEmptyUiMessage(message: UIMessage): boolean {
       return part.text.trim().length > 0;
     }
     if (part.type === "file") {
+      return true;
+    }
+    if (isPreviewPickPart(part)) {
       return true;
     }
     if (isToolUIPart(part) && !isToolPartIncomplete(part)) {

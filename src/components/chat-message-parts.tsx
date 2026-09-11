@@ -14,6 +14,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
+import { UserMessagePreviewPickChips } from "@/components/preview-pick-chips";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import {
   USER_MESSAGE_IMAGE_FRAME_CLASS,
   USER_MESSAGE_IMAGE_TILE_CLASS,
 } from "@/lib/chat/user-message-gallery";
+import { collectPreviewPickParts } from "@/lib/preview/format-preview-pick";
 import { cn } from "@/lib/utils";
 import {
   isToolUIPart,
@@ -461,8 +463,13 @@ export function ChatMessageParts({
 }) {
   if (message.role === "user") {
     const text = collectTextParts(message);
+    const picks = collectPreviewPickParts(message.parts).map((part) => ({
+      ...part.data,
+      id: part.id,
+    }));
     return (
       <div className="flex flex-col gap-2">
+        <UserMessagePreviewPickChips picks={picks} />
         <UserMessageFiles parts={message.parts} sessionId={sessionId} />
         {text ? <UserMessageText text={text} /> : null}
       </div>

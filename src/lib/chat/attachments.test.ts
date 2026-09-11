@@ -124,6 +124,48 @@ describe("user message helpers", () => {
         url: "https://cdn.example/a.png",
       },
     ]);
+    expect(
+      buildUserMessageParts(
+        "make blue",
+        [],
+        [
+          {
+            tagName: "button",
+            selector: "button.primary",
+            path: "/",
+            componentName: "SaveButton",
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        type: "data-preview-pick",
+        data: {
+          tagName: "button",
+          selector: "button.primary",
+          path: "/",
+          componentName: "SaveButton",
+        },
+      },
+      { type: "text", text: "make blue" },
+    ]);
+  });
+
+  it("treats preview-pick-only rows as sendable", () => {
+    const message = user([
+      {
+        type: "data-preview-pick",
+        data: {
+          tagName: "button",
+          selector: "button",
+          path: "/",
+          componentName: "AddTodo",
+        },
+      },
+    ] as UIMessage["parts"]);
+    expect(isEmptyUiMessage(message)).toBe(false);
+    expect(isSendableUserMessage(message)).toBe(true);
+    expect(userMessagePreview(message)).toBe("AddTodo · button");
   });
 });
 
@@ -252,6 +294,31 @@ describe("expandAttachmentPartsForModel", () => {
     expect(
       expanded?.parts.filter((part) => part.type === "file"),
     ).toHaveLength(1);
+  });
+
+  it("expands data-preview-pick into model text and drops the data part", () => {
+    const message = user([
+      {
+        type: "data-preview-pick",
+        data: {
+          tagName: "button",
+          selector: 'button[aria-label="Add"]',
+          path: "/todos",
+          componentName: "AddTodoButton",
+          ariaLabel: "Add",
+        },
+      },
+      { type: "text", text: "Make this primary" },
+    ] as UIMessage["parts"]);
+
+    const [expanded] = expandAttachmentPartsForModel([message]);
+    expect(
+      expanded?.parts.some((part) => part.type === "data-preview-pick"),
+    ).toBe(false);
+    const text = expanded?.parts.find((part) => part.type === "text");
+    expect(text?.type === "text" && text.text).toContain("Selected in preview");
+    expect(text?.type === "text" && text.text).toContain("AddTodoButton");
+    expect(text?.type === "text" && text.text).toContain("Make this primary");
   });
 
   it("turns a file-only text attachment into a text part", () => {

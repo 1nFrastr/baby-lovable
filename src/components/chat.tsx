@@ -41,6 +41,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
 import { ChatTimeline } from "@/components/chat-compaction";
+import { PreviewPickChips } from "@/components/preview-pick-chips";
 import { SlashCommandMenu } from "@/components/slash-command-menu";
 import { useSlashCommandComposer } from "@/hooks/use-slash-command-composer";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
@@ -55,6 +56,9 @@ import {
 } from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
+import {
+  type PreviewElementPick,
+} from "@/lib/preview/format-preview-pick";
 import {
   isActiveRunStatus,
   type Session,
@@ -81,6 +85,12 @@ interface ChatProps {
   onAppTestStatus?: (
     status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
   ) => void;
+  /** Visual Picker chips from Preview (pick-to-chat). */
+  previewPicks?: PreviewElementPick[];
+  onRemovePreviewPick?: (id: string) => void;
+  onClearPreviewPicks?: () => void;
+  /** Exit Visual Picker when the composer is focused. */
+  onComposerFocus?: () => void;
 }
 
 export function Chat({
@@ -92,6 +102,10 @@ export function Chat({
   runStatus = "idle",
   onSessionRefresh,
   onAppTestStatus,
+  previewPicks = [],
+  onRemovePreviewPick,
+  onClearPreviewPicks,
+  onComposerFocus,
 }: ChatProps) {
   const transport = useMemo(
     () =>
@@ -230,12 +244,17 @@ export function Chat({
   }, [chatMessages, onAppTestStatus]);
 
   const sendUserMessage = useCallback(
-    (text: string, files: FileUIPart[] = []) => {
+    (
+      text: string,
+      files: FileUIPart[] = [],
+      picks: PreviewElementPick[] = [],
+    ) => {
       if (turnLocked) {
         return;
       }
 
-      const parts = buildUserMessageParts(text, files);
+      const pickPayloads = picks.map(({ id: _id, ...payload }) => payload);
+      const parts = buildUserMessageParts(text, files, pickPayloads);
       if (parts.length === 0) {
         return;
       }
@@ -313,7 +332,7 @@ export function Chat({
         const incoming = message.files ?? [];
         const parsed = resolveSubmit(message.text);
         if (parsed.kind === "empty") {
-          if (incoming.length === 0) {
+          if (incoming.length === 0 && previewPicks.length === 0) {
             return;
           }
         } else if (parsed.kind === "slash-draft") {
@@ -336,8 +355,9 @@ export function Chat({
           setCommandError(null);
         }
 
-        const text = parsed.kind === "empty" ? "" : parsed.text;
-        sendUserMessage(text, files);
+        const baseText = parsed.kind === "empty" ? "" : parsed.text;
+        sendUserMessage(baseText, files, previewPicks);
+        onClearPreviewPicks?.();
       } catch (cause) {
         if (
           cause instanceof Error &&
@@ -351,7 +371,15 @@ export function Chat({
         setUploadingAttachments(false);
       }
     },
-    [resolveSubmit, runSlashCommand, sendUserMessage, sessionId, turnLocked],
+    [
+      resolveSubmit,
+      runSlashCommand,
+      sendUserMessage,
+      sessionId,
+      turnLocked,
+      previewPicks,
+      onClearPreviewPicks,
+    ],
   );
 
   const handleRunAppTest = useCallback(() => {
@@ -537,6 +565,12 @@ export function Chat({
             onSubmit={handleSubmit}
           >
             <PromptInputBody>
+              {onRemovePreviewPick ? (
+                <PreviewPickChips
+                  picks={previewPicks}
+                  onRemove={onRemovePreviewPick}
+                />
+              ) : null}
               <PromptInputAttachments>
                 {(attachment) => (
                   <PromptInputAttachment data={attachment} />
@@ -557,6 +591,7 @@ export function Chat({
                     ? "cursor-not-allowed text-muted-foreground"
                     : undefined
                 }
+                onFocus={() => onComposerFocus?.()}
                 onChange={(event) => setSlashValue(event.target.value)}
                 onKeyDown={(event) => {
                   if (handleSlashKeyDown(event)) {
@@ -568,6 +603,19 @@ export function Chat({
                     !event.shiftKey
                   ) {
                     event.preventDefault();
+                    return;
+                  }
+                  if (
+                    event.key === "Backspace" &&
+                    event.currentTarget.value === "" &&
+                    previewPicks.length > 0 &&
+                    onRemovePreviewPick
+                  ) {
+                    event.preventDefault();
+                    const last = previewPicks.at(-1);
+                    if (last) {
+                      onRemovePreviewPick(last.id);
+                    }
                   }
                 }}
                 placeholder={composerPlaceholder}

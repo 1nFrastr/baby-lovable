@@ -8,6 +8,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { nanoid } from "nanoid";
 
 import {
   useCreateSessionMutation,
@@ -18,6 +19,10 @@ import {
   useSyncSessionSummary,
 } from "@/lib/session/queries";
 import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
+import type { PreviewElementPickPayload } from "@/lib/preview/bridge-protocol";
+import {
+  type PreviewElementPick,
+} from "@/lib/preview/format-preview-pick";
 import { useWorkspaceLayout } from "@/hooks/use-workspace-layout";
 import { useInvalidateSessionRuntime, useSessionRuntime } from "@/lib/session/runtime-query";
 import { cn } from "@/lib/utils";
@@ -135,6 +140,10 @@ export function AppShell() {
   );
   /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
   const [chatAppTestReady, setChatAppTestReady] = useState(false);
+  /** Visual Picker: at most one chip in the composer (latest pick wins). */
+  const [previewPicks, setPreviewPicks] = useState<PreviewElementPick[]>([]);
+  /** Bumped when the composer gains focus — Preview exits inspect mode. */
+  const [inspectExitKey, setInspectExitKey] = useState(0);
   const {
     containerRef,
     mainRef,
@@ -162,6 +171,7 @@ export function AppShell() {
   useEffect(() => {
     setChatAppTest(null);
     setChatAppTestReady(false);
+    setPreviewPicks([]);
   }, [activeSessionId]);
 
   const handleAppTestStatus = useCallback(
@@ -171,6 +181,22 @@ export function AppShell() {
     },
     [],
   );
+
+  const handleElementPicked = useCallback((element: PreviewElementPickPayload) => {
+    setPreviewPicks([{ ...element, id: nanoid() }]);
+  }, []);
+
+  const handleRemovePreviewPick = useCallback((id: string) => {
+    setPreviewPicks((prev) => prev.filter((pick) => pick.id !== id));
+  }, []);
+
+  const handleClearPreviewPicks = useCallback(() => {
+    setPreviewPicks([]);
+  }, []);
+
+  const handleComposerFocus = useCallback(() => {
+    setInspectExitKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -422,6 +448,10 @@ export function AppShell() {
                   runStatus={activeSession.runStatus}
                   onSessionRefresh={handleSessionRefresh}
                   onAppTestStatus={handleAppTestStatus}
+                  previewPicks={previewPicks}
+                  onRemovePreviewPick={handleRemovePreviewPick}
+                  onClearPreviewPicks={handleClearPreviewPicks}
+                  onComposerFocus={handleComposerFocus}
                 />
               }
               right={
@@ -443,6 +473,8 @@ export function AppShell() {
                   }
                   chatAppTest={chatAppTest}
                   chatAppTestReady={chatAppTestReady}
+                  onElementPicked={handleElementPicked}
+                  inspectExitKey={inspectExitKey}
                 />
               }
             />
