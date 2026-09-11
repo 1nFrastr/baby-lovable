@@ -13,6 +13,14 @@ export interface PreviewElementPick extends PreviewElementPickPayload {
 
 const MAX_SNIPPET = 80;
 
+/**
+ * Next.js / React framework fibers that leak into chip labels when picking
+ * layout roots (e.g. SegmentViewNode · main). Kept in sync with the starter
+ * bridge skip list so older sandboxes still render sane chips.
+ */
+const FRAMEWORK_COMPONENT_NAMES =
+  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition|SegmentViewNode|ClientSegmentRoot|OuterLayoutRouter|InnerLayoutRouter|RedirectBoundary|HTTPAccessFallbackBoundary|LoadingBoundary|NotFoundBoundary|DevRootHTTPAccessFallbackBoundary|ScrollAndFocusHandler|ScrollAndMaybeFocusHandler|RenderFromTemplateContext|AppRouter|HistoryUpdater|HotReload|ReactDevOverlay|AppDevOverlay|RootErrorBoundary|ErrorBoundaryHandler)$|Boundary$|LayoutRouter$/;
+
 export function truncatePickText(value: string, max = MAX_SNIPPET): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= max) {
@@ -21,33 +29,37 @@ export function truncatePickText(value: string, max = MAX_SNIPPET): string {
   return `${normalized.slice(0, max - 1)}…`;
 }
 
+function usableComponentName(name: string | undefined): string | undefined {
+  if (!name || FRAMEWORK_COMPONENT_NAMES.test(name)) {
+    return undefined;
+  }
+  return name;
+}
+
+/** `button:2` when the selector ends with nth-of-type; otherwise just the tag. */
+function previewPickLeafName(pick: PreviewElementPickPayload): string {
+  const nth = pick.selector.match(/:nth-of-type\((\d+)\)\s*$/i)?.[1];
+  return nth ? `${pick.tagName}:${nth}` : pick.tagName;
+}
+
 /**
- * Short semantic label for chips (Cursor-style): prefer React component name,
- * then accessible / visible text — not raw CSS selectors.
+ * Short chip label: React component + DOM leaf (`TodoList · input`),
+ * with optional nth index — not ids / aria / quoted text.
  */
 export function previewPickChipLabel(pick: PreviewElementPickPayload): string {
-  if (pick.componentName) {
-    return pick.componentName;
+  const leaf = previewPickLeafName(pick);
+  const componentName = usableComponentName(pick.componentName);
+  if (componentName) {
+    return `${componentName} · ${leaf}`;
   }
-  if (pick.ariaLabel) {
-    return `${pick.tagName} “${truncatePickText(pick.ariaLabel, 28)}”`;
-  }
-  if (pick.textSnippet) {
-    return `${pick.tagName} “${truncatePickText(pick.textSnippet, 28)}”`;
-  }
-  if (pick.testId) {
-    return `${pick.tagName}[${truncatePickText(pick.testId, 24)}]`;
-  }
-  if (pick.id) {
-    return `${pick.tagName}#${truncatePickText(pick.id, 24)}`;
-  }
-  return pick.tagName;
+  return leaf;
 }
 
 /** Tooltip / title with a bit more targeting context. */
 export function previewPickChipTitle(pick: PreviewElementPickPayload): string {
+  const componentName = usableComponentName(pick.componentName);
   const bits = [
-    pick.componentName ? `<${pick.componentName}>` : null,
+    componentName ? `<${componentName}>` : null,
     pick.tagName,
     pick.path,
     pick.selector,

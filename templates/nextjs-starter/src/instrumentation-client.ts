@@ -106,8 +106,9 @@ function nthOfTypeSelector(el: Element): string {
   return `${tag}:nth-of-type(${index})`;
 }
 
+/** React / Next internals — not useful as pick-to-chat chip names. */
 const SKIP_COMPONENT_NAMES =
-  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition)$/;
+  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition|SegmentViewNode|ClientSegmentRoot|OuterLayoutRouter|InnerLayoutRouter|RedirectBoundary|HTTPAccessFallbackBoundary|LoadingBoundary|NotFoundBoundary|DevRootHTTPAccessFallbackBoundary|ScrollAndFocusHandler|ScrollAndMaybeFocusHandler|RenderFromTemplateContext|AppRouter|HistoryUpdater|HotReload|ReactDevOverlay|AppDevOverlay|RootErrorBoundary|ErrorBoundaryHandler)$/;
 
 function normalizeComponentName(raw: string): string | undefined {
   const name = raw.split(".").pop()?.trim();
@@ -115,6 +116,10 @@ function normalizeComponentName(raw: string): string | undefined {
     return undefined;
   }
   if (SKIP_COMPONENT_NAMES.test(name)) {
+    return undefined;
+  }
+  // Next.js App Router / Flight wrappers often end with Boundary or Router.
+  if (/(?:Boundary|LayoutRouter)$/.test(name)) {
     return undefined;
   }
   // Prefer PascalCase user components (skip minified single-letter names).

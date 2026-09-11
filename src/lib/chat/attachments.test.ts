@@ -165,7 +165,7 @@ describe("user message helpers", () => {
     ] as UIMessage["parts"]);
     expect(isEmptyUiMessage(message)).toBe(false);
     expect(isSendableUserMessage(message)).toBe(true);
-    expect(userMessagePreview(message)).toBe("AddTodo");
+    expect(userMessagePreview(message)).toBe("AddTodo · button");
   });
 });
 
