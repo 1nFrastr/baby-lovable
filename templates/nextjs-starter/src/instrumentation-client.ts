@@ -118,8 +118,8 @@ function normalizeComponentName(raw: string): string | undefined {
   if (SKIP_COMPONENT_NAMES.test(name)) {
     return undefined;
   }
-  // Next.js App Router / Flight wrappers often end with Boundary or Router.
-  if (/(?:Boundary|LayoutRouter)$/.test(name)) {
+  // Next.js App Router / Flight wrappers (SegmentViewNode, *Context, *Router…).
+  if (/(?:Boundary|LayoutRouter|Context|Router)$/.test(name)) {
     return undefined;
   }
   // Prefer PascalCase user components (skip minified single-letter names).
