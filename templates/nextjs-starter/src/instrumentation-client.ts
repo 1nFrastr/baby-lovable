@@ -106,20 +106,56 @@ function nthOfTypeSelector(el: Element): string {
   return `${tag}:nth-of-type(${index})`;
 }
 
-/** React / Next internals — not useful as pick-to-chat chip names. */
-const SKIP_COMPONENT_NAMES =
-  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition|SegmentViewNode|ClientSegmentRoot|OuterLayoutRouter|InnerLayoutRouter|RedirectBoundary|HTTPAccessFallbackBoundary|LoadingBoundary|NotFoundBoundary|DevRootHTTPAccessFallbackBoundary|ScrollAndFocusHandler|ScrollAndMaybeFocusHandler|RenderFromTemplateContext|AppRouter|HistoryUpdater|HotReload|ReactDevOverlay|AppDevOverlay|RootErrorBoundary|ErrorBoundaryHandler)$/;
+/**
+ * React / Next.js framework fibers — keep aligned with
+ * `src/lib/preview/is-framework-component-name.ts` (host chip filter).
+ */
+function isFrameworkComponentName(name: string): boolean {
+  const trimmed = name.trim();
+  const wrapped = /^(?:ForwardRef|Memo)\((.+)\)$/.exec(trimmed);
+  const base =
+    (wrapped?.[1] ?? trimmed).split(".").pop()?.trim() || trimmed;
+  if (!base || base === "Anonymous" || base.startsWith("_")) {
+    return true;
+  }
+  if (
+    /^unstable_/.test(trimmed) ||
+    /^unstable_/.test(base) ||
+    /^Next\./.test(trimmed)
+  ) {
+    return true;
+  }
+  if (
+    /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition|Lazy|Memo|ForwardRef|HotReload|HistoryUpdater|AppDevOverlay|ReactDevOverlay|RootErrorBoundary|ErrorBoundaryHandler|ClientSegmentRoot|ClientPageRoot|InnerScrollHandlerNew|ScrollAndMaybeFocusHandler|ScrollAndFocusHandler|RenderFromTemplateContext|SegmentViewNode|SegmentViewStateNode|SegmentBoundaryTriggerNode)$/.test(
+      base,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /(?:Boundary|Context|Provider|Consumer|Router|Portal|Outlet|Fallback|ViewNode|ViewStateNode|TriggerNode|FocusHandler)$/.test(
+      base,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:Segment|ClientSegment|ClientPage|LoadingBoundary|NavigationPromises|GlobalLayout|MissingSlot|Pathname|SearchParams|PathParams|HeadManager|ImageConfig|AppRouter|DevRoot|HTTPAccess)/.test(
+      base,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
 
 function normalizeComponentName(raw: string): string | undefined {
-  const name = raw.split(".").pop()?.trim();
-  if (!name || name === "Anonymous" || name.startsWith("_")) {
+  if (isFrameworkComponentName(raw)) {
     return undefined;
   }
-  if (SKIP_COMPONENT_NAMES.test(name)) {
-    return undefined;
-  }
-  // Next.js App Router / Flight wrappers (SegmentViewNode, *Context, *Router…).
-  if (/(?:Boundary|LayoutRouter|Context|Router)$/.test(name)) {
+  const wrapped = /^(?:ForwardRef|Memo)\((.+)\)$/.exec(raw.trim());
+  const name = (wrapped?.[1] ?? raw).split(".").pop()?.trim();
+  if (!name || isFrameworkComponentName(name)) {
     return undefined;
   }
   // Prefer PascalCase user components (skip minified single-letter names).
