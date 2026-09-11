@@ -7,6 +7,9 @@
 
 export const PREVIEW_BRIDGE_SOURCE = "baby-lovable-preview" as const;
 
+/** Persisted UIMessage part — rendered as a chip; expanded to text for the model. */
+export const PREVIEW_PICK_PART_TYPE = "data-preview-pick" as const;
+
 export type PreviewNavigateAction = "back" | "forward" | "reload" | "home";
 
 export interface PreviewBridgeLocationMessage {
@@ -41,6 +44,8 @@ export interface PreviewBridgeInspectStateMessage {
 /** Child → parent: user clicked a DOM node while inspect is on. */
 export interface PreviewElementPickPayload {
   tagName: string;
+  /** Nearest React function/class displayName when available (Cursor-style). */
+  componentName?: string;
   id?: string;
   className?: string;
   textSnippet?: string;
@@ -51,6 +56,12 @@ export interface PreviewElementPickPayload {
   /** Preview route path when the element was picked (e.g. `/todos`). */
   path: string;
 }
+
+export type PreviewPickUIPart = {
+  type: typeof PREVIEW_PICK_PART_TYPE;
+  id?: string;
+  data: PreviewElementPickPayload;
+};
 
 export interface PreviewBridgeElementPickedMessage {
   source: typeof PREVIEW_BRIDGE_SOURCE;
@@ -89,10 +100,21 @@ export function isPreviewElementPickPayload(
     typeof v.tagName === "string" &&
     typeof v.selector === "string" &&
     typeof v.path === "string" &&
+    (v.componentName === undefined || typeof v.componentName === "string") &&
     (v.id === undefined || typeof v.id === "string") &&
     (v.className === undefined || typeof v.className === "string") &&
     (v.textSnippet === undefined || typeof v.textSnippet === "string") &&
     (v.ariaLabel === undefined || typeof v.ariaLabel === "string") &&
     (v.testId === undefined || typeof v.testId === "string")
   );
+}
+
+export function isPreviewPickPart(
+  part: unknown,
+): part is PreviewPickUIPart {
+  if (typeof part !== "object" || part === null) {
+    return false;
+  }
+  const p = part as { type?: unknown; data?: unknown };
+  return p.type === PREVIEW_PICK_PART_TYPE && isPreviewElementPickPayload(p.data);
 }

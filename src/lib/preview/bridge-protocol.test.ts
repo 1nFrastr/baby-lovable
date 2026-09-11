@@ -25,6 +25,7 @@ describe("bridge-protocol guards", () => {
         tagName: "button",
         selector: "button.primary",
         path: "/",
+        componentName: "AddButton",
       }),
     ).toBe(true);
     expect(

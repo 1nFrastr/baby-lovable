@@ -37,6 +37,7 @@ interface ElementPickedPayload {
   type: "element-picked";
   element: {
     tagName: string;
+    componentName?: string;
     id?: string;
     className?: string;
     textSnippet?: string;
@@ -105,6 +106,82 @@ function nthOfTypeSelector(el: Element): string {
   return `${tag}:nth-of-type(${index})`;
 }
 
+const SKIP_COMPONENT_NAMES =
+  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition)$/;
+
+function normalizeComponentName(raw: string): string | undefined {
+  const name = raw.split(".").pop()?.trim();
+  if (!name || name === "Anonymous" || name.startsWith("_")) {
+    return undefined;
+  }
+  if (SKIP_COMPONENT_NAMES.test(name)) {
+    return undefined;
+  }
+  // Prefer PascalCase user components (skip minified single-letter names).
+  if (!/^[A-Z][A-Za-z0-9]*$/.test(name) && name.length < 3) {
+    return undefined;
+  }
+  if (!/^[A-Z]/.test(name)) {
+    return undefined;
+  }
+  return name;
+}
+
+function nameFromComponentType(type: unknown): string | undefined {
+  if (typeof type === "function") {
+    const fn = type as { displayName?: string; name?: string };
+    return normalizeComponentName(fn.displayName || fn.name || "");
+  }
+  if (typeof type === "object" && type !== null) {
+    const obj = type as {
+      displayName?: string;
+      render?: { displayName?: string; name?: string };
+      type?: unknown;
+    };
+    const nested =
+      obj.displayName ||
+      obj.render?.displayName ||
+      obj.render?.name ||
+      "";
+    const fromNested = normalizeComponentName(nested);
+    if (fromNested) {
+      return fromNested;
+    }
+    return nameFromComponentType(obj.type);
+  }
+  return undefined;
+}
+
+/**
+ * Best-effort React fiber walk for a Cursor-style component node name.
+ * Production minification may hide names — fall back to tag / text in the host.
+ */
+function resolveReactComponentName(el: Element): string | undefined {
+  const fiberKey = Reflect.ownKeys(el).find((key) => {
+    const name = typeof key === "string" ? key : "";
+    return (
+      name.startsWith("__reactFiber$") ||
+      name.startsWith("__reactInternalInstance$")
+    );
+  });
+  if (typeof fiberKey !== "string") {
+    return undefined;
+  }
+
+  let fiber: { type?: unknown; return?: unknown } | null = (
+    el as unknown as Record<string, { type?: unknown; return?: unknown }>
+  )[fiberKey];
+
+  for (let depth = 0; fiber && depth < 30; depth += 1) {
+    const name = nameFromComponentType(fiber.type);
+    if (name) {
+      return name;
+    }
+    fiber = (fiber.return as typeof fiber) ?? null;
+  }
+  return undefined;
+}
+
 /** Best-effort unique-ish selector for the agent / chip label. */
 function buildSelector(el: Element): string {
   const testId = el.getAttribute("data-testid");
@@ -151,9 +228,11 @@ function describeElement(el: Element, path: string): ElementPickedPayload["eleme
   const ariaLabel = el.getAttribute("aria-label")?.trim() || undefined;
   const testId = el.getAttribute("data-testid")?.trim() || undefined;
   const id = el.id?.trim() || undefined;
+  const componentName = resolveReactComponentName(el);
 
   return {
     tagName: el.tagName.toLowerCase(),
+    componentName,
     id,
     className,
     textSnippet: ownTextSnippet(el),

@@ -1,5 +1,16 @@
 import type { FileUIPart, UIMessage } from "ai";
 
+import {
+  isPreviewPickPart,
+  type PreviewElementPickPayload,
+} from "@/lib/preview/bridge-protocol";
+import {
+  collectPreviewPickParts,
+  formatPreviewPicksForPrompt,
+  previewPickChipLabel,
+  toPreviewPickUIPart,
+} from "@/lib/preview/format-preview-pick";
+
 /** Per-file ceiling for composer uploads (raw bytes, before base64). */
 export const CHAT_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -445,8 +456,9 @@ export function describeLastUserPrompt(messages: UIMessage[]): string {
     return "last-user=none";
   }
   const files = collectFileParts(message);
+  const picks = collectPreviewPickParts(message.parts);
   const media = files.map((file) => file.mediaType).join(",") || "none";
-  return `last-user textChars=${collectUserText(message).length} fileParts=${files.length} media=[${media}]`;
+  return `last-user textChars=${collectUserText(message).length} fileParts=${files.length} previewPicks=${picks.length} media=[${media}]`;
 }
 
 /** Short label for titles, git trailers, and file-only bubbles. */
@@ -454,6 +466,14 @@ export function userMessagePreview(message: UIMessage): string {
   const text = collectUserText(message);
   if (text) {
     return text;
+  }
+  const picks = collectPreviewPickParts(message.parts);
+  if (picks.length > 0) {
+    const first = picks[0];
+    if (first) {
+      const label = previewPickChipLabel(first.data);
+      return picks.length === 1 ? label : `${label} +${picks.length - 1}`;
+    }
   }
   const files = collectFileParts(message);
   if (files.length === 0) {
@@ -473,7 +493,9 @@ export function isSendableUserMessage(message: UIMessage): boolean {
     return false;
   }
   return (
-    collectUserText(message).length > 0 || collectFileParts(message).length > 0
+    collectUserText(message).length > 0 ||
+    collectFileParts(message).length > 0 ||
+    collectPreviewPickParts(message.parts).length > 0
   );
 }
 
@@ -492,8 +514,12 @@ export function latestUserMessage(
 export function buildUserMessageParts(
   text: string,
   files: FileUIPart[] = [],
+  picks: PreviewElementPickPayload[] = [],
 ): UIMessage["parts"] {
   const parts: UIMessage["parts"] = [];
+  for (const pick of picks) {
+    parts.push(toPreviewPickUIPart(pick) as UIMessage["parts"][number]);
+  }
   const trimmed = text.trim();
   if (trimmed) {
     parts.push({ type: "text", text: trimmed });
@@ -692,8 +718,16 @@ export function expandAttachmentPartsForModel(
     }
 
     const extracted: string[] = [];
+    const pickBlocks: string[] = [];
     const parts: UIMessage["parts"] = [];
     for (const part of message.parts) {
+      if (isPreviewPickPart(part)) {
+        const block = formatPreviewPicksForPrompt([part.data]);
+        if (block) {
+          pickBlocks.push(block);
+        }
+        continue;
+      }
       if (part.type !== "file") {
         parts.push(part);
         continue;
@@ -731,8 +765,24 @@ export function expandAttachmentPartsForModel(
       parts.push(part);
     }
 
+    if (pickBlocks.length > 0) {
+      const pickText = pickBlocks.join("\n\n");
+      const textIndex = parts.findIndex((part) => part.type === "text");
+      if (textIndex >= 0) {
+        const current = parts[textIndex];
+        if (current?.type === "text") {
+          parts[textIndex] = {
+            type: "text",
+            text: `${pickText}\n\n${current.text.trim()}`,
+          };
+        }
+      } else {
+        parts.unshift({ type: "text", text: pickText });
+      }
+    }
+
     if (extracted.length === 0) {
-      return parts === message.parts ? message : { ...message, parts };
+      return { ...message, parts };
     }
 
     const extra = extracted.join("\n\n");

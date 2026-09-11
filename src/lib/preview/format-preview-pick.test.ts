@@ -24,12 +24,13 @@ describe("formatPreviewPicksForPrompt", () => {
     expect(formatPreviewPicksForPrompt([])).toBe("");
   });
 
-  it("formats picks with path and selector", () => {
-    const text = formatPreviewPicksForPrompt([samplePick()]);
+  it("formats picks with component name when present", () => {
+    const text = formatPreviewPicksForPrompt([
+      samplePick({ componentName: "AddTodoButton" }),
+    ]);
     expect(text).toContain("Selected in preview");
-    expect(text).toContain("<button> on `/todos`");
+    expect(text).toContain("component `AddTodoButton`");
     expect(text).toContain('`button[aria-label="Add todo"]`');
-    expect(text).toContain('text "Add"');
   });
 });
 
@@ -37,32 +38,45 @@ describe("mergeTextWithPreviewPicks", () => {
   it("returns only pick block when text is empty", () => {
     const merged = mergeTextWithPreviewPicks("  ", [samplePick()]);
     expect(merged.startsWith("Selected in preview")).toBe(true);
-    expect(merged).not.toMatch(/\n\n$/);
   });
 
   it("prepends pick block before user text", () => {
     const merged = mergeTextWithPreviewPicks("Make it blue", [samplePick()]);
     expect(merged).toMatch(/^Selected in preview[\s\S]*\n\nMake it blue$/);
   });
-
-  it("passes through text when no picks", () => {
-    expect(mergeTextWithPreviewPicks("  hello  ", [])).toBe("hello");
-  });
 });
 
 describe("previewPickChipLabel", () => {
-  it("prefers test id, then id, then aria-label", () => {
-    expect(
-      previewPickChipLabel(samplePick({ testId: "add-btn" })),
-    ).toBe('[data-testid="add-btn"]');
-    expect(previewPickChipLabel(samplePick({ id: "cta", testId: undefined }))).toBe(
-      "#cta",
-    );
+  it("prefers React component name", () => {
     expect(
       previewPickChipLabel(
-        samplePick({ id: undefined, testId: undefined, ariaLabel: "Save" }),
+        samplePick({ componentName: "AddTodoButton", testId: "add" }),
       ),
-    ).toBe('button[aria-label="Save"]');
+    ).toBe("AddTodoButton");
+  });
+
+  it("falls back to aria / text / tag without CSS selectors", () => {
+    expect(
+      previewPickChipLabel(
+        samplePick({ componentName: undefined, testId: undefined }),
+      ),
+    ).toBe('button “Add todo”');
+    expect(
+      previewPickChipLabel(
+        samplePick({
+          componentName: undefined,
+          ariaLabel: undefined,
+          textSnippet: "Save",
+        }),
+      ),
+    ).toBe('button “Save”');
+    expect(
+      previewPickChipLabel({
+        tagName: "div",
+        selector: "div > span:nth-of-type(2)",
+        path: "/",
+      }),
+    ).toBe("div");
   });
 });
 

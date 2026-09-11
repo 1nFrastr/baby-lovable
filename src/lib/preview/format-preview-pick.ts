@@ -1,4 +1,9 @@
-import type { PreviewElementPickPayload } from "@/lib/preview/bridge-protocol";
+import {
+  isPreviewPickPart,
+  PREVIEW_PICK_PART_TYPE,
+  type PreviewElementPickPayload,
+  type PreviewPickUIPart,
+} from "@/lib/preview/bridge-protocol";
 
 /** Composer / chat chip for a preview DOM pick (pick-to-chat). */
 export interface PreviewElementPick extends PreviewElementPickPayload {
@@ -16,28 +21,42 @@ export function truncatePickText(value: string, max = MAX_SNIPPET): string {
   return `${normalized.slice(0, max - 1)}…`;
 }
 
-/** Short label for the composer chip. */
+/**
+ * Short semantic label for chips (Cursor-style): prefer React component name,
+ * then accessible / visible text — not raw CSS selectors.
+ */
 export function previewPickChipLabel(pick: PreviewElementPickPayload): string {
-  if (pick.testId) {
-    return `[data-testid="${truncatePickText(pick.testId, 32)}"]`;
-  }
-  if (pick.id) {
-    return `#${truncatePickText(pick.id, 40)}`;
+  if (pick.componentName) {
+    return pick.componentName;
   }
   if (pick.ariaLabel) {
-    return `${pick.tagName}[aria-label="${truncatePickText(pick.ariaLabel, 28)}"]`;
+    return `${pick.tagName} “${truncatePickText(pick.ariaLabel, 28)}”`;
   }
   if (pick.textSnippet) {
     return `${pick.tagName} “${truncatePickText(pick.textSnippet, 28)}”`;
   }
-  return pick.selector.length <= 48
-    ? pick.selector
-    : `${pick.selector.slice(0, 47)}…`;
+  if (pick.testId) {
+    return `${pick.tagName}[${truncatePickText(pick.testId, 24)}]`;
+  }
+  if (pick.id) {
+    return `${pick.tagName}#${truncatePickText(pick.id, 24)}`;
+  }
+  return pick.tagName;
+}
+
+/** Tooltip / title with a bit more targeting context. */
+export function previewPickChipTitle(pick: PreviewElementPickPayload): string {
+  const bits = [
+    pick.componentName ? `<${pick.componentName}>` : null,
+    pick.tagName,
+    pick.path,
+    pick.selector,
+  ].filter(Boolean);
+  return bits.join(" · ");
 }
 
 /**
- * Serialize picks into user message text so the agent sees edit targets
- * without a new UIMessage part type / Storage path.
+ * Model-facing targeting text (not shown in the chat bubble UI).
  */
 export function formatPreviewPicksForPrompt(
   picks: PreviewElementPickPayload[],
@@ -47,7 +66,11 @@ export function formatPreviewPicksForPrompt(
   }
 
   const lines = picks.map((pick, index) => {
-    const details: string[] = [`\`${pick.selector}\``];
+    const details: string[] = [];
+    if (pick.componentName) {
+      details.push(`component \`${pick.componentName}\``);
+    }
+    details.push(`\`${pick.selector}\``);
     if (pick.ariaLabel) {
       details.push(`aria-label "${truncatePickText(pick.ariaLabel)}"`);
     }
@@ -66,6 +89,7 @@ export function formatPreviewPicksForPrompt(
   ].join("\n");
 }
 
+/** @deprecated Prefer data-preview-pick parts; kept for tests / migration. */
 export function mergeTextWithPreviewPicks(
   text: string,
   picks: PreviewElementPickPayload[],
@@ -79,4 +103,22 @@ export function mergeTextWithPreviewPicks(
     return pickBlock;
   }
   return `${pickBlock}\n\n${trimmed}`;
+}
+
+export function toPreviewPickUIPart(
+  pick: PreviewElementPickPayload,
+  id?: string,
+): PreviewPickUIPart {
+  const { ...data } = pick;
+  return {
+    type: PREVIEW_PICK_PART_TYPE,
+    id,
+    data,
+  };
+}
+
+export function collectPreviewPickParts(
+  parts: ReadonlyArray<{ type: string }>,
+): PreviewPickUIPart[] {
+  return parts.filter(isPreviewPickPart);
 }

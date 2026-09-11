@@ -57,7 +57,6 @@ import {
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
 import {
-  mergeTextWithPreviewPicks,
   type PreviewElementPick,
 } from "@/lib/preview/format-preview-pick";
 import {
@@ -245,12 +244,17 @@ export function Chat({
   }, [chatMessages, onAppTestStatus]);
 
   const sendUserMessage = useCallback(
-    (text: string, files: FileUIPart[] = []) => {
+    (
+      text: string,
+      files: FileUIPart[] = [],
+      picks: PreviewElementPick[] = [],
+    ) => {
       if (turnLocked) {
         return;
       }
 
-      const parts = buildUserMessageParts(text, files);
+      const pickPayloads = picks.map(({ id: _id, ...payload }) => payload);
+      const parts = buildUserMessageParts(text, files, pickPayloads);
       if (parts.length === 0) {
         return;
       }
@@ -352,8 +356,7 @@ export function Chat({
         }
 
         const baseText = parsed.kind === "empty" ? "" : parsed.text;
-        const text = mergeTextWithPreviewPicks(baseText, previewPicks);
-        sendUserMessage(text, files);
+        sendUserMessage(baseText, files, previewPicks);
         onClearPreviewPicks?.();
       } catch (cause) {
         if (
