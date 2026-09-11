@@ -15,11 +15,12 @@ const MAX_SNIPPET = 80;
 
 /**
  * Next.js / React framework fibers that leak into chip labels when picking
- * layout roots (e.g. SegmentViewNode · main). Kept in sync with the starter
- * bridge skip list so older sandboxes still render sane chips.
+ * layout roots (e.g. SegmentViewNode · main, LayoutRouterContext · main).
+ * Kept in sync with the starter bridge skip list so older sandboxes still
+ * render sane chips.
  */
 const FRAMEWORK_COMPONENT_NAMES =
-  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition|SegmentViewNode|ClientSegmentRoot|OuterLayoutRouter|InnerLayoutRouter|RedirectBoundary|HTTPAccessFallbackBoundary|LoadingBoundary|NotFoundBoundary|DevRootHTTPAccessFallbackBoundary|ScrollAndFocusHandler|ScrollAndMaybeFocusHandler|RenderFromTemplateContext|AppRouter|HistoryUpdater|HotReload|ReactDevOverlay|AppDevOverlay|RootErrorBoundary|ErrorBoundaryHandler)$|Boundary$|LayoutRouter$/;
+  /^(Fragment|Suspense|StrictMode|Profiler|Provider|Consumer|Activity|ViewTransition|SegmentViewNode|ClientSegmentRoot|OuterLayoutRouter|InnerLayoutRouter|RedirectBoundary|HTTPAccessFallbackBoundary|LoadingBoundary|NotFoundBoundary|DevRootHTTPAccessFallbackBoundary|ScrollAndFocusHandler|ScrollAndMaybeFocusHandler|RenderFromTemplateContext|AppRouter|HistoryUpdater|HotReload|ReactDevOverlay|AppDevOverlay|RootErrorBoundary|ErrorBoundaryHandler)$|(?:Boundary|LayoutRouter|Context|Router)$/;
 
 export function truncatePickText(value: string, max = MAX_SNIPPET): string {
   const normalized = value.replace(/\s+/g, " ").trim();

@@ -85,6 +85,17 @@ describe("previewPickChipLabel", () => {
         }),
       ),
     ).toBe("main");
+    expect(
+      previewPickChipLabel(
+        samplePick({
+          componentName: "LayoutRouterContext",
+          tagName: "main",
+          selector: "main",
+          ariaLabel: undefined,
+          textSnippet: undefined,
+        }),
+      ),
+    ).toBe("main");
   });
 
   it("falls back to tag / nth without ids", () => {
