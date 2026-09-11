@@ -278,18 +278,9 @@ export function PreviewPanel({
   const previewEmbedUrl =
     previewAction === "restart" ? undefined : readyPreviewUrl;
   const previewIframeKey = `${previewEmbedUrl ?? ""}::${previewGeneration}::${embedRemountNonce}`;
-  const previewIframeKeyRef = useRef(previewIframeKey);
   const iframeLoaded =
     Boolean(previewEmbedUrl) && loadedIframeKey === previewIframeKey;
   iframeLoadedRef.current = iframeLoaded;
-
-  useEffect(() => {
-    previewIframeKeyRef.current = previewIframeKey;
-  }, [previewIframeKey]);
-
-  const markIframeLoaded = useCallback((key = previewIframeKeyRef.current) => {
-    setLoadedIframeKey(key);
-  }, []);
 
   // The root document can become reachable just before its CSS chunks do.
   // Retry one full navigation after ready; unlike HMR, this reloads failed
@@ -307,21 +298,6 @@ export function PreviewPanel({
     return () => window.clearTimeout(timer);
   }, [readyPreviewUrl, previewGeneration]);
 
-  // If onLoad is missed after a soft remount (cross-origin / proxy), don't leave
-  // the host stuck on "Preview is ready; rendering the page…".
-  useEffect(() => {
-    if (!previewEmbedUrl || iframeLoaded) {
-      return;
-    }
-    const key = previewIframeKey;
-    const timer = window.setTimeout(() => {
-      if (previewIframeKeyRef.current === key) {
-        markIframeLoaded(key);
-      }
-    }, 8_000);
-    return () => window.clearTimeout(timer);
-  }, [previewEmbedUrl, previewIframeKey, iframeLoaded, markIframeLoaded]);
-
   // Prefetch the file tree as soon as the preview iframe is ready so the Files
   // tab opens without a first-click wait.
   useEffect(() => {
@@ -334,7 +310,6 @@ export function PreviewPanel({
   useEffect(() => {
     setPreviewRefreshPending(false);
     setIframeLocation(null);
-    setLoadedIframeKey(null);
     setFilesBusy(false);
   }, [sessionId]);
 
@@ -373,8 +348,6 @@ export function PreviewPanel({
         }
         const path = data.path || "/";
         const href = typeof data.href === "string" ? data.href : path;
-        // Bridge init posts location — treat as embed-ready even if onLoad is late.
-        markIframeLoaded();
         setIframeLocation((prev) => ({
           href,
           path,
@@ -408,7 +381,7 @@ export function PreviewPanel({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [readyPreviewUrl, markIframeLoaded]);
+  }, [readyPreviewUrl]);
 
   const postInspectMode = useCallback(
     (enabled: boolean) => {
@@ -1177,7 +1150,7 @@ export function PreviewPanel({
                 key={previewIframeKey}
                 src={previewIframeSrc}
                 title="App preview"
-                onLoad={() => markIframeLoaded()}
+                onLoad={() => setLoadedIframeKey(previewIframeKey)}
                 className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${
                   iframeLoaded ? "opacity-100" : "opacity-0"
                 }`}
