@@ -1,4 +1,4 @@
-import type { FileUIPart } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 
 import { parseAttachmentId } from "@/lib/chat/attachments";
 import {
@@ -40,6 +40,26 @@ export function shouldQueueComposerSubmit(options: {
   summarizing: boolean;
 }): boolean {
   return options.turnLocked && !options.summarizing;
+}
+
+export function collectUserMessageIds(
+  messages: readonly Pick<UIMessage, "id" | "role">[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "user" && message.id) {
+      ids.add(message.id);
+    }
+  }
+  return ids;
+}
+
+/** Drop queue rows only after the session snapshot (or live thread) has that user id. */
+export function queueItemsNotYetSent(
+  items: readonly QueuedChatMessage[],
+  knownUserMessageIds: ReadonlySet<string>,
+): QueuedChatMessage[] {
+  return items.filter((item) => !knownUserMessageIds.has(item.id));
 }
 
 function parseQueuedFile(value: unknown): FileUIPart | null {

@@ -5,6 +5,8 @@ import {
   chatQueueStorageKey,
   getChatMessageQueueSnapshot,
   parseChatMessageQueue,
+  collectUserMessageIds,
+  queueItemsNotYetSent,
   queuedMessageHasContent,
   readChatMessageQueue,
   replaceChatMessageQueue,
@@ -123,6 +125,16 @@ describe("chat message queue", () => {
     expect(
       queuedMessageHasContent({ text: "hi", files: [], picks: [] }),
     ).toBe(true);
+  });
+
+  it("hides queue rows once that user message id is in history", () => {
+    const ids = collectUserMessageIds([
+      { id: "q_1", role: "user" },
+      { id: "a_1", role: "assistant" },
+    ]);
+    expect(ids.has("q_1")).toBe(true);
+    expect(queueItemsNotYetSent([sample], ids)).toEqual([]);
+    expect(queueItemsNotYetSent([sample], new Set())).toEqual([sample]);
   });
 
   it("queues while a turn is locked but not while summarizing", () => {

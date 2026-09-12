@@ -9,10 +9,12 @@ import { cn } from "@/lib/utils";
 
 function QueueItem({
   item,
+  sending,
   onRemove,
   onUpdateText,
 }: {
   item: QueuedChatMessage;
+  sending: boolean;
   onRemove: (id: string) => void;
   onUpdateText: (id: string, text: string) => void;
 }) {
@@ -55,7 +57,7 @@ function QueueItem({
     <li className="group rounded-lg border border-zinc-200 bg-zinc-50/90 px-2.5 py-2 dark:border-zinc-800 dark:bg-zinc-900/80">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          {editing ? (
+          {editing && !sending ? (
             <textarea
               ref={inputRef}
               aria-label="Edit queued message"
@@ -98,25 +100,33 @@ function QueueItem({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition group-hover:opacity-100">
-          <button
-            aria-label="Edit queued message"
-            className="flex size-6 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-            onClick={() => {
-              setDraft(item.text);
-              setEditing(true);
-            }}
-            type="button"
-          >
-            <Pencil className="size-3" />
-          </button>
-          <button
-            aria-label="Remove queued message"
-            className="flex size-6 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-            onClick={() => onRemove(item.id)}
-            type="button"
-          >
-            <XIcon className="size-3.5" />
-          </button>
+          {sending ? (
+            <span className="px-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              Sending…
+            </span>
+          ) : (
+            <>
+              <button
+                aria-label="Edit queued message"
+                className="flex size-6 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                onClick={() => {
+                  setDraft(item.text);
+                  setEditing(true);
+                }}
+                type="button"
+              >
+                <Pencil className="size-3" />
+              </button>
+              <button
+                aria-label="Remove queued message"
+                className="flex size-6 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                onClick={() => onRemove(item.id)}
+                type="button"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </li>
@@ -125,11 +135,13 @@ function QueueItem({
 
 export function ChatMessageQueue({
   items,
+  sendingId,
   onRemove,
   onUpdateText,
   className,
 }: {
   items: QueuedChatMessage[];
+  sendingId?: string | null;
   onRemove: (id: string) => void;
   onUpdateText: (id: string, text: string) => void;
   className?: string;
@@ -154,6 +166,7 @@ export function ChatMessageQueue({
           <QueueItem
             key={item.id}
             item={item}
+            sending={item.id === sendingId}
             onRemove={onRemove}
             onUpdateText={onUpdateText}
           />

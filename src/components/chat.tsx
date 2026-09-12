@@ -60,6 +60,8 @@ import {
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import {
   CHAT_QUEUE_MAX_ITEMS,
+  collectUserMessageIds,
+  queueItemsNotYetSent,
   shouldQueueComposerSubmit,
 } from "@/lib/chat/message-queue";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
@@ -78,10 +80,6 @@ const APP_TEST_USER_PROMPT =
 
 /** Cap streamed UI updates so long reasoning/markdown does not trip React #185. */
 const CHAT_STREAM_THROTTLE_MS = 50;
-
-/** Survives Strict Mode remount so a flushed follow-up is not sent twice. */
-const queueFlushInflight = new Map<string, string>();
-const queueFlushActive = new Set<string>();
 
 interface ChatProps {
   sessionId: string;
@@ -166,6 +164,10 @@ export function Chat({
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const submitInFlightRef = useRef(false);
   const sendStartedRef = useRef(false);
+  const attemptedFlushIdsRef = useRef(new Set<string>());
+  const flushBlockRef = useRef<{ id: string; revision: number } | null>(
+    null,
+  );
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const lastSyncedRevisionRef = useRef(conversationRevision);
 
@@ -180,30 +182,41 @@ export function Chat({
     if (!pendingUserMessageId) {
       return;
     }
-    if (
-      messages.some((message) => message.id === pendingUserMessageId) ||
-      status === "error"
-    ) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- server acknowledged or rejected this send
+    if (messages.some((message) => message.id === pendingUserMessageId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- server persisted this send
       setPendingUserMessageId(null);
     }
-  }, [messages, pendingUserMessageId, status]);
+  }, [messages, pendingUserMessageId]);
 
   useEffect(() => {
     if (localUserMessageId) {
       const terminalSnapshotReady =
         !serverTurnActive && serverHasLocalUser;
-      const rejectedBeforeClaim =
-        status === "error" && !serverTurnActive;
-      if (!terminalSnapshotReady && !rejectedBeforeClaim) {
+      if (terminalSnapshotReady) {
+        lastSyncedRevisionRef.current = conversationRevision;
+        setMessages(messages);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- hand display ownership back to authoritative snapshot
+        setLocalUserMessageId(null);
+        setPendingUserMessageId(null);
         return;
       }
 
-      lastSyncedRevisionRef.current = conversationRevision;
-      setMessages(messages);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- hand display ownership back to authoritative snapshot
-      setLocalUserMessageId(null);
-      setPendingUserMessageId(null);
+      const streamFailedBeforeSnapshot =
+        status === "error" && !serverTurnActive && !serverHasLocalUser;
+      if (streamFailedBeforeSnapshot) {
+        lastSyncedRevisionRef.current = conversationRevision;
+        setMessages(messages);
+        flushBlockRef.current = {
+          id: localUserMessageId,
+          revision: conversationRevision,
+        };
+        attemptedFlushIdsRef.current.delete(localUserMessageId);
+        sendStartedRef.current = false;
+        setLocalUserMessageId(null);
+        setPendingUserMessageId(null);
+        return;
+      }
+
       return;
     }
 
@@ -271,7 +284,7 @@ export function Chat({
       text: string,
       files: FileUIPart[] = [],
       picks: PreviewElementPick[] = [],
-      options?: { clearComposer?: boolean },
+      options?: { clearComposer?: boolean; id?: string },
     ) => {
       if (turnLocked || sendStartedRef.current) {
         return false;
@@ -294,7 +307,7 @@ export function Chat({
 
       sendStartedRef.current = true;
 
-      const userMessageId = generateId();
+      const userMessageId = options?.id ?? generateId();
       setLocalUserMessageId(userMessageId);
       setPendingUserMessageId(userMessageId);
       setStopError(null);
@@ -492,49 +505,74 @@ export function Chat({
   }, [queueFollowUp, queueMode, sendUserMessage]);
 
   const canFlushQueue = !turnLocked && !uploadingAttachments;
+  const serverUserIds = useMemo(
+    () => collectUserMessageIds(messages),
+    [messages],
+  );
+  const liveUserIds = useMemo(
+    () => collectUserMessageIds(chatMessages),
+    [chatMessages],
+  );
+  const visibleQueuedItems = queueItemsNotYetSent(
+    queuedItems,
+    new Set([...serverUserIds, ...liveUserIds]),
+  );
 
   useEffect(() => {
     if (!turnLocked) {
       sendStartedRef.current = false;
-      queueFlushActive.delete(sessionId);
     }
-  }, [sessionId, turnLocked]);
+  }, [turnLocked]);
+
+  useEffect(() => {
+    for (const item of queuedItems) {
+      if (serverUserIds.has(item.id)) {
+        removeQueued(item.id);
+      }
+    }
+  }, [queuedItems, removeQueued, serverUserIds]);
 
   useEffect(() => {
     if (!canFlushQueue) {
       return;
     }
     if (queuedItems.length === 0) {
-      queueFlushInflight.delete(sessionId);
-      return;
-    }
-    if (queueFlushActive.has(sessionId)) {
       return;
     }
     const next = queuedItems[0];
     if (!next) {
       return;
     }
-    if (queueFlushInflight.get(sessionId) === next.id) {
+    if (serverUserIds.has(next.id) || liveUserIds.has(next.id)) {
       return;
     }
-    queueFlushActive.add(sessionId);
-    queueFlushInflight.set(sessionId, next.id);
-    removeQueued(next.id);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- dequeue then send when the active turn becomes idle
+    const blocked = flushBlockRef.current;
+    if (
+      blocked &&
+      blocked.id === next.id &&
+      blocked.revision === conversationRevision
+    ) {
+      return;
+    }
+    if (attemptedFlushIdsRef.current.has(next.id)) {
+      return;
+    }
+    attemptedFlushIdsRef.current.add(next.id);
+    flushBlockRef.current = null;
     const sent = sendUserMessage(next.text, next.files, next.picks, {
       clearComposer: false,
+      id: next.id,
     });
     if (!sent) {
-      queueFlushActive.delete(sessionId);
-      queueFlushInflight.delete(sessionId);
+      attemptedFlushIdsRef.current.delete(next.id);
     }
   }, [
     canFlushQueue,
+    conversationRevision,
+    liveUserIds,
     queuedItems,
-    removeQueued,
     sendUserMessage,
-    sessionId,
+    serverUserIds,
   ]);
 
   const handleStop = useCallback(() => {
@@ -631,11 +669,11 @@ export function Chat({
         ? "Queue a follow-up…"
         : "Describe the app, or paste / drop a screenshot";
   const queuedHint =
-    queuedItems.length === 0
+    visibleQueuedItems.length === 0
       ? ""
-      : queuedItems.length === 1
+      : visibleQueuedItems.length === 1
         ? " - 1 queued"
-        : ` - ${queuedItems.length} queued`;
+        : ` - ${visibleQueuedItems.length} queued`;
   const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop
@@ -711,7 +749,8 @@ export function Chat({
             </p>
           ) : null}
           <ChatMessageQueue
-            items={queuedItems}
+            items={visibleQueuedItems}
+            sendingId={pendingUserMessageId}
             onRemove={removeQueued}
             onUpdateText={(id, text) => updateQueued(id, { text })}
           />
