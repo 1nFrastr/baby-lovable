@@ -244,6 +244,7 @@ export class FakeDaytonaGitRunner implements DaytonaGitRunner {
   remoteUrl: string | null = null;
   failPush = false;
   failPushOnce = false;
+  failPushError: string | null = null;
   emptyRemote = false;
 
   async status(): Promise<GitStatusSnapshot> {
@@ -308,6 +309,9 @@ export class FakeDaytonaGitRunner implements DaytonaGitRunner {
   async push(..._args: [FreestyleGitCredentials?, string?]): Promise<void> {
     void _args;
     this.calls.push("push");
+    if (this.failPushError) {
+      throw new Error(this.failPushError);
+    }
     if (this.failPush || this.failPushOnce) {
       this.failPushOnce = false;
       throw new Error("simulated push failure");

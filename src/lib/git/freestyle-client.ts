@@ -2,6 +2,8 @@ import { Freestyle } from "freestyle";
 
 import {
   FREESTYLE_GIT_USERNAME,
+  GIT_AUTHOR_EMAIL,
+  GIT_AUTHOR_NAME,
   freestyleRemoteUrl,
   getFreestyleApiKey,
   isFreestyleConfigured,
@@ -23,6 +25,12 @@ export interface FreestyleGithubSyncConfig {
   githubRepoName: string;
 }
 
+export interface FreestyleCommitFile {
+  path: string;
+  content: string;
+  encoding: "utf8" | "base64";
+}
+
 export interface FreestyleAdapter {
   createPrivateRepo(options: {
     name: string;
@@ -32,12 +40,41 @@ export interface FreestyleAdapter {
   deleteRepo(repoId: string): Promise<void>;
   /** Source-tree zip at a revision (no `.git` history). */
   downloadRepoZip(repoId: string, rev?: string): Promise<Uint8Array>;
+  /**
+   * Create a commit from files (orphan branch if `main` does not exist).
+   * Used to seed empty remotes and to push when Daytona git cannot speak
+   * Freestyle's empty-repo receive-pack advertisement.
+   */
+  createCommit(input: {
+    repoId: string;
+    message: string;
+    branch?: string;
+    files: FreestyleCommitFile[];
+  }): Promise<string>;
   enableGithubSync(
     repoId: string,
     githubRepoName: string,
   ): Promise<void>;
   getGithubSync(repoId: string): Promise<FreestyleGithubSyncConfig | null>;
   disableGithubSync(repoId: string): Promise<void>;
+}
+
+function extractCommitSha(result: unknown): string | null {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  const obj = result as Record<string, unknown>;
+  if (typeof obj.sha === "string") {
+    return obj.sha;
+  }
+  const commit = obj.commit;
+  if (commit && typeof commit === "object") {
+    const sha = (commit as { sha?: unknown }).sha;
+    if (typeof sha === "string") {
+      return sha;
+    }
+  }
+  return null;
 }
 
 class LiveFreestyleAdapter implements FreestyleAdapter {
@@ -90,6 +127,38 @@ class LiveFreestyleAdapter implements FreestyleAdapter {
       rev ? { rev } : undefined,
     );
     return new Uint8Array(buffer);
+  }
+
+  async createCommit(input: {
+    repoId: string;
+    message: string;
+    branch?: string;
+    files: FreestyleCommitFile[];
+  }): Promise<string> {
+    const repo = this.client.git.repos.ref({ repoId: input.repoId });
+    const branch = input.branch ?? "main";
+    const result = await repo.commits.create({
+      message: input.message,
+      branch,
+      files: input.files,
+      author: { name: GIT_AUTHOR_NAME, email: GIT_AUTHOR_EMAIL },
+    });
+
+    const sha = extractCommitSha(result);
+    if (sha) {
+      return sha;
+    }
+
+    const listed = (await repo.commits.list({
+      branch,
+      limit: 1,
+      order: "desc",
+    })) as { commits?: Array<{ sha?: string }> };
+    const tip = listed.commits?.[0]?.sha;
+    if (!tip) {
+      throw new Error("Freestyle commit did not return a SHA");
+    }
+    return tip;
   }
 
   async enableGithubSync(
@@ -169,6 +238,13 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
   createCalls = 0;
   tokenCalls = 0;
   deleteCalls = 0;
+  createCommitCalls = 0;
+  lastCommit: {
+    repoId: string;
+    message: string;
+    files: FreestyleCommitFile[];
+  } | null = null;
+  commitSha = "e".repeat(40);
   enableGithubSyncCalls = 0;
   disableGithubSyncCalls = 0;
   /** When set, next enableGithubSync throws this message. */
@@ -202,6 +278,21 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
     this.deleteCalls += 1;
     this.repos.delete(repoId);
     this.githubSync.delete(repoId);
+  }
+
+  async createCommit(input: {
+    repoId: string;
+    message: string;
+    branch?: string;
+    files: FreestyleCommitFile[];
+  }): Promise<string> {
+    this.createCommitCalls += 1;
+    this.lastCommit = {
+      repoId: input.repoId,
+      message: input.message,
+      files: input.files,
+    };
+    return this.commitSha;
   }
 
   async downloadRepoZip(repoId: string, _rev?: string): Promise<Uint8Array> {

@@ -1,6 +1,7 @@
 import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
 
 import { getFreestyleAdapter } from "./freestyle-client";
+import { isEmptyRemoteGitError } from "./empty-remote-error";
 import {
   ensureFreestyleRepository,
   markRepositoryProvisionError,
@@ -16,29 +17,13 @@ export interface HydrateResult {
   error?: string;
 }
 
-function isEmptyRemoteError(error: unknown): boolean {
-  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  return (
-    msg.includes("couldn't find remote ref") ||
-    msg.includes("could not find remote ref") ||
-    msg.includes("no upstream") ||
-    msg.includes("doesn't have any refs") ||
-    msg.includes("does not have any refs") ||
-    msg.includes("empty repository") ||
-    msg.includes("remote empty") ||
-    msg.includes("git-upload-pack") ||
-    msg.includes("connection reset") ||
-    msg.includes("repository not found") ||
-    msg.includes("illegal zero-id")
-  );
-}
-
 /**
  * Prepare Daytona workspace from Freestyle `main` using Daytona SDK git.
  *
- * Empty remotes are seeded once via Freestyle Commits API (host), because
- * Daytona SDK cannot push the first commit to an empty Freestyle repo.
- * After that, hydrate uses SDK pull/checkout only.
+ * Freestyle repos are seeded at provision (Commits API) so Daytona never has
+ * to git-push the first commit. Hydrate then pull/checkout. An empty-remote
+ * pull is retried after a second seed; if Daytona still cannot see `main`,
+ * provision fails — writes stay blocked until git is actually ready.
  */
 export async function hydrateWorkspaceFromFreestyle(
   sessionId: string,
@@ -62,19 +47,6 @@ export async function hydrateWorkspaceFromFreestyle(
     const credentials = await getFreestyleAdapter().issueWriteToken(identityId);
     const branch = repo.defaultBranch || "main";
 
-    // First bind: seed empty Freestyle repo from host, then pull into sandbox.
-    if (!repo.remoteHeadSha) {
-      const sha = await seedEmptyFreestyleRepo(repoId);
-      const { updateGitRepositoryWithRetry } = await import(
-        "./repository-store"
-      );
-      repo = await updateGitRepositoryWithRetry(
-        sessionId,
-        () => ({ remoteHeadSha: sha }),
-        userId,
-      );
-    }
-
     if (!(await git.isRepoInitialized())) {
       await git.initMain();
     } else {
@@ -87,24 +59,29 @@ export async function hydrateWorkspaceFromFreestyle(
       await git.pull(credentials, branch);
       await git.checkoutBranch(branch);
     } catch (pullError) {
-      if (!isEmptyRemoteError(pullError)) {
+      if (!isEmptyRemoteGitError(pullError)) {
         throw pullError;
       }
-      // Remote still empty somehow — seed again then pull.
-      if (repoId) {
-        const sha = await seedEmptyFreestyleRepo(repoId);
-        await git.pull(credentials, branch);
-        await git.checkoutBranch(branch);
-        await markRepositoryReady(sessionId, sha, userId);
-        return { ok: true, remoteHeadSha: sha, mode: "init-push" };
-      }
-      throw pullError;
+      const sha = await seedEmptyFreestyleRepo(repoId);
+      const { updateGitRepositoryWithRetry } = await import(
+        "./repository-store"
+      );
+      repo = await updateGitRepositoryWithRetry(
+        sessionId,
+        () => ({ remoteHeadSha: sha }),
+        userId,
+      );
+      await git.pull(credentials, branch);
+      await git.checkoutBranch(branch);
+      await markRepositoryReady(sessionId, sha, userId);
+      return { ok: true, remoteHeadSha: sha, mode: "init-push" };
     }
 
-    await markRepositoryReady(sessionId, repo.remoteHeadSha, userId);
+    const headSha = (await git.getHeadSha()) ?? repo.remoteHeadSha;
+    await markRepositoryReady(sessionId, headSha, userId);
     return {
       ok: true,
-      remoteHeadSha: repo.remoteHeadSha,
+      remoteHeadSha: headSha,
       mode: "pull",
     };
   } catch (error) {

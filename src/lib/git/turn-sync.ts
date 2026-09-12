@@ -1,5 +1,7 @@
 import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
 
+import { commitWorkspaceViaFreestyleApi } from "./commit-workspace";
+import { isZeroIdRefError } from "./empty-remote-error";
 import { getFreestyleAdapter } from "./freestyle-client";
 import { redactSecrets } from "./provision-repo";
 import { readGitRepository, updateGitRepositoryWithRetry } from "./repository-store";
@@ -220,7 +222,25 @@ export async function runTurnCheckpoint(
         );
         return conflict;
       }
-      throw pushError;
+      if (
+        isZeroIdRefError(pushError) &&
+        repo.repoId &&
+        repo.remoteUrl &&
+        repo.identityId
+      ) {
+        console.warn(
+          `[git] Daytona push hit empty-remote zero-id; falling back to Freestyle Commits API session=${sessionId} run=${runId}`,
+        );
+        localSha = await commitWorkspaceViaFreestyleApi(project, {
+          repoId: repo.repoId,
+          remoteUrl: repo.remoteUrl,
+          identityId: repo.identityId,
+          branch: repo.defaultBranch || "main",
+          message: task.commitMessage,
+        });
+      } else {
+        throw pushError;
+      }
     }
 
     const done = await updateGitSyncTaskWithRetry(
@@ -228,6 +248,7 @@ export async function runTurnCheckpoint(
       runId,
       () => ({
         status: "synced",
+        localCommitSha: localSha,
         remoteSha: localSha,
         leaseOwner: null,
         leaseExpiresAt: null,
