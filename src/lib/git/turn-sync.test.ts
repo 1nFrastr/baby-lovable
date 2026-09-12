@@ -14,6 +14,66 @@ import {
 import { enqueueTurnCheckpoint, runTurnCheckpoint } from "./turn-sync";
 import { FakeDaytonaGitRunner } from "@/lib/sandbox/daytona/git-runner";
 import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
+import type { FileInfo, SandboxFileSystem } from "@/lib/sandbox/types";
+
+const ZERO_ID_PUSH_ERROR =
+  "internal server error: pkt-line 3: malformed zero-id ref ( capabilitiesside-band-64k side-band report-status delete-refs quiet shallow)";
+
+function memoryWorkspaceFs(files: Record<string, string>): SandboxFileSystem {
+  const list = (dirPath: string): FileInfo[] => {
+    const prefix =
+      !dirPath || dirPath === "." ? "" : `${dirPath.replace(/\/$/, "")}/`;
+    const seen = new Set<string>();
+    const entries: FileInfo[] = [];
+    for (const path of Object.keys(files)) {
+      if (prefix && !path.startsWith(prefix)) {
+        continue;
+      }
+      const rest = prefix ? path.slice(prefix.length) : path;
+      const segment = rest.split("/")[0];
+      if (!segment || seen.has(segment)) {
+        continue;
+      }
+      seen.add(segment);
+      const full = prefix ? `${prefix}${segment}` : segment;
+      const isDir = Object.keys(files).some((candidate) =>
+        candidate.startsWith(`${full}/`),
+      );
+      entries.push({
+        name: segment,
+        path: full,
+        isDir,
+        size: isDir ? 0 : (files[full]?.length ?? 0),
+      });
+    }
+    return entries;
+  };
+
+  return {
+    listFiles: async (path = ".") => list(path),
+    readTextFile: async (path) => {
+      const content = files[path];
+      if (content == null) {
+        throw new Error(`missing ${path}`);
+      }
+      return content;
+    },
+    readBinaryFile: async () => new Uint8Array(),
+    writeTextFile: async () => undefined,
+    writeBinaryFile: async () => undefined,
+    createFolder: async () => undefined,
+    deleteFile: async () => undefined,
+    moveFiles: async () => undefined,
+    searchFiles: async () => [],
+    searchContent: async () => [],
+    getFileDetails: async (path) => ({
+      name: path.split("/").pop() ?? path,
+      path,
+      isDir: false,
+      size: files[path]?.length ?? 0,
+    }),
+  };
+}
 
 describe("git repository + turn sync", () => {
   let adapter: FakeFreestyleAdapter;
@@ -35,12 +95,17 @@ describe("git repository + turn sync", () => {
     delete process.env.FREESTYLE_API_KEY;
   });
 
-  function fakeProject(): DaytonaProjectSandbox {
+  function fakeProject(
+    files: Record<string, string> = {
+      "package.json": '{"name":"app"}',
+      "src/app/page.tsx": "export default function Page() { return null; }",
+    },
+  ): DaytonaProjectSandbox {
     return {
       id: "sess_test",
       description: "fake",
       rootDir: "/home/daytona/workspace",
-      fs: {} as DaytonaProjectSandbox["fs"],
+      fs: memoryWorkspaceFs(files),
       process: {
         executeCommand: vi.fn(async () => {
           throw new Error("shell git must not be called");
@@ -56,10 +121,14 @@ describe("git repository + turn sync", () => {
     expect(repo.repoId).toBeTruthy();
     expect(repo.identityId).toBeTruthy();
     expect(adapter.createCalls).toBe(1);
+    expect(adapter.createCommitCalls).toBe(1);
+    expect(adapter.lastCommit?.message).toMatch(/init/i);
+    expect(repo.remoteHeadSha).toBeNull();
 
     const again = await ensureFreestyleRepository("sess_test");
     expect(again.repoId).toBe(repo.repoId);
     expect(adapter.createCalls).toBe(1);
+    expect(adapter.createCommitCalls).toBe(1);
   });
 
   it("enqueues idempotent sync tasks per runId", async () => {
@@ -237,5 +306,38 @@ describe("git repository + turn sync", () => {
     await runTurnCheckpoint("sess_test", "run_5", project);
 
     expect(project.process.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("falls back to Freestyle Commits API when Daytona push hits zero-id", async () => {
+    await ensureFreestyleRepository("sess_test");
+    git.dirty = true;
+    git.failPushError = ZERO_ID_PUSH_ERROR;
+
+    await enqueueTurnCheckpoint({
+      sessionId: "sess_test",
+      runId: "run_zero",
+      outcome: "completed",
+      commitMessage: "turn-zero: first push",
+    });
+
+    const result = await runTurnCheckpoint(
+      "sess_test",
+      "run_zero",
+      fakeProject(),
+    );
+
+    expect(result.status).toBe("synced");
+    expect(result.remoteSha).toBe(adapter.commitSha);
+    expect(adapter.createCommitCalls).toBeGreaterThanOrEqual(2);
+    expect(adapter.lastCommit?.message).toBe("turn-zero: first push");
+    expect(adapter.lastCommit?.files.some((file) => file.path === "src/app/page.tsx")).toBe(
+      true,
+    );
+    expect(git.calls).toContain("push");
+    expect(git.calls).toContain("pull");
+
+    const repo = await readGitRepository("sess_test");
+    expect(repo?.syncStatus).toBe("synced");
+    expect(repo?.remoteHeadSha).toBe(adapter.commitSha);
   });
 });

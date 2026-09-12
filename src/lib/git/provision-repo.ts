@@ -7,6 +7,7 @@ import {
   ensureGitRepository,
   updateGitRepositoryWithRetry,
 } from "./repository-store";
+import { seedEmptyFreestyleRepo } from "./seed-remote";
 import type { SessionGitRepository } from "./types";
 
 /**
@@ -56,7 +57,7 @@ export async function ensureFreestyleRepository(
     defaultBranch: "main",
   });
 
-  return updateGitRepositoryWithRetry(
+  const bound = await updateGitRepositoryWithRetry(
     sessionId,
     (repo) => {
       // Another worker may have won the create race — keep existing binding.
@@ -74,6 +75,17 @@ export async function ensureFreestyleRepository(
     },
     userId,
   );
+
+  // Seed `main` immediately via Commits API so Daytona git never talks to an
+  // empty Freestyle remote (`malformed zero-id ref`). Do not store
+  // remoteHeadSha here — that would make first-sandbox create block on pull
+  // and delay preview; snapshot already has the starter tree. Seed failure
+  // fails provision: writes must not proceed against an empty remote.
+  if (!bound.repoId) {
+    throw new Error("Freestyle repository binding incomplete after create");
+  }
+  await seedEmptyFreestyleRepo(bound.repoId);
+  return bound;
 }
 
 export async function markRepositoryReady(
