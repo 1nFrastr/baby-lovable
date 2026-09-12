@@ -9,9 +9,10 @@ export const SESSION_SCHEMA_VERSION = 4;
 export type UserId = string | null;
 
 /**
- * Server-owned chat-turn lifecycle. Composer lock and Stop follow this field
+ * Server-owned chat-turn lifecycle. Stop and immediate-send follow this field
  * together with `activeTurnId`; clients must not infer sendability from a
- * local stream alone.
+ * local stream alone. The composer stays editable during an active turn and
+ * queues follow-ups until the turn is idle.
  */
 export type SessionRunStatus =
   | "idle"

@@ -34,6 +34,7 @@ import {
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
+  PromptInputStop,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
@@ -41,8 +42,10 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { ChatActivityLabel } from "@/components/chat-activity-label";
 import { ChatTimeline } from "@/components/chat-compaction";
+import { ChatMessageQueue } from "@/components/chat-message-queue";
 import { PreviewPickChips } from "@/components/preview-pick-chips";
 import { SlashCommandMenu } from "@/components/slash-command-menu";
+import { useQueuedChatMessages } from "@/hooks/use-queued-chat-messages";
 import { useSlashCommandComposer } from "@/hooks/use-slash-command-composer";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
 import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
@@ -55,6 +58,10 @@ import {
   uploadSessionAttachments,
 } from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
+import {
+  CHAT_QUEUE_MAX_ITEMS,
+  shouldQueueComposerSubmit,
+} from "@/lib/chat/message-queue";
 import type { SlashCommand } from "@/lib/chat/slash-commands";
 import {
   type PreviewElementPick,
@@ -71,6 +78,10 @@ const APP_TEST_USER_PROMPT =
 
 /** Cap streamed UI updates so long reasoning/markdown does not trip React #185. */
 const CHAT_STREAM_THROTTLE_MS = 50;
+
+/** Survives Strict Mode remount so a flushed follow-up is not sent twice. */
+const queueFlushInflight = new Map<string, string>();
+const queueFlushActive = new Set<string>();
 
 interface ChatProps {
   sessionId: string;
@@ -154,6 +165,7 @@ export function Chat({
   const [commandError, setCommandError] = useState<string | null>(null);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const submitInFlightRef = useRef(false);
+  const sendStartedRef = useRef(false);
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const lastSyncedRevisionRef = useRef(conversationRevision);
 
@@ -212,12 +224,23 @@ export function Chat({
     status,
   ]);
 
+  const {
+    items: queuedItems,
+    enqueue: enqueueQueued,
+    remove: removeQueued,
+    update: updateQueued,
+  } = useQueuedChatMessages(sessionId);
   const turnLocked =
     stopping ||
     summarizing ||
     Boolean(pendingUserMessageId) ||
     serverTurnActive;
-  const composerLocked = turnLocked || uploadingAttachments;
+  const queueMode =
+    shouldQueueComposerSubmit({
+      turnLocked,
+      summarizing,
+    }) || queuedItems.length > 0;
+  const composerLocked = summarizing || uploadingAttachments;
   const slash = useSlashCommandComposer({
     disabled: composerLocked,
     surface: "web",
@@ -248,16 +271,28 @@ export function Chat({
       text: string,
       files: FileUIPart[] = [],
       picks: PreviewElementPick[] = [],
+      options?: { clearComposer?: boolean },
     ) => {
-      if (turnLocked) {
-        return;
+      if (turnLocked || sendStartedRef.current) {
+        return false;
       }
 
-      const pickPayloads = picks.map(({ id: _id, ...payload }) => payload);
+      const pickPayloads = picks.map((pick) => ({
+        tagName: pick.tagName,
+        selector: pick.selector,
+        path: pick.path,
+        ...(pick.componentName ? { componentName: pick.componentName } : {}),
+        ...(pick.className ? { className: pick.className } : {}),
+        ...(pick.textSnippet ? { textSnippet: pick.textSnippet } : {}),
+        ...(pick.ariaLabel ? { ariaLabel: pick.ariaLabel } : {}),
+        ...(pick.testId ? { testId: pick.testId } : {}),
+      }));
       const parts = buildUserMessageParts(text, files, pickPayloads);
       if (parts.length === 0) {
-        return;
+        return false;
       }
+
+      sendStartedRef.current = true;
 
       const userMessageId = generateId();
       setLocalUserMessageId(userMessageId);
@@ -265,7 +300,9 @@ export function Chat({
       setStopError(null);
       setCommandError(null);
       setCancelledHint(false);
-      clearSlash();
+      if (options?.clearComposer !== false) {
+        clearSlash();
+      }
 
       void sendMessage({
         id: userMessageId,
@@ -275,13 +312,48 @@ export function Chat({
         onSessionRefresh?.();
       });
       onSessionRefresh?.();
+      return true;
     },
     [turnLocked, onSessionRefresh, sendMessage, clearSlash],
   );
 
+  const queueFollowUp = useCallback(
+    (
+      text: string,
+      files: FileUIPart[] = [],
+      picks: PreviewElementPick[] = [],
+    ) => {
+      const item = {
+        id: generateId(),
+        text,
+        files,
+        picks,
+        createdAt: Date.now(),
+      };
+      if (queuedItems.length >= CHAT_QUEUE_MAX_ITEMS) {
+        setCommandError(
+          `Queue is full (${CHAT_QUEUE_MAX_ITEMS}). Wait for a follow-up to send.`,
+        );
+        return false;
+      }
+      if (!enqueueQueued(item)) {
+        setCommandError("Could not queue that follow-up.");
+        return false;
+      }
+      setCommandError(null);
+      return true;
+    },
+    [enqueueQueued, queuedItems.length],
+  );
+
   const runSlashCommand = useCallback(
     async (command: SlashCommand, args: string) => {
-      if (composerLocked || command.name !== "summarize") {
+      if (
+        turnLocked ||
+        uploadingAttachments ||
+        queuedItems.length > 0 ||
+        command.name !== "summarize"
+      ) {
         return;
       }
 
@@ -318,12 +390,20 @@ export function Chat({
         setSummarizing(false);
       }
     },
-    [clearSlash, composerLocked, onSessionRefresh, sessionId, setMessages],
+    [
+      clearSlash,
+      onSessionRefresh,
+      queuedItems.length,
+      sessionId,
+      setMessages,
+      turnLocked,
+      uploadingAttachments,
+    ],
   );
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
-      if (turnLocked || submitInFlightRef.current) {
+      if (composerLocked || submitInFlightRef.current) {
         throw new Error("Composer is busy");
       }
       submitInFlightRef.current = true;
@@ -341,6 +421,14 @@ export function Chat({
           setCommandError(`Unknown command: /${parsed.name}`);
           throw new Error(`Unknown command: /${parsed.name}`);
         } else if (parsed.kind === "command") {
+          if (queueMode) {
+            setCommandError(
+              "Wait until the current turn finishes to run /summarize",
+            );
+            throw new Error(
+              "Wait until the current turn finishes to run /summarize",
+            );
+          }
           void runSlashCommand(parsed.command, parsed.args);
           return;
         }
@@ -356,6 +444,15 @@ export function Chat({
         }
 
         const baseText = parsed.kind === "empty" ? "" : parsed.text;
+        if (queueMode || queuedItems.length > 0 || sendStartedRef.current) {
+          if (!queueFollowUp(baseText, files, previewPicks)) {
+            throw new Error("Could not queue that follow-up.");
+          }
+          clearSlash();
+          onClearPreviewPicks?.();
+          return;
+        }
+
         sendUserMessage(baseText, files, previewPicks);
         onClearPreviewPicks?.();
       } catch (cause) {
@@ -372,19 +469,73 @@ export function Chat({
       }
     },
     [
+      clearSlash,
+      composerLocked,
+      onClearPreviewPicks,
+      previewPicks,
+      queueFollowUp,
+      queueMode,
+      queuedItems.length,
       resolveSubmit,
       runSlashCommand,
       sendUserMessage,
       sessionId,
-      turnLocked,
-      previewPicks,
-      onClearPreviewPicks,
     ],
   );
 
   const handleRunAppTest = useCallback(() => {
+    if (queueMode || sendStartedRef.current) {
+      queueFollowUp(APP_TEST_USER_PROMPT);
+      return;
+    }
     sendUserMessage(APP_TEST_USER_PROMPT);
-  }, [sendUserMessage]);
+  }, [queueFollowUp, queueMode, sendUserMessage]);
+
+  const canFlushQueue = !turnLocked && !uploadingAttachments;
+
+  useEffect(() => {
+    if (!turnLocked) {
+      sendStartedRef.current = false;
+      queueFlushActive.delete(sessionId);
+    }
+  }, [sessionId, turnLocked]);
+
+  useEffect(() => {
+    if (!canFlushQueue) {
+      return;
+    }
+    if (queuedItems.length === 0) {
+      queueFlushInflight.delete(sessionId);
+      return;
+    }
+    if (queueFlushActive.has(sessionId)) {
+      return;
+    }
+    const next = queuedItems[0];
+    if (!next) {
+      return;
+    }
+    if (queueFlushInflight.get(sessionId) === next.id) {
+      return;
+    }
+    queueFlushActive.add(sessionId);
+    queueFlushInflight.set(sessionId, next.id);
+    removeQueued(next.id);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- dequeue then send when the active turn becomes idle
+    const sent = sendUserMessage(next.text, next.files, next.picks, {
+      clearComposer: false,
+    });
+    if (!sent) {
+      queueFlushActive.delete(sessionId);
+      queueFlushInflight.delete(sessionId);
+    }
+  }, [
+    canFlushQueue,
+    queuedItems,
+    removeQueued,
+    sendUserMessage,
+    sessionId,
+  ]);
 
   const handleStop = useCallback(() => {
     if (stopping || !showStop) {
@@ -467,27 +618,33 @@ export function Chat({
     !composerLocked &&
     chatMessages.some((message) => message.role === "assistant");
 
-  const submitStatus = stopping || showStop
-    ? "streaming"
-    : status === "error"
+  const submitStatus = summarizing || uploadingAttachments
+    ? "submitted"
+    : status === "error" && !queueMode
       ? "error"
-      : summarizing || pendingUserMessageId || uploadingAttachments
-        ? "submitted"
-        : "ready";
-  const composerPlaceholder = stopping
-    ? "Stopping… you can send again after cancel succeeds"
-    : summarizing
-      ? "Summarizing conversation…"
-      : "Describe the app, or paste / drop a screenshot";
+      : "ready";
+  const composerPlaceholder = summarizing
+    ? "Summarizing conversation…"
+    : stopping
+      ? "Queue a follow-up — sends after stop"
+      : queueMode
+        ? "Queue a follow-up…"
+        : "Describe the app, or paste / drop a screenshot";
+  const queuedHint =
+    queuedItems.length === 0
+      ? ""
+      : queuedItems.length === 1
+        ? " - 1 queued"
+        : ` - ${queuedItems.length} queued`;
   const sessionStatusHint = stopping || runStatus === "cancelling"
     ? " - Stopping…"
     : showStop
-      ? " - Generating…"
+      ? ` - Generating…${queuedHint}`
       : pendingUserMessageId || uploadingAttachments
         ? " - Sending…"
         : cancelledHint
           ? " - Stopped"
-          : "";
+          : queuedHint;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" ref={dropTargetRef}>
@@ -553,6 +710,11 @@ export function Chat({
               {commandError}
             </p>
           ) : null}
+          <ChatMessageQueue
+            items={queuedItems}
+            onRemove={removeQueued}
+            onUpdateText={(id, text) => updateQueued(id, { text })}
+          />
           <PromptInput
             accept={CHAT_ATTACHMENT_ACCEPT}
             disabled={composerLocked}
@@ -631,19 +793,30 @@ export function Chat({
                   <PromptInputButton
                     disabled={composerLocked}
                     onClick={handleRunAppTest}
-                    tooltip="Send a message asking the agent to run a happy-path UI test"
+                    tooltip={
+                      queueMode
+                        ? "Queue a happy-path UI test after this reply"
+                        : "Send a message asking the agent to run a happy-path UI test"
+                    }
                   >
                     <FlaskConical className="size-4" />
                     Auto Test
                   </PromptInputButton>
                 ) : null}
               </PromptInputTools>
-              <PromptInputSubmit
-                disabled={composerLocked && !showStop}
-                onStop={showStop ? handleStop : undefined}
-                status={submitStatus}
-                stopping={stopping}
-              />
+              <div className="flex items-center gap-1">
+                {showStop || stopping ? (
+                  <PromptInputStop
+                    onStop={showStop ? handleStop : undefined}
+                    stopping={stopping}
+                  />
+                ) : null}
+                <PromptInputSubmit
+                  disabled={composerLocked}
+                  queueMode={queueMode}
+                  status={submitStatus}
+                />
+              </div>
             </PromptInputFooter>
           </PromptInput>
         </div>

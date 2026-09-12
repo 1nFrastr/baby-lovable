@@ -50,6 +50,7 @@ import {
   CornerDownLeftIcon,
   FileIcon,
   ImageIcon,
+  ListPlusIcon,
   Monitor,
   PlusIcon,
   SquareIcon,
@@ -1386,6 +1387,54 @@ export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
   onStop?: () => void;
   /** Cancel request in flight — button is not a send control. */
   stopping?: boolean;
+  /** Agent is busy: submit enqueues a follow-up instead of sending now. */
+  queueMode?: boolean;
+};
+
+export const PromptInputStop = ({
+  className,
+  stopping = false,
+  disabled,
+  onStop,
+  ...props
+}: Omit<ComponentProps<typeof InputGroupButton>, "onClick" | "type"> & {
+  stopping?: boolean;
+  onStop?: () => void;
+}) => {
+  const tooltip = stopping ? "Stopping…" : "Stop generating";
+  const button = (
+    <InputGroupButton
+      aria-busy={stopping || undefined}
+      aria-disabled={stopping || undefined}
+      aria-label={stopping ? "Stopping" : "Stop"}
+      className={cn(!stopping && "cursor-pointer shadow-sm", className)}
+      disabled={disabled}
+      onClick={(event) => {
+        event.preventDefault();
+        if (!stopping) {
+          onStop?.();
+        }
+      }}
+      size="icon-sm"
+      title={tooltip}
+      type="button"
+      variant={stopping ? "secondary" : "destructive"}
+      {...props}
+    >
+      {stopping ? <Spinner /> : <SquareIcon className="size-3.5 fill-current" />}
+    </InputGroupButton>
+  );
+
+  if (stopping) {
+    return button;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
 };
 
 export const PromptInputSubmit = ({
@@ -1395,13 +1444,14 @@ export const PromptInputSubmit = ({
   status,
   onStop,
   stopping = false,
+  queueMode = false,
   disabled,
   onClick,
   children,
   ...props
 }: PromptInputSubmitProps) => {
   const isGenerating = status === "submitted" || status === "streaming";
-  const showStop = Boolean(!stopping && isGenerating && onStop);
+  const showStop = Boolean(!stopping && isGenerating && onStop && !queueMode);
   const isBusy = stopping || showStop;
 
   let Icon = <CornerDownLeftIcon className="size-4" />;
@@ -1409,7 +1459,11 @@ export const PromptInputSubmit = ({
   let buttonVariant = variant;
   let tooltip: string | undefined;
 
-  if (stopping) {
+  if (queueMode && !showStop) {
+    Icon = <ListPlusIcon className="size-4" />;
+    ariaLabel = "Queue";
+    tooltip = "Queue — sends after this reply";
+  } else if (stopping) {
     Icon = <Spinner />;
     ariaLabel = "Stopping";
     buttonVariant = "secondary";
