@@ -21,6 +21,7 @@ import {
   PREVIEW_BRIDGE_SOURCE,
   type PreviewElementPickPayload,
 } from "@/lib/preview/bridge-protocol";
+import type { PreviewViewportMode } from "@/lib/preview/viewport";
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import {
   type SessionRuntimeProjection,
@@ -33,6 +34,10 @@ import {
 
 import { DevServerLogsPanel } from "./dev-server-logs-panel";
 import { GithubSyncPanel } from "./github-sync-panel";
+import {
+  PreviewViewportFrame,
+  PreviewViewportToggle,
+} from "./preview-viewport";
 import { SourceControlStatusChip } from "./source-control-status";
 import { VersionHistoryPanel } from "./version-history-panel";
 import { WorkspaceFileExplorer } from "./workspace-file-explorer";
@@ -250,6 +255,8 @@ export function PreviewPanel({
   const [inspectMode, setInspectMode] = useState(false);
   const inspectModeRef = useRef(false);
   const onElementPickedRef = useRef(onElementPicked);
+  const [previewViewport, setPreviewViewport] =
+    useState<PreviewViewportMode>("desktop");
 
   useEffect(() => {
     inspectModeRef.current = inspectMode;
@@ -1048,6 +1055,10 @@ export function PreviewPanel({
             >
               <MousePointer2 className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
+            <PreviewViewportToggle
+              mode={previewViewport}
+              onChange={setPreviewViewport}
+            />
           </div>
           <p
             className="min-w-0 flex-1 truncate rounded-md border border-zinc-200 bg-white px-2.5 py-1 font-mono text-[11px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
@@ -1145,17 +1156,19 @@ export function PreviewPanel({
                   </button>
                 </div>
               ) : null}
-              <iframe
-                ref={previewIframeRef}
-                key={previewIframeKey}
-                src={previewIframeSrc}
-                title="App preview"
-                onLoad={() => setLoadedIframeKey(previewIframeKey)}
-                className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${
-                  iframeLoaded ? "opacity-100" : "opacity-0"
-                }`}
-                allow="accelerometer; camera; microphone; clipboard-write"
-              />
+              <PreviewViewportFrame mode={previewViewport}>
+                <iframe
+                  ref={previewIframeRef}
+                  key={previewIframeKey}
+                  src={previewIframeSrc}
+                  title="App preview"
+                  onLoad={() => setLoadedIframeKey(previewIframeKey)}
+                  className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${
+                    iframeLoaded ? "opacity-100" : "opacity-0"
+                  }`}
+                  allow="accelerometer; camera; microphone; clipboard-write"
+                />
+              </PreviewViewportFrame>
             </>
           ) : (
             <div
