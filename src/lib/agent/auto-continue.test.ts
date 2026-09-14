@@ -88,6 +88,73 @@ describe("reconcileMessagesWithLastStep", () => {
     ]);
     expect(result).toHaveLength(2);
   });
+
+  it("does not copy a completed tool-call after its result (step-budget auto-continue)", () => {
+    const toolCallId = "chatcmpl-tool-90a7400ff19c47178328bceb90bca8c9";
+    const messages: ModelMessage[] = [
+      { role: "user", content: "fix the overlay" },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId,
+            toolName: "readLog",
+            input: { lines: 12, source: "preview" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId,
+            toolName: "readLog",
+            output: { type: "json", value: { ok: true, lines: 12 } },
+          },
+        ],
+      },
+    ];
+
+    const result = reconcileMessagesWithLastStep(messages, [
+      {
+        finishReason: "tool-calls",
+        toolCalls: [
+          {
+            toolCallId,
+            toolName: "readLog",
+            input: { lines: 12, source: "preview" },
+          },
+        ],
+      },
+    ]);
+
+    expect(result).toEqual(messages);
+  });
+
+  it("reattaches truncated text only, ignoring last-step tool-calls", () => {
+    const messages: ModelMessage[] = [{ role: "user", content: "fix ghosts" }];
+    const result = reconcileMessagesWithLastStep(messages, [
+      {
+        finishReason: "length",
+        text: "I will patch Layout next",
+        toolCalls: [
+          {
+            toolCallId: "call_truncated",
+            toolName: "editFile",
+            input: { path: "src/components/Layout.tsx" },
+          },
+        ],
+      },
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "I will patch Layout next" }],
+    });
+  });
 });
 
 describe("isOutputLengthFinish", () => {

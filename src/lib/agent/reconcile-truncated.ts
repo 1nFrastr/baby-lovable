@@ -26,58 +26,40 @@ function extractAssistantText(message: ModelMessage): string {
     .join("");
 }
 
-function buildPartsFromStep(step: StepWithContent): Array<
-  | { type: "text"; text: string }
-  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-> {
-  const parts: Array<
-    | { type: "text"; text: string }
-    | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-  > = [];
-
+function extractStepText(step: StepWithContent): string {
   if (typeof step.text === "string" && step.text.length > 0) {
-    parts.push({ type: "text", text: step.text });
+    return step.text;
   }
-
-  for (const tc of step.toolCalls ?? []) {
-    if (tc.toolCallId && tc.toolName) {
-      parts.push({
-        type: "tool-call",
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        input: tc.input ?? {},
-      });
-    }
+  if (!Array.isArray(step.content)) {
+    return "";
   }
+  return step.content
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        part.type === "text" && typeof part.text === "string" && part.text.length > 0,
+    )
+    .map((part) => part.text)
+    .join("");
+}
 
-  if (parts.length === 0 && Array.isArray(step.content)) {
-    for (const part of step.content) {
-      if (part.type === "text" && typeof part.text === "string" && part.text) {
-        parts.push({ type: "text", text: part.text });
-      }
-      if (
-        part.type === "tool-call" &&
-        part.toolCallId &&
-        part.toolName
-      ) {
-        parts.push({
-          type: "tool-call",
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          input: part.input ?? {},
-        });
-      }
-    }
-  }
-
-  return parts;
+function textAlreadyPresent(existing: string, stepText: string): boolean {
+  return (
+    existing === stepText ||
+    (existing.length > 40 && stepText.startsWith(existing.slice(0, 40))) ||
+    (stepText.length > 40 && existing.startsWith(stepText.slice(0, 40)))
+  );
 }
 
 /**
  * WorkflowAgent stops on finishReason=length without pushing the truncated
  * assistant turn into conversationPrompt — so result.messages omit text that
- * was already streamed to the UI. Re-attach the last step so auto-continue
- * and session persistence see the cut-off content.
+ * was already streamed to the UI. Re-attach that text so auto-continue and
+ * session persistence see the cut-off content.
+ *
+ * Only text is reattached. Last-step tool-calls already live in messages
+ * (call + result). Copying them again creates a duplicate unpaired call;
+ * auto-continue then appends a user hint and convertToLanguageModelPrompt
+ * throws AI_MissingToolResultsError.
  */
 export function reconcileMessagesWithLastStep(
   messages: ModelMessage[],
@@ -88,32 +70,22 @@ export function reconcileMessagesWithLastStep(
     return messages;
   }
 
-  const parts = buildPartsFromStep(last);
-  if (parts.length === 0) {
+  const stepText = extractStepText(last);
+  if (!stepText) {
     return messages;
   }
 
-  const stepText = parts
-    .filter((p) => p.type === "text")
-    .map((p) => p.text)
-    .join("");
-
   const lastMessage = messages.at(-1);
-  if (lastMessage?.role === "assistant" && stepText) {
+  if (lastMessage?.role === "assistant") {
     const existing = extractAssistantText(lastMessage);
-    // Already reconciled / included (prefix match handles minor streaming drift).
-    if (
-      existing === stepText ||
-      (existing.length > 40 && stepText.startsWith(existing.slice(0, 40))) ||
-      (stepText.length > 40 && existing.startsWith(stepText.slice(0, 40)))
-    ) {
+    if (textAlreadyPresent(existing, stepText)) {
       return messages;
     }
   }
 
   return [
     ...messages,
-    { role: "assistant", content: parts } as ModelMessage,
+    { role: "assistant", content: [{ type: "text", text: stepText }] },
   ];
 }
 
