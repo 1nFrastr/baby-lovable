@@ -55,8 +55,8 @@ import {
   CHAT_ATTACHMENT_MAX_BYTES,
   CHAT_ATTACHMENT_MAX_FILES,
   CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
-  uploadSessionAttachments,
 } from "@/lib/chat/attachments";
+import { uploadSessionAttachments } from "@/lib/chat/upload-session-attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import {
   CHAT_QUEUE_MAX_ITEMS,

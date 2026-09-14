@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { extractGithubAuthIdentity } from "./auth-context";
+import {
+  extractGithubAuthIdentity,
+  shouldRetryAuthUserLookup,
+} from "./auth-context";
 
 describe("extractGithubAuthIdentity", () => {
   it("extracts the numeric GitHub provider id and login", () => {
@@ -51,5 +54,21 @@ describe("extractGithubAuthIdentity", () => {
         user_metadata: {},
       }),
     ).toBeNull();
+  });
+});
+
+describe("shouldRetryAuthUserLookup", () => {
+  it("retries transient auth API failures", () => {
+    expect(shouldRetryAuthUserLookup({ status: 503 })).toBe(true);
+    expect(shouldRetryAuthUserLookup({ status: 429 })).toBe(true);
+    expect(
+      shouldRetryAuthUserLookup({ name: "AuthRetryableFetchError" }),
+    ).toBe(true);
+  });
+
+  it("does not retry a missing or rejected session", () => {
+    expect(shouldRetryAuthUserLookup(null)).toBe(false);
+    expect(shouldRetryAuthUserLookup({ status: 400 })).toBe(false);
+    expect(shouldRetryAuthUserLookup({ status: 401 })).toBe(false);
   });
 });
