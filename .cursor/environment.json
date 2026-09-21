@@ -1,0 +1,17 @@
+{
+  "name": "baby-lovable",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "next-dev",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [
+    { "name": "Next.js host app", "port": 3000 },
+    { "name": "Supabase API", "port": 54321 },
+    { "name": "Supabase Studio", "port": 54323 }
+  ]
+}
