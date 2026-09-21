@@ -1,6 +1,7 @@
 import { tool, type ModelMessage } from "ai";
 import { z } from "zod";
 
+import { withFileMutationLock } from "@/lib/agent/file-mutation-lock";
 import type { OrderedToolCall } from "@/lib/chat/turn-progress";
 import {
   persistToolProgressStep,
@@ -132,6 +133,21 @@ function orderedToolCalls(
     : [...calls, current];
 }
 
+function withPathLock<TInput extends { path: string }, TOutput>(
+  execute: (
+    input: TInput,
+    options: { context: { sessionId: string } },
+  ) => Promise<TOutput>,
+) {
+  return (
+    input: TInput,
+    options: { context: { sessionId: string } },
+  ): Promise<TOutput> =>
+    withFileMutationLock(options.context.sessionId, input.path, () =>
+      execute(input, options),
+    );
+}
+
 function withTurnProgress<TInput, TOutput>(
   toolName: string,
   execute: (
@@ -239,20 +255,22 @@ export const builderTools = {
   }),
   editFile: tool({
     description:
-      "Edit a text file by replacing an exact string. Prefer this for small changes to existing files instead of rewriting the whole file. Only src/**, public/**, and root config files are editable. When preview is already ready, may include compileError from the live next log — fix and checkPreview if present.",
+      "Performs exact string replacements in a workspace file. Fails if oldString is missing or not unique — add surrounding context, or set replaceAll. Only src/**, public/**, and root config files are editable. When preview is already ready, may include compileError from the live next log — fix and checkPreview if present.",
     inputSchema: z.object({
       path: z.string().describe("Relative path inside the workspace"),
       oldString: z
         .string()
-        .describe("Exact text to find. Include enough context to match only the intended location."),
-      newString: z.string().describe("Replacement text"),
+        .describe("The text to replace. Include surrounding context to make it unique unless replaceAll is true."),
+      newString: z
+        .string()
+        .describe("The text to replace it with (must be different from oldString)"),
       replaceAll: z
         .boolean()
         .optional()
-        .describe("Replace every occurrence. Defaults to false and requires a unique oldString."),
+        .describe("Replace all occurrences of oldString (default false)"),
     }),
     contextSchema: toolContextSchema,
-    execute: withTurnProgress("editFile", editFileStep),
+    execute: withTurnProgress("editFile", withPathLock(editFileStep)),
   }),
   listFiles: tool({
     description:

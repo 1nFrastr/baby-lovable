@@ -1,4 +1,5 @@
 import { isCompactedFilePayload } from "@/lib/agent/context-compact";
+import { applyEdit } from "@/lib/agent/edit-apply";
 import {
   buildAllowedShellCommand,
   validateRunCommand,
@@ -173,52 +174,23 @@ export async function editFileStep(
     };
   }
 
-  // Tolerate line-ending differences between the model's oldString (usually
-  // "\n") and the on-disk file (which may contain "\r\n").
-  const normalize = (value: string) => value.replace(/\r\n/g, "\n");
-  const usesCrlf = original.includes("\r\n");
-  const content = normalize(original);
-  const oldString = normalize(input.oldString);
-  const newString = normalize(input.newString);
+  const applied = applyEdit(
+    original,
+    input.oldString,
+    input.newString,
+    input.replaceAll === true,
+  );
 
-  const countMatches = (haystack: string, needle: string) =>
-    haystack.split(needle).length - 1;
-
-  const matches = countMatches(content, oldString);
-
-  if (matches === 0) {
-    // Help the caller recover instead of blindly retrying: detect whether the
-    // mismatch is only leading/trailing whitespace or indentation.
-    const collapse = (value: string) =>
-      value.replace(/[ \t]+/g, " ").replace(/[ \t]*\n[ \t]*/g, "\n").trim();
-    const whitespaceInsensitiveMatch =
-      collapse(content).includes(collapse(oldString));
-
+  if (!applied.ok) {
     return {
       ok: false,
       path: input.path,
-      error: whitespaceInsensitiveMatch
-        ? "oldString was not found exactly. A near-match exists that differs only in whitespace/indentation — re-read the file and copy the exact characters (including leading spaces)."
-        : "oldString was not found in the file. Re-read the file to copy the exact text, or use writeFile to replace the whole file.",
+      ...(applied.matches !== undefined ? { matches: applied.matches } : {}),
+      error: applied.error,
     };
   }
 
-  if (matches > 1 && !input.replaceAll) {
-    return {
-      ok: false,
-      path: input.path,
-      matches,
-      error:
-        "oldString matched multiple locations. Add surrounding context to make it unique, or set replaceAll to true.",
-    };
-  }
-
-  const updatedContent = input.replaceAll
-    ? content.split(oldString).join(newString)
-    : content.replace(oldString, newString);
-
-  // Preserve the file's original line-ending style.
-  const output = usesCrlf ? updatedContent.replace(/\n/g, "\r\n") : updatedContent;
+  const output = applied.content;
 
   await sandbox.fs.writeTextFile(input.path, output);
 
@@ -230,7 +202,7 @@ export async function editFileStep(
   return {
     ok: true,
     path: input.path,
-    replacements: input.replaceAll ? matches : 1,
+    replacements: applied.replacements,
     bytesWritten: new TextEncoder().encode(output).length,
     ...(compileError ? { compileError } : {}),
   };
