@@ -101,6 +101,16 @@ export async function expandAttachmentPartsForModelStep(
   return hydrateAndExpandAttachmentsForModel(sessionId, messages);
 }
 
+/** Load L0 skill catalog from the host filesystem — Node I/O stays in a step. */
+export async function loadSkillCatalogPromptStep(): Promise<string> {
+  "use step";
+
+  const { formatSkillCatalogPrompt } = await import(
+    "@/lib/agent/skills/catalog"
+  );
+  return formatSkillCatalogPrompt();
+}
+
 /** Close the agent writable stream — must run as a step inside workflows. */
 export async function closeAgentWritableStep(
   writable: WritableStream<import("@ai-sdk/workflow").ModelCallStreamPart>,

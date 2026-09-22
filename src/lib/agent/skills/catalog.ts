@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * Host-filesystem skill catalog. Do not statically import this module from
+ * `'use workflow'` files — Node `fs` / `path` / `crypto` are banned in the
+ * workflow sandbox. Load via `'use step'` + dynamic import instead.
+ */
+
 export type SkillMeta = {
   name: string;
   description: string;

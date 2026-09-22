@@ -17,7 +17,10 @@ import { toPromptUiMessages } from "@/lib/chat/compaction";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import { createBuilderAgent } from "@/workflow/builder-agent";
-import { modelMessagesToAssistantUIMessage } from "@/workflow/builder-chat-steps";
+import {
+  loadSkillCatalogPromptStep,
+  modelMessagesToAssistantUIMessage,
+} from "@/workflow/builder-chat-steps";
 import { ensureCompactionStep } from "@/workflow/compaction-step";
 
 export interface RunAgentOptions {
@@ -75,10 +78,11 @@ export async function runAgentTurn({
   const previousModelCount = modelMessages.length;
   const modelId = resolveBuilderModelId(promptMessages);
 
+  const skillCatalogPrompt = await loadSkillCatalogPromptStep();
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(
     sessionId,
     undefined,
-    { modelId },
+    { modelId, skillCatalogPrompt },
   );
 
   const trace = createCliAgentTrace({

@@ -20,6 +20,7 @@ import {
   closeAgentWritableStep,
   expandAttachmentPartsForModelStep,
   getSessionStep,
+  loadSkillCatalogPromptStep,
 } from "./builder-chat-steps";
 import { ensureCompactionStep } from "./compaction-step";
 import {
@@ -69,11 +70,12 @@ export async function builderChat(
     formatTraceStdout(sessionId, "INFO", describeLastUserPrompt(promptMessages)),
   );
   const modelId = resolveBuilderModelId(promptMessages);
+  const skillCatalogPrompt = await loadSkillCatalogPromptStep();
 
   const { agent, toolsContext, runtimeContext } = createBuilderAgent(
     sessionId,
     { turnId, assistantMessageId },
-    { modelId },
+    { modelId, skillCatalogPrompt },
   );
 
   const maxSteps = 30;

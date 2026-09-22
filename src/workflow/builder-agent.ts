@@ -9,7 +9,6 @@ import {
 } from "@/lib/agent/context-compact";
 import { resolveMaxOutputTokens } from "@/lib/agent/max-output-tokens";
 import { resolveReasoningEffort } from "@/lib/agent/reasoning";
-import { formatSkillCatalogPrompt } from "@/lib/agent/skills/catalog";
 import { packageManagerPromptLines } from "@/lib/sandbox/package-manager";
 import { builderTools, createToolsContext } from "@/tools/builder-tools";
 
@@ -47,10 +46,9 @@ Rules:
 - Paths passed to tools are relative to the workspace root.
 - If a command fails, inspect the output, fix the issue, and retry.`;
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(skillCatalogPrompt = ""): string {
   const pmLines = packageManagerPromptLines().map((line) => `- ${line}`);
-  const skills = formatSkillCatalogPrompt();
-  return `${BUILDER_BASE_PROMPT}\n${pmLines.join("\n")}\n${skills}`;
+  return `${BUILDER_BASE_PROMPT}\n${pmLines.join("\n")}\n${skillCatalogPrompt}`;
 }
 
 export interface BuilderAgentContext {
@@ -77,7 +75,7 @@ export interface BuilderTurnIdentity {
 export function createBuilderAgent(
   sessionId: string,
   turn?: BuilderTurnIdentity,
-  options?: { modelId?: string },
+  options?: { modelId?: string; skillCatalogPrompt?: string },
 ): BuilderAgentBundle {
   const toolsContext = createToolsContext(sessionId, turn);
   const runtimeContext: BuilderAgentContext = {
@@ -91,7 +89,7 @@ export function createBuilderAgent(
     model: modelId,
     maxOutputTokens: resolveMaxOutputTokens(modelId),
     reasoning: resolveReasoningEffort(),
-    instructions: buildSystemPrompt(),
+    instructions: buildSystemPrompt(options?.skillCatalogPrompt),
     tools: builderTools,
     toolsContext,
     runtimeContext,
