@@ -79,40 +79,33 @@ export async function peekVercelSandbox(
   }
 }
 
-type VercelCreateParams = {
-  name: string;
-  ports: number[];
-  timeout: number;
-  persistent: false;
-  resources: { vcpus: number };
-  networkPolicy: ReturnType<typeof getVercelNetworkPolicy>;
-  onResume: (sandbox: Sandbox) => Promise<void>;
-  image?: string;
-  source?: { type: "snapshot"; snapshotId: string };
-  token?: string;
-  teamId?: string;
-  projectId?: string;
-};
+type VercelCreateParams = NonNullable<Parameters<typeof Sandbox.create>[0]>;
 
 function vercelCreateParams(
   sessionId: string,
   name: string,
 ): VercelCreateParams {
-  const port = getVercelDevPort();
   const snapshotId = getVercelSnapshotId();
   const auth = vercelAuthOptions();
-  return {
+  const shared = {
     name,
-    ports: [port],
+    ports: [getVercelDevPort()],
     timeout: getVercelIdleMs(),
-    persistent: false,
+    persistent: false as const,
     resources: getVercelResources(),
     networkPolicy: getVercelNetworkPolicy(),
     onResume: onResume(sessionId),
-    ...(snapshotId
-      ? { source: { type: "snapshot" as const, snapshotId } }
-      : { image: getVercelSandboxImage() }),
     ...auth,
+  };
+  if (snapshotId) {
+    return {
+      ...shared,
+      source: { type: "snapshot" as const, snapshotId },
+    };
+  }
+  return {
+    ...shared,
+    image: getVercelSandboxImage(),
   };
 }
 
@@ -127,12 +120,13 @@ export async function createVercelSandbox(
 
   const name = vercelSandboxName(sessionId);
   const params = vercelCreateParams(sessionId, name);
+  const snapshotId = getVercelSnapshotId();
   logVercel(
     sessionId,
     "sandbox",
-    params.source
-      ? `create name=${name} snapshot=${params.source.snapshotId} vcpus=${params.resources.vcpus} timeoutMs=${params.timeout}`
-      : `create name=${name} image=${params.image} vcpus=${params.resources.vcpus} timeoutMs=${params.timeout}`,
+    snapshotId
+      ? `create name=${name} snapshot=${snapshotId} vcpus=${getVercelResources().vcpus} timeoutMs=${getVercelIdleMs()}`
+      : `create name=${name} image=${getVercelSandboxImage()} vcpus=${getVercelResources().vcpus} timeoutMs=${getVercelIdleMs()}`,
   );
 
   const sandbox = await createVercelSandboxWithReuse(sessionId, name, params);
