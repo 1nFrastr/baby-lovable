@@ -1,6 +1,7 @@
 import type { Sandbox } from "@vercel/sandbox";
 
 import { resolvePackageManager } from "../package-manager";
+import { withVercelAllowedDevOrigin } from "./allowed-dev-origin";
 import { getVercelDevPort, VERCEL_WORKSPACE_ROOT } from "./config";
 import { asVercelProject, VercelProjectSandbox } from "./provider";
 import type { ProjectSandbox } from "../types";
@@ -25,6 +26,20 @@ async function killVercelDev(sdk: Sandbox): Promise<void> {
   }
 }
 
+async function ensureVercelAllowedDevOrigins(
+  project: ProjectSandbox,
+): Promise<void> {
+  try {
+    const current = await project.fs.readTextFile("next.config.ts");
+    const next = withVercelAllowedDevOrigin(current);
+    if (next !== current) {
+      await project.fs.writeTextFile("next.config.ts", next);
+    }
+  } catch {
+    // missing / unreadable config — start anyway
+  }
+}
+
 export async function startVercelDevSession(
   project: ProjectSandbox,
   sessionId: string,
@@ -35,6 +50,7 @@ export async function startVercelDevSession(
   const command = pm.dev(port);
   console.warn(`[vercel] session=${sessionId} preview ${command}`);
 
+  await ensureVercelAllowedDevOrigins(project);
   await killVercelDev(vercel.sdkSandbox);
 
   const detached = await vercel.sdkSandbox.runCommand({
