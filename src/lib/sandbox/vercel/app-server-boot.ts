@@ -27,12 +27,13 @@ async function killVercelDev(sdk: Sandbox): Promise<void> {
 
 export async function startVercelDevSession(
   project: ProjectSandbox,
-  _sessionId: string,
+  sessionId: string,
 ): Promise<{ sessionName: string; port: number; cmdId: string | null }> {
   const vercel = asVercelProject(project);
   const port = getVercelDevPort();
   const pm = resolvePackageManager();
   const command = pm.dev(port);
+  console.warn(`[vercel] session=${sessionId} preview ${command}`);
 
   await killVercelDev(vercel.sdkSandbox);
 
@@ -51,11 +52,12 @@ export async function startVercelDevSession(
 
 export async function stopVercelDevSession(
   project: ProjectSandbox | null,
-  _sessionId: string,
+  sessionId: string,
 ): Promise<void> {
   if (!project) {
     return;
   }
+  console.warn(`[vercel] session=${sessionId} preview stop`);
   await killVercelDev(asVercelProject(project).sdkSandbox);
 }
 
