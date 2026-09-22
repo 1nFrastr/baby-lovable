@@ -221,9 +221,16 @@ Next, in order:
 - [ ] Offline eval from production traces: prompt / model / tool-set diffs vs a baseline
 - [ ] Online monitoring of live sessions (not only local CLI logs)
 
-**7. Admin & billing** — Today the product is multi-user (Auth + RLS) but there is no staff console, and users cannot see what they spent. Token counts exist only in `[agent-trace]` stdout and CLI `agent.log`; they are not a credit ledger. Host-product plans, subscriptions, and invoices do not exist (the Stripe item under Build & Ship is for *generated* apps).
+**7. Admin & billing** — Today the product is multi-user (Auth + RLS) but there is no staff console, and users cannot see what they spent. Token counts exist only in `[agent-trace]` stdout and CLI `agent.log`; they are not a credit ledger. Which builder models a user may pick is an env default (`AI_MODEL`), not something operators can publish or revoke. Host-product plans, subscriptions, and invoices do not exist (the Stripe item under Build & Ship is for *generated* apps).
 
 - [ ] Staff admin console: users, sessions, live runs, sandboxes. Not Supabase Studio and not the eval dashboard
+- [ ] Host model catalog (same console, staff-only): enable / disable AI Gateway models, set the default, labels, and sort — this is the allowlist the user picker consumes, not a code or env list
 - [ ] Usage metering: persist credit consumption per user / session / turn so it can be shown as a statement
 - [ ] User billing: plans, subscriptions, remaining credits, and a consumption statement the user can open for themselves
 - [ ] Admin billing view: the same statements, grouped and filterable per user (not infra cost vs revenue)
+
+**8. Self-host setup** — Today a clone is `cp .env.example` plus the docs. There is no first-run UI. Keys still have to be created on AI Gateway, Supabase, Daytona / Vercel Sandbox, Freestyle, GitHub, Cloudflare, and similar vendor consoles, then pasted back — an agent cannot finish those flows without computer-use, and v1 should not pretend it can.
+
+- [ ] First-run setup page after install: required vs optional capabilities, deep links to each vendor, paste keys, then start
+- [ ] Completeness check: which integrations are ready, which are skipped, what is blocked until a key exists
+- Later: optional computer-use to drive vendor consoles — not the default path
