@@ -1,9 +1,10 @@
 /**
- * Real Daytona + Freestyle end-to-end smoke:
- *   provision repo → create sandbox → hydrate → mutate → commit/push → re-hydrate check
+ * Real sandbox + Freestyle end-to-end smoke (Vercel or Daytona):
+ *   provision repo → create sandbox → hydrate → mutate → commit/push → re-hydrate
  *
  * Usage:
  *   npx tsx src/cli/test-freestyle-git.ts
+ *   SANDBOX_PROVIDER=vercel npx tsx src/cli/test-freestyle-git.ts
  *   npx tsx src/cli/test-freestyle-git.ts --keep
  */
 import "@/lib/load-host-env";
@@ -17,10 +18,12 @@ import {
   runTurnCheckpoint,
 } from "@/lib/git/turn-sync";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
-import {
-  ensureDesiredState,
-} from "@/lib/sandbox/daytona/runtime-reconciler";
-import { getOrCreateDaytonaSandbox, deleteDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
+import { ensureDesiredState } from "@/lib/sandbox/daytona/runtime-reconciler";
+import { getRuntimeSnapshot } from "@/lib/sandbox/daytona/runtime-store";
+import { getProjectSandbox } from "@/lib/sandbox/factory";
+import { getSandboxDriverForSession } from "@/lib/sandbox/providers";
+import { getDefaultSandboxMode } from "@/lib/sandbox/types";
+import { isVercelSandboxConfigured } from "@/lib/sandbox/vercel/config";
 import { createSession, updateSession } from "@/lib/session/store";
 
 const keep = process.argv.includes("--keep");
@@ -36,12 +39,16 @@ function fail(msg: string): never {
 }
 
 async function main() {
-  if (!isDaytonaConfigured()) {
+  const mode = getDefaultSandboxMode();
+  if (mode === "vercel" && !isVercelSandboxConfigured()) {
+    fail("Vercel Sandbox is not configured");
+  }
+  if (mode === "daytona" && !isDaytonaConfigured()) {
     fail("DAYTONA_API_KEY not configured");
   }
-  assertFreestyleForDaytona();
+  assertFreestyleForDaytona(mode);
 
-  log("START", "create Daytona session …");
+  log("START", `create ${mode} session …`);
   const session = await createSession({
     title: "Freestyle Git smoke",
   });
@@ -67,7 +74,33 @@ async function main() {
       fail(snap.lastError ?? "sandbox ready failed");
     }
 
-    const afterHydrate = await readGitRepository(session.id, session.userId);
+    log("HYDRATE", "wait for Freestyle pull …");
+    const hydrateDeadline = Date.now() + 120_000;
+    let afterHydrate = await readGitRepository(session.id, session.userId);
+    while (Date.now() < hydrateDeadline) {
+      afterHydrate = await readGitRepository(session.id, session.userId);
+      if (afterHydrate?.provisionStatus === "ready") {
+        break;
+      }
+      if (afterHydrate?.provisionStatus === "error") {
+        fail(
+          `hydrate failed: ${afterHydrate.provisionError ?? "unknown"}`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (afterHydrate?.provisionStatus !== "ready") {
+      const project = await getProjectSandbox(session.id);
+      const explicit = await hydrateWorkspaceFromFreestyle(
+        session.id,
+        project,
+        session.userId,
+      );
+      if (!explicit.ok) {
+        fail(`hydrate not ready: ${explicit.error ?? explicit.mode}`);
+      }
+      afterHydrate = await readGitRepository(session.id, session.userId);
+    }
     if (afterHydrate?.provisionStatus !== "ready") {
       fail(
         `hydrate not ready: ${afterHydrate?.provisionStatus} ${afterHydrate?.provisionError ?? ""}`,
@@ -78,18 +111,20 @@ async function main() {
       `ready sha=${afterHydrate.remoteHeadSha?.slice(0, 7) ?? "(none yet)"}`,
     );
 
-    const project = await getOrCreateDaytonaSandbox(session.id);
+    const project = await getProjectSandbox(session.id);
     if (!project.git) {
       fail("sandbox missing git runner");
     }
 
-    // Mutate a tracked source file so status sees a real diff.
+    const page = await project.fs.readTextFile("src/app/page.tsx");
+    if (!page.includes("function")) {
+      fail("read src/app/page.tsx after hydrate returned unexpected content");
+    }
+    log("READ", `src/app/page.tsx bytes=${page.length}`);
+
     const stamp = new Date().toISOString();
     const markerPath = "src/app/freestyle-smoke.txt";
-    await project.fs.writeTextFile(
-      markerPath,
-      `freestyle smoke ${stamp}\n`,
-    );
+    await project.fs.writeTextFile(markerPath, `freestyle smoke ${stamp}\n`);
     log("MUTATE", `wrote ${markerPath}`);
 
     const runId = `smoke_${Date.now()}`;
@@ -118,7 +153,6 @@ async function main() {
       fail("remoteHeadSha mismatch after sync");
     }
 
-    // Second hydrate path: pull should succeed on existing repo.
     log("REHYDRATE", "pull existing Freestyle main …");
     const again = await hydrateWorkspaceFromFreestyle(
       session.id,
@@ -134,12 +168,18 @@ async function main() {
     }
     log("REHYDRATE", `ok mode=${again.mode}`);
 
-    log("PASS", "Daytona + Freestyle e2e succeeded");
+    log("PASS", `${mode} + Freestyle e2e succeeded`);
   } finally {
     if (!keep) {
       try {
         log("CLEANUP", "delete sandbox …");
-        await deleteDaytonaSandbox(session.id);
+        const snap = await getRuntimeSnapshot(session.id, session.userId, {
+          fresh: true,
+        });
+        if (snap.sandboxId) {
+          const driver = await getSandboxDriverForSession(session.id);
+          await driver.deleteById(session.id, snap.sandboxId);
+        }
       } catch (error) {
         log(
           "WARN",

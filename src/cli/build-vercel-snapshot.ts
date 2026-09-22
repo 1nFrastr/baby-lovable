@@ -1,5 +1,9 @@
 /**
- * Build a reusable Vercel Sandbox snapshot with pnpm + ripgrep.
+ * Optional: freeze a running sandbox filesystem as a snapshot.
+ *
+ * Prefer `npm run build:vercel-image` for the durable environment
+ * (starter + pnpm + node_modules + warmed `.next/dev`). Snapshots are an extra
+ * overlay on top of that image.
  *
  * Usage:
  *   npm run build:vercel-snapshot

@@ -2,6 +2,7 @@ import { awaitPreviousCheckpoint } from "@/lib/git/await-checkpoint";
 import { getFreestyleAdapter } from "@/lib/git/freestyle-client";
 import { shouldUseFreestyle } from "@/lib/git/freestyle-config";
 import { readGitRepository } from "@/lib/git/repository-store";
+import type { SandboxMode } from "@/lib/sandbox/types";
 import { getSession } from "@/lib/session/store";
 
 export type ExportArchiveSource = "freestyle-zip";
@@ -34,10 +35,11 @@ async function exportFreestyleArchive(
   sessionId: string,
   title: string | undefined,
   userId: string | null,
+  mode?: SandboxMode,
 ): Promise<ExportArchiveResult> {
-  if (!shouldUseFreestyle()) {
+  if (!shouldUseFreestyle(mode)) {
     throw new Error(
-      "Export requires durable source of truth (Freestyle). It is disabled for this deployment.",
+      "Export requires durable source of truth (Freestyle). It is disabled for this Daytona free-plan session.",
     );
   }
 
@@ -87,5 +89,6 @@ export async function exportWorkspaceArchive(
     sessionId,
     session.title,
     options.userId ?? session.userId ?? null,
+    session.sandboxMode,
   );
 }

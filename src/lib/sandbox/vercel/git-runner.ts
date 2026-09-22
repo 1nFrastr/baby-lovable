@@ -181,12 +181,29 @@ export class VercelShellGitRunner implements SandboxGitRunner {
       throw new Error("git pull failed: no origin remote");
     }
     const url = authedRemote(origin, credentials);
-    const result = await this.git(["pull", "--ff-only", url, branch], {
-      timeoutSec: 120,
-    });
-    if (result.exitCode !== 0) {
+    // Fetch + force checkout: baked images already have starter files, so
+    // `pull --ff-only` dies with "untracked files would be overwritten".
+    const fetch = await this.git(
+      ["fetch", url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+      { timeoutSec: 180 },
+    );
+    if (fetch.exitCode !== 0) {
       throw wrapGitError(
-        new Error(`${result.stdout}\n${result.stderr}`.trim() || "git pull failed"),
+        new Error(`${fetch.stdout}\n${fetch.stderr}`.trim() || "git fetch failed"),
+      );
+    }
+    const checkout = await this.git([
+      "checkout",
+      "-f",
+      "-B",
+      branch,
+      `origin/${branch}`,
+    ]);
+    if (checkout.exitCode !== 0) {
+      throw wrapGitError(
+        new Error(
+          `${checkout.stdout}\n${checkout.stderr}`.trim() || "git checkout failed",
+        ),
       );
     }
   }

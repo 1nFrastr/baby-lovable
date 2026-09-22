@@ -175,9 +175,11 @@ See `.env.example`:
 - `DAYTONA_API_KEY` — Daytona provider (when `SANDBOX_PROVIDER=daytona` or sticky Daytona sessions)
 - `SANDBOX_PROVIDER` — `vercel` (default for new sessions) or `daytona`
 - `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_ID` — Vercel Sandbox (OIDC on Vercel production)
-- `VERCEL_SANDBOX_SNAPSHOT` — optional prebaked snapshot from `npm run build:vercel-snapshot`
-- `FREESTYLE_API_KEY` — durable Git source of truth (required unless `DAYTONA_FREE_PLAN=1`)
-- `DAYTONA_FREE_PLAN` — optional; `1`/`true`/`on` enables free-tier ephemeral Daytona (no Freestyle SoT)
+- `VERCEL_SANDBOX_IMAGE` — custom VCR image for new Vercel sessions (default `baby-lovable-nextjs-starter`). Build with `npm run build:vercel-image`.
+- `VERCEL_SANDBOX_VCPUS` — optional; default `1` (2 GiB RAM). Sandboxes are ephemeral and stop after `SANDBOX_IDLE_MINUTES` (Vercel default **15**) of **inactivity**. Agent tools, preview, and UI polling reset the idle window; they do not keep a sandbox forever.
+- `VERCEL_SANDBOX_SNAPSHOT` — optional extra filesystem freeze from `npm run build:vercel-snapshot`
+- `FREESTYLE_API_KEY` — durable Git source of truth (required for Vercel; for Daytona unless `DAYTONA_FREE_PLAN=1`)
+- `DAYTONA_FREE_PLAN` — optional; `1`/`true`/`on` enables free-tier ephemeral **Daytona** only (no Freestyle SoT). Vercel sessions ignore this flag.
 
 ## Supabase schema changes
 

@@ -6,12 +6,14 @@ import {
   getVercelDevPort,
   getVercelIdleMs,
   getVercelNetworkPolicy,
+  getVercelResources,
   getVercelSandboxImage,
   getVercelSnapshotId,
   isVercelSandboxConfigured,
   vercelSandboxName,
 } from "./config";
 import { VercelProjectSandbox } from "./provider";
+import { ensureVercelWorkspaceRoot } from "./workspace-root";
 
 function logVercel(sessionId: string, phase: string, message: string): void {
   console.warn(`[vercel] session=${sessionId} ${phase} ${message}`);
@@ -20,6 +22,7 @@ function logVercel(sessionId: string, phase: string, message: string): void {
 function onResume(sessionId: string) {
   return async (sandbox: Sandbox) => {
     logVercel(sessionId, "sandbox", `onResume ${sandbox.name}`);
+    await ensureVercelWorkspaceRoot(sandbox);
     await resumeVercelPreview(sessionId, sandbox);
   };
 }
@@ -44,6 +47,7 @@ export async function createVercelSandbox(
   const port = getVercelDevPort();
   const snapshotId = getVercelSnapshotId();
   const timeout = getVercelIdleMs();
+  const resources = getVercelResources();
   const auth = vercelAuthOptions();
   const networkPolicy = getVercelNetworkPolicy();
   const resume = onResume(sessionId);
@@ -52,8 +56,8 @@ export async function createVercelSandbox(
     sessionId,
     "sandbox",
     snapshotId
-      ? `create name=${name} snapshot=${snapshotId}`
-      : `create name=${name} image=${getVercelSandboxImage()}`,
+      ? `create name=${name} snapshot=${snapshotId} vcpus=${resources.vcpus} timeoutMs=${timeout}`
+      : `create name=${name} image=${getVercelSandboxImage()} vcpus=${resources.vcpus} timeoutMs=${timeout}`,
   );
 
   const createParams = snapshotId
@@ -61,7 +65,8 @@ export async function createVercelSandbox(
         name,
         ports: [port],
         timeout,
-        persistent: true as const,
+        persistent: false as const,
+        resources,
         source: { type: "snapshot" as const, snapshotId },
         networkPolicy,
         onResume: resume,
@@ -71,7 +76,8 @@ export async function createVercelSandbox(
         name,
         ports: [port],
         timeout,
-        persistent: true as const,
+        persistent: false as const,
+        resources,
         image: getVercelSandboxImage(),
         networkPolicy,
         onResume: resume,
@@ -91,6 +97,7 @@ export async function createVercelSandbox(
   }
 
   logVercel(sessionId, "sandbox", `started ${sandbox.name} status=${sandbox.status}`);
+  await ensureVercelWorkspaceRoot(sandbox);
   return sandbox;
 }
 
@@ -111,6 +118,9 @@ export async function fetchVercelSandbox(
       logVercel(sessionId, "sandbox", `${sandboxId} is ${sandbox.status}`);
       return null;
     }
+    if (wake) {
+      await ensureVercelWorkspaceRoot(sandbox);
+    }
     return sandbox;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -125,12 +135,8 @@ export async function reconnectVercelSandbox(
   wake: boolean,
 ): Promise<Sandbox | null> {
   const sandbox = await fetchVercelSandbox(sessionId, sandboxId, wake);
-  if (sandbox && wake) {
-    try {
-      await sandbox.extendTimeout(getVercelIdleMs());
-    } catch {
-      // best effort — session may already be at plan max
-    }
+  if (!sandbox) {
+    return null;
   }
   return sandbox;
 }

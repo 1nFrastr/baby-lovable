@@ -16,7 +16,7 @@ Every session uses Freestyle private-repo `main` as the durable source of truth 
 
 | When | Behavior |
 | --- | --- |
-| Create Daytona session | When SoT enabled: validate `FREESTYLE_API_KEY`; start durable `provisionFreestyleRepoWorkflow`; reconciler hydrates after creating the VM. When `DAYTONA_FREE_PLAN=1`: skip Freestyle entirely |
+| Create session | When SoT enabled: validate `FREESTYLE_API_KEY`; start durable `provisionFreestyleRepoWorkflow`; reconciler hydrates after creating the VM. `DAYTONA_FREE_PLAN=1` skips Freestyle **only for Daytona sessions**; Vercel always provisions and hydrates |
 | Turn ends | Unlock UI → enqueue sync task → start durable `gitTurnCheckpointWorkflow` (do not wait for push) |
 | Next turn writes files | `awaitPreviousCheckpoint` only waits; on a dead worker, CAS kicks a background task once |
 | Delete sandbox | Flush unfinished checkpoint first (kick + wait for terminal state); refuse delete on failure |
@@ -33,7 +33,7 @@ Agent / checkpoint **still write only to Freestyle**. The GitHub side is mirrore
 User flow:
 
 1. Ops: create/configure the platform App on GitHub (the **same App** as Freestyle Dashboard → Git > Sync); turn off “Request user authorization (OAuth) during installation”; set Setup URL to `https://<host>/api/github/app/setup` and enable **Redirect on update**. The GitHub App only needs Contents R/W and Metadata — not Administration create-repo permission
-2. User (Daytona session): preview bar **GitHub** → install the App and pick an existing repo on GitHub → back in the app, choose an empty repo with no commits from the dropdown → connect; if there is no empty repo, jump to GitHub to create one
+2. User (any session with Freestyle SoT): preview bar **GitHub** → install the App and pick an existing repo on GitHub → back in the app, choose an empty repo with no commits from the dropdown → connect; if there is no empty repo, jump to GitHub to create one
 3. Afterward: turn checkpoint → Freestyle → (Freestyle) → GitHub; user pushes on GitHub are also mirrored back to Freestyle
 
 Boundaries:
@@ -72,13 +72,13 @@ GITHUB_APP_INSTALL_URL=https://github.com/apps/<slug>/installations/new
 
 If `FREESTYLE_API_KEY` is missing while durable SoT is enabled, session creation fails immediately and does not silently fall back to sandbox-only.
 
-## Free-tier / ephemeral mode
+## Free-tier / ephemeral mode (Daytona only)
 
-Set `DAYTONA_FREE_PLAN=1` (or `true` / `on`) to run Daytona without Freestyle:
+Set `DAYTONA_FREE_PLAN=1` (or `true` / `on`) to run **Daytona** without Freestyle. This flag does **not** apply to Vercel Sandbox sessions — Vercel always uses Freestyle as the durable source of truth (its network allowlist includes `git.freestyle.sh`).
 
-- No Freestyle repo provision, hydrate, or turn checkpoint
-- No GitHub Sync, History, or Export (APIs return unavailable; UI hides the controls)
-- Sandbox recreate uses the snapshot/starter tree only — work is lost when the VM is destroyed
-- Omits `domainAllowList` on sandbox create (Daytona Tier 1–2 rejects sandbox-level network overrides)
+- No Freestyle repo provision, hydrate, or turn checkpoint **on Daytona sessions**
+- No GitHub Sync, History, or Export for those Daytona sessions (APIs return unavailable; UI hides the controls)
+- Daytona sandbox recreate uses the snapshot/starter tree only — work is lost when the VM is destroyed
+- Omits `domainAllowList` on Daytona sandbox create (Daytona Tier 1–2 rejects sandbox-level network overrides)
 
-Unset or `0` / `false` keeps current pro behavior (Freestyle required). This is a global env stand-in until per-user entitlements exist.
+Unset or `0` / `false` keeps current pro behavior (Freestyle required). This is a Daytona env stand-in until per-user entitlements exist.

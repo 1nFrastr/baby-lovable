@@ -1478,8 +1478,9 @@ export function refreshRuntimeInBackground(sessionId: string): void {
 const HEARTBEAT_MIN_INTERVAL_MS = 60_000;
 
 /**
- * Vercel sessions die at `timeout` unless `extendTimeout` runs.
- * Daytona is a no-op. Rate-limited so UI poll + log SSE stay under API limits.
+ * Vercel idle: top remaining timeout back up to the idle window (default 15m).
+ * Daytona is a no-op (autoStopInterval). Rate-limited so UI poll + log SSE
+ * stay under API limits.
  */
 export function heartbeatSandboxInBackground(sessionId: string): void {
   void heartbeatSandboxSession(sessionId).catch(() => {

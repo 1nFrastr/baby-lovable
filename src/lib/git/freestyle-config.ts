@@ -7,34 +7,25 @@ export function isFreestyleConfigured(): boolean {
 
 /**
  * Product gate: Freestyle is SoT for every Vercel session, and for Daytona
- * unless DAYTONA_FREE_PLAN is on.
+ * unless DAYTONA_FREE_PLAN is on. The free-plan flag never applies to Vercel.
  */
 export function shouldUseFreestyle(mode?: SandboxMode): boolean {
-  if (mode === "vercel") {
-    return isFreestyleConfigured();
-  }
-  return !isDaytonaFreePlan() && isFreestyleConfigured();
+  return !isDaytonaFreePlan(mode) && isFreestyleConfigured();
 }
 
 /**
  * Freestyle is the durable source of truth when not on Daytona free plan.
- * Vercel sessions always require Freestyle.
+ * Vercel sessions always require Freestyle (DAYTONA_FREE_PLAN does not apply).
  */
 export function assertFreestyleForDaytona(mode?: SandboxMode): void {
-  if (mode === "vercel") {
-    if (!isFreestyleConfigured()) {
-      throw new Error(
-        "FREESTYLE_API_KEY is required. Freestyle Git is the durable source of truth for Vercel sandbox sessions.",
-      );
-    }
-    return;
-  }
-  if (isDaytonaFreePlan()) {
+  if (isDaytonaFreePlan(mode)) {
     return;
   }
   if (!isFreestyleConfigured()) {
     throw new Error(
-      "FREESTYLE_API_KEY is required. Freestyle Git is the durable source of truth for Daytona sessions.",
+      mode === "vercel"
+        ? "FREESTYLE_API_KEY is required. Freestyle Git is the durable source of truth for Vercel sandbox sessions."
+        : "FREESTYLE_API_KEY is required. Freestyle Git is the durable source of truth for Daytona sessions.",
     );
   }
 }

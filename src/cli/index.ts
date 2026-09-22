@@ -22,7 +22,10 @@ import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import { isVercelSandboxConfigured } from "@/lib/sandbox/vercel/config";
 import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 import type { Session } from "@/lib/session/types";
-import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
+import {
+  assertFreestyleForDaytona,
+  shouldUseFreestyle,
+} from "@/lib/git/freestyle-config";
 import {
   assertSupabaseMetadataConfigured,
   getDevUserId,
@@ -186,6 +189,22 @@ async function resolveSession(args: CliArgs): Promise<Session> {
 
   const session = await createSession();
   logger.info(`Created session ${session.id}`);
+  if (shouldUseFreestyle(session.sandboxMode)) {
+    try {
+      // CLI has no Workflow world (`start()` rejects 'use workflow' fns).
+      // Provision inline; hydrate still no-ops if the repo is already bound.
+      const { ensureFreestyleRepository } = await import(
+        "@/lib/git/provision-repo"
+      );
+      await ensureFreestyleRepository(session.id, session.userId);
+    } catch (error) {
+      logger.warn(
+        `Freestyle provision failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
   return session;
 }
 

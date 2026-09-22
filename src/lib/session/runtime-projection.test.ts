@@ -70,4 +70,29 @@ describe("runtime projection merge / bump", () => {
     expect(shouldBumpRuntimeVersion(before, after)).toBe(true);
     expect(after.sourceControl.status).toBe("syncing");
   });
+
+  it("does not mark Vercel sessions as Daytona free plan", () => {
+    const previous = process.env.DAYTONA_FREE_PLAN;
+    process.env.DAYTONA_FREE_PLAN = "1";
+    try {
+      const vercel = emptyRuntimeProjection(
+        "sess_vercel",
+        "2026-01-01T00:00:00.000Z",
+        "vercel",
+      );
+      const daytona = emptyRuntimeProjection(
+        "sess_daytona",
+        "2026-01-01T00:00:00.000Z",
+        "daytona",
+      );
+      expect(vercel.capabilities.daytonaFreePlan).toBe(false);
+      expect(daytona.capabilities.daytonaFreePlan).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DAYTONA_FREE_PLAN;
+      } else {
+        process.env.DAYTONA_FREE_PLAN = previous;
+      }
+    }
+  });
 });

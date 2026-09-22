@@ -34,7 +34,12 @@ export async function readRuntimeProjectionStore(
 ): Promise<SessionRuntimeProjection | null> {
   void userId;
   const projection = await readRuntimeProjectionSupabase(sessionId);
-  return projection ? withLiveCapabilities(projection) : null;
+  if (!projection) {
+    return null;
+  }
+  const { getSessionOwner } = await import("./store");
+  const owner = await getSessionOwner(sessionId);
+  return withLiveCapabilities(projection, owner?.sandboxMode);
 }
 
 export async function writeRuntimeProjectionStore(
@@ -80,10 +85,9 @@ async function assembleRuntimeProjection(
   sessionId: string,
 ): Promise<SessionRuntimeProjection> {
   const now = new Date().toISOString();
-  const base = emptyRuntimeProjection(sessionId, now);
-
   const { getSession } = await import("./store");
   const session = await getSession(sessionId);
+  const base = emptyRuntimeProjection(sessionId, now, session?.sandboxMode);
 
   try {
     // Side-effect free: never call peekAllStatus (it may kick background observe).
@@ -147,10 +151,12 @@ export async function publishRuntimeUpdate(
 ): Promise<SessionRuntimeProjection | null> {
   try {
     const ownerId = await resolveUserId(sessionId, userId);
+    const { getSessionOwner } = await import("./store");
+    const owner = await getSessionOwner(sessionId);
     const current =
       (await readRuntimeProjectionStore(sessionId, ownerId)) ??
-      emptyRuntimeProjection(sessionId);
-    const merged = mergeRuntimeProjection(current, patch);
+      emptyRuntimeProjection(sessionId, new Date().toISOString(), owner?.sandboxMode);
+    const merged = mergeRuntimeProjection(current, patch, owner?.sandboxMode);
 
     if (current.version > 0 && !shouldBumpRuntimeVersion(current, merged)) {
       return current;

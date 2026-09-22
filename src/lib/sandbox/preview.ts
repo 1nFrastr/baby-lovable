@@ -70,7 +70,6 @@ export async function getAllStatus(sessionId: string): Promise<AllStatus> {
 /**
  * Fast UI status: durable runtime snapshot only.
  * When not ready / URL stale, kicks background soft-observe for the next poll.
- * When already ready, heartbeats Vercel session timeout.
  */
 export async function peekAllStatus(sessionId: string): Promise<AllStatus> {
   const {
@@ -87,6 +86,7 @@ export async function peekAllStatus(sessionId: string): Promise<AllStatus> {
   if (all.appServer.status !== "ready" || !hasFreshPreviewEmbed(snapshot)) {
     refreshRuntimeInBackground(sessionId);
   } else {
+    // Preview open / UI poll counts as activity — idle timer resets.
     heartbeatSandboxInBackground(sessionId);
   }
 

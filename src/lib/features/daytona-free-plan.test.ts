@@ -29,6 +29,13 @@ describe("isDaytonaFreePlan", () => {
       expect(isDaytonaFreePlan()).toBe(false);
     },
   );
+
+  it("never applies to Vercel sessions", () => {
+    process.env.DAYTONA_FREE_PLAN = "1";
+    expect(isDaytonaFreePlan("vercel")).toBe(false);
+    expect(isDaytonaFreePlan("daytona")).toBe(true);
+    expect(isDaytonaFreePlan()).toBe(true);
+  });
 });
 
 describe("shouldUseFreestyle", () => {

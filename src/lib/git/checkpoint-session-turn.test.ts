@@ -23,8 +23,15 @@ describe("checkpointSessionTurn", () => {
     vi.clearAllMocks();
   });
 
-  it("no-ops when Daytona free plan is enabled", async () => {
+  it("no-ops when Daytona free plan is enabled for a Daytona session", async () => {
     process.env.DAYTONA_FREE_PLAN = "1";
+    vi.mocked(getSession).mockResolvedValue({
+      id: "sess_free",
+      sandboxMode: "daytona",
+      title: "New Project",
+      userId: "user_1",
+      messages: [],
+    } as never);
 
     const result = await checkpointSessionTurn({
       sessionId: "sess_free",
@@ -33,8 +40,30 @@ describe("checkpointSessionTurn", () => {
     });
 
     expect(result).toEqual({ ran: false });
-    expect(getSession).not.toHaveBeenCalled();
     expect(enqueueTurnCheckpoint).not.toHaveBeenCalled();
     expect(kickGitTurnCheckpointWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("still checkpoints Vercel sessions when Daytona free plan is on", async () => {
+    process.env.DAYTONA_FREE_PLAN = "1";
+    vi.mocked(getSession).mockResolvedValue({
+      id: "sess_vercel",
+      sandboxMode: "vercel",
+      title: "Vercel Project",
+      userId: "user_1",
+      lastRunId: "run_1",
+      messages: [],
+    } as never);
+    vi.mocked(kickGitTurnCheckpointWorkflow).mockResolvedValue("wrun_1");
+
+    const result = await checkpointSessionTurn({
+      sessionId: "sess_vercel",
+      messages: [],
+      outcome: "success",
+    });
+
+    expect(result.ran).toBe(true);
+    expect(enqueueTurnCheckpoint).toHaveBeenCalled();
+    expect(kickGitTurnCheckpointWorkflow).toHaveBeenCalled();
   });
 });

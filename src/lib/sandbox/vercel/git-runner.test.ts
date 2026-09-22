@@ -43,6 +43,24 @@ describe("VercelShellGitRunner", () => {
     }
   });
 
+  it("pulls by fetch + force checkout so baked starter files do not block", async () => {
+    const calls: string[][] = [];
+    const runner = new VercelShellGitRunner(async (args) => {
+      calls.push(args);
+      if (args.includes("get-url")) {
+        return ok("https://git.freestyle.sh/demo.git\n");
+      }
+      return ok();
+    });
+    await runner.pull({
+      username: "x-access-token",
+      password: "token",
+    });
+    expect(calls.some((args) => args.includes("fetch"))).toBe(true);
+    expect(calls.some((args) => args.includes("checkout"))).toBe(true);
+    expect(calls.some((args) => args.includes("--ff-only"))).toBe(false);
+  });
+
   it("skips commit when porcelain is empty", async () => {
     const runner = new VercelShellGitRunner(async (args) => {
       if (args.includes("add")) {

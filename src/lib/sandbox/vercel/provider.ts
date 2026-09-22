@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { VercelShellGitRunner } from "./git-runner";
 import { VERCEL_WORKSPACE_ROOT } from "./config";
+import { ensureVercelWorkspaceRoot } from "./workspace-root";
 
 function normalizeRelativePath(targetPath: string): string {
   const normalized = targetPath.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -194,6 +195,7 @@ class VercelSandboxProcessRunner implements SandboxProcessRunner {
     env?: Record<string, string>,
     timeout = 120,
   ): Promise<ExecuteResult> {
+    await ensureVercelWorkspaceRoot(this.sdk);
     const workingDirectory =
       cwd === "." ? VERCEL_WORKSPACE_ROOT : normalizeRelativePath(cwd);
     const envPrefix = env
@@ -215,10 +217,12 @@ class VercelSandboxProcessRunner implements SandboxProcessRunner {
     args: string[],
     options?: { env?: Record<string, string>; timeoutSec?: number },
   ): Promise<ExecuteResult> {
+    await ensureVercelWorkspaceRoot(this.sdk);
+    const isClone = args[0] === "clone";
     const response = await this.sdk.runCommand({
       cmd: "git",
       args,
-      cwd: VERCEL_WORKSPACE_ROOT,
+      cwd: isClone ? "/" : VERCEL_WORKSPACE_ROOT,
       env: options?.env,
       timeoutMs: (options?.timeoutSec ?? 120) * 1000,
     });

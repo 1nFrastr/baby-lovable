@@ -29,17 +29,16 @@ export async function GET(
     throw error;
   }
 
-  if (isDaytonaFreePlan()) {
-    return NextResponse.json(
-      { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
-      { status: 403 },
-    );
-  }
-
   try {
     const session = await getSession(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (isDaytonaFreePlan(session.sandboxMode)) {
+      return NextResponse.json(
+        { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
+        { status: 403 },
+      );
     }
     const repository = await readGitRepository(sessionId, auth.userId);
     const lastGithubRepositoryId =

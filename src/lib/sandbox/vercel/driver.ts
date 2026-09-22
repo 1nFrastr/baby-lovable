@@ -10,7 +10,7 @@ import {
   vercelSandboxExists,
   wrapVercelSandbox,
 } from "./vm";
-import { getVercelDevPort, getVercelIdleMs } from "./config";
+import { getVercelDevPort, getVercelIdleMs, vercelIdleExtendMs } from "./config";
 import type { ProjectSandbox } from "../types";
 import type {
   CreatedSandbox,
@@ -108,10 +108,18 @@ export const vercelDriver: SandboxVmDriver = {
   },
 
   async extendSessionIfNeeded(project: ProjectSandbox) {
+    const sdk = asVercelProject(project).sdkSandbox;
+    const addMs = vercelIdleExtendMs({
+      idleMs: getVercelIdleMs(),
+      expiresAt: sdk.expiresAt,
+    });
+    if (addMs <= 0) {
+      return;
+    }
     try {
-      await asVercelProject(project).sdkSandbox.extendTimeout(getVercelIdleMs());
+      await sdk.extendTimeout(addMs);
     } catch {
-      // at plan max or already extended
+      // at plan max or already gone
     }
   },
 
