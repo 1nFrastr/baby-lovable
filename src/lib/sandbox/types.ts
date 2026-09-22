@@ -47,7 +47,7 @@ export interface FileInfo {
   modifiedAt?: string;
 }
 
-/** One hit from workspace text search (`searchContent`). */
+/** One hit from workspace text search. */
 export interface ContentSearchMatch {
   path: string;
   line: number;
@@ -71,7 +71,7 @@ export interface SandboxFileSystem {
   moveFiles(source: string, destination: string): Promise<void>;
   /** Filename glob match. */
   searchFiles(path: string, pattern: string): Promise<string[]>;
-  /** Text inside files (public tool is `searchContent`). */
+  /** Text inside files. */
   searchContent(path: string, query: string): Promise<ContentSearchMatch[]>;
   getFileDetails(path: string): Promise<FileInfo>;
 }

@@ -17,6 +17,7 @@ export const EXPLORER_MAX_TREE_DEPTH = 16;
 
 /** Extra noise dirs/files beyond `.next` / `node_modules` / `.git`. */
 const EXPLORER_HIDDEN_SEGMENTS = new Set([
+  ".baby",
   ".turbo",
   ".vercel",
   ".cache",

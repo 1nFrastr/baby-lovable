@@ -22,6 +22,7 @@ const ACTIVITY_VERBS: Record<string, [running: string, done: string]> = {
   checkPreview: ["Checking preview", "Checked preview"],
   testPreview: ["Testing preview", "Tested preview"],
   runCommand: ["Running", "Ran"],
+  exec: ["Running", "Ran"],
 };
 
 function readStringField(input: unknown, field: string): string | undefined {
@@ -116,6 +117,16 @@ export function formatToolPartLabel(
     return verb;
   }
 
+  if (name === "exec" || name === "runCommand") {
+    const command = readStringField(input, "command");
+    if (command) {
+      const compact =
+        command.length > 80 ? `${command.slice(0, 77)}…` : command;
+      return `${verb} ${compact}`;
+    }
+    return verb;
+  }
+
   if (name === "testPreview") {
     const actions =
       input && typeof input === "object" && "actions" in input
@@ -169,6 +180,18 @@ export function formatToolPartOutput(
       return `${mark} ${summary.slice(0, 160)}`;
     }
     return mark;
+  }
+
+  if (name === "exec" && output && typeof output === "object") {
+    const rec = output as {
+      ok?: boolean;
+      exitCode?: number;
+      truncated?: boolean;
+    };
+    const mark = rec.ok ? "ok" : "failed";
+    const exit = rec.exitCode != null ? ` · exit ${rec.exitCode}` : "";
+    const trunc = rec.truncated ? " · truncated" : "";
+    return `${mark}${exit}${trunc}`;
   }
 
   if (name === "checkPreview" && output && typeof output === "object") {

@@ -50,13 +50,18 @@ export function buildNextDevWarmCommands(port = getDaytonaDevPort()): string[] {
  */
 export function buildStarterSnapshotImage(repoRoot = process.cwd()): Image {
   const starterDir = path.join(repoRoot, "templates", "nextjs-starter");
+  const skillsDir = path.join(repoRoot, "skills");
+  const babyBin = path.join(repoRoot, "src/lib/agent/skills/baby.sh");
   const warmScript = warmScriptLocalPath(repoRoot);
   const remoteWarm = path.posix.join(DAYTONA_WORKSPACE_ROOT, NEXT_DEV_WARM_SCRIPT);
+  const remoteSkills = path.posix.join(DAYTONA_WORKSPACE_ROOT, ".baby/skills");
+  const remoteBaby = path.posix.join(DAYTONA_WORKSPACE_ROOT, ".baby/bin/baby");
 
   return Image.base(DAYTONA_STARTER_BASE_IMAGE)
     .runCommands(
       "apt-get update " +
-        "&& apt-get install -y --no-install-recommends git ca-certificates " +
+        "&& apt-get install -y --no-install-recommends git ca-certificates ripgrep jq " +
+        "&& rg --version && jq --version " +
         "&& rm -rf /var/lib/apt/lists/*",
       // Global npm install puts pnpm on /usr/local/bin for non-login shells
       // (Daytona process API). Corepack alone can leave shims off PATH in build.
@@ -64,9 +69,12 @@ export function buildStarterSnapshotImage(repoRoot = process.cwd()): Image {
         `&& pnpm --version`,
     )
     .addLocalDir(starterDir, DAYTONA_WORKSPACE_ROOT)
+    .addLocalDir(skillsDir, remoteSkills)
+    .addLocalFile(babyBin, remoteBaby)
     .addLocalFile(warmScript, remoteWarm)
     .workdir(DAYTONA_WORKSPACE_ROOT)
     .runCommands(
+      "chmod +x .baby/bin/baby && find .baby/skills -type f -name '*.sh' -exec chmod +x {} +",
       "pnpm install --frozen-lockfile",
       ...buildNextDevWarmCommands(),
     )

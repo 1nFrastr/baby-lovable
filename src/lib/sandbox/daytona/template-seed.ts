@@ -22,7 +22,7 @@ export async function readStarterTemplateFiles(): Promise<
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const absolute = path.join(directory, entry.name);
 
-      if (relative === "node_modules" || relative.startsWith("node_modules/")) {
+      if (entry.name === "node_modules" || entry.name === ".baby") {
         continue;
       }
 

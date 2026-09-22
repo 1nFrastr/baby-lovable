@@ -11,14 +11,8 @@ import {
   checkPreviewStep,
   deleteFileStep,
   editFileStep,
-  installDependenciesStep,
-  installPackageStep,
-  listFilesStep,
+  execStep,
   readFileStep,
-  readLogStep,
-  runCommandStep,
-  searchContentStep,
-  searchFilesStep,
   testPreviewStep,
   writeFileStep,
 } from "./builder-tool-steps";
@@ -79,15 +73,9 @@ export function createToolsContext(
 
   return {
     readFile: context,
-    readLog: context,
     writeFile: context,
     editFile: context,
-    listFiles: context,
-    searchFiles: context,
-    searchContent: context,
-    installPackage: context,
-    installDependencies: context,
-    runCommand: context,
+    exec: context,
     checkPreview: context,
     testPreview: context,
     deleteFile: context,
@@ -225,24 +213,6 @@ export const builderTools = {
     contextSchema: toolContextSchema,
     execute: withTurnProgress("readFile", readFileStep),
   }),
-  readLog: tool({
-    description:
-      "Read the latest lines from a platform log source (on-demand diagnosis). Use when checkPreview returns ok:false with httpStatus >= 500, or when you need runtime/SSR error text. source=preview is the Next development log. Do not use readFile on .next. Returns { ok, source, lines, text, error? }.",
-    inputSchema: z.object({
-      source: z
-        .enum(["preview"])
-        .describe('Log source. Currently only "preview" (Next dev log).'),
-      lines: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .optional()
-        .describe("How many trailing lines to return (default 20, max 100)."),
-    }),
-    contextSchema: toolContextSchema,
-    execute: withTurnProgress("readLog", readLogStep),
-  }),
   writeFile: tool({
     description:
       "Create or overwrite a text file in the project workspace. Only src/**, public/**, and root config files are writable. When preview is already ready, may include compileError from the live next log — fix and checkPreview if present.",
@@ -272,91 +242,15 @@ export const builderTools = {
     contextSchema: toolContextSchema,
     execute: withTurnProgress("editFile", withPathLock(editFileStep)),
   }),
-  listFiles: tool({
+  exec: tool({
     description:
-      "List files and directories in a workspace path. Managed directories (.next, node_modules, .git) are hidden.",
-    inputSchema: z.object({
-      path: z
-        .string()
-        .optional()
-        .describe("Relative directory path, defaults to workspace root"),
-    }),
-    contextSchema: toolContextSchema,
-    execute: withTurnProgress("listFiles", listFilesStep),
-  }),
-  searchFiles: tool({
-    description:
-      "Match filenames under a directory (recursive). Pattern is a filename glob only (*.tsx, *Button*) — put the folder in path, e.g. path: \"src\", pattern: \"*.tsx\". Do not pass src/**/*.tsx as pattern; that matches no files. Does not search file contents — use searchContent. Cannot search inside .next, node_modules, or .git.",
-    inputSchema: z.object({
-      path: z
-        .string()
-        .optional()
-        .describe(
-          'Directory to search under (recursive). Defaults to workspace root. Example: "src"',
-        ),
-      pattern: z
-        .string()
-        .describe(
-          'Filename glob only, e.g. *.tsx or *.svg. Not a path like src/**/*.tsx — use path for the folder.',
-        ),
-    }),
-    contextSchema: toolContextSchema,
-    execute: withTurnProgress("searchFiles", searchFilesStep),
-  }),
-  searchContent: tool({
-    description:
-      "Search text inside workspace files. Returns path, line, and a short snippet per match (capped). Query is a literal text substring via Daytona findFiles — not ripgrep flags or regex options. Use searchFiles for filename globs. Cannot search inside .next, node_modules, or .git.",
-    inputSchema: z.object({
-      path: z
-        .string()
-        .optional()
-        .describe("Relative directory path, defaults to workspace root"),
-      query: z
-        .string()
-        .describe(
-          "Literal text to find inside files (e.g. TodoItem, bg-foreground/5). Not a filename glob.",
-        ),
-    }),
-    contextSchema: toolContextSchema,
-    execute: withTurnProgress("searchContent", searchContentStep),
-  }),
-  installPackage: tool({
-    description:
-      "Add or remove npm packages via the platform package manager after editing package.json or when the user requests new dependencies.",
-    inputSchema: z.object({
-      packages: z
-        .array(z.string())
-        .min(1)
-        .describe("Package names, e.g. [\"lucide-react\", \"date-fns\"]"),
-      dev: z
-        .boolean()
-        .optional()
-        .describe("Install as devDependencies"),
-      remove: z
-        .boolean()
-        .optional()
-        .describe("Remove packages instead of adding them"),
-    }),
-    contextSchema: toolContextSchema,
-    execute: withTurnProgress("installPackage", installPackageStep),
-  }),
-  installDependencies: tool({
-    description:
-      "Install workspace dependencies via the platform package manager after you change package.json or the lockfile.",
-    inputSchema: z.object({}),
-    contextSchema: toolContextSchema,
-    execute: withTurnProgress(
-      "installDependencies",
-      installDependenciesStep,
-    ),
-  }),
-  runCommand: tool({
-    description:
-      "Deprecated — prefer installPackage or installDependencies. Only package-manager install/add/remove commands are allowed; all other shell commands are rejected.",
+      "Run a sandbox bash command. Compose inspect/search/install in one pipeline (ls, find, rg, jq, pnpm add/remove/install, skill scripts, baby skills). Do not edit source with sed/redirects/rm — use editFile/writeFile/deleteFile. Do not start the dev server. Preview logs: tail .baby/logs/preview.log. Returns { ok, exitCode, stdout, stderr, truncated }.",
     inputSchema: z.object({
       command: z
         .string()
-        .describe("Must be a package-manager install, add, or remove command"),
+        .describe(
+          "Bash command, e.g. rg -n TODO src --glob '*.tsx' | head -50",
+        ),
       cwd: z
         .string()
         .optional()
@@ -364,14 +258,14 @@ export const builderTools = {
       timeout: z
         .number()
         .optional()
-        .describe("Timeout in seconds, defaults to 120"),
+        .describe("Timeout in seconds (default 30 inspect / 120 pnpm; max 180)"),
     }),
     contextSchema: toolContextSchema,
-    execute: withTurnProgress("runCommand", runCommandStep),
+    execute: withTurnProgress("exec", execStep),
   }),
   checkPreview: tool({
     description:
-      "Probe preview readiness via HTTP (does not start preview; does not read logs). HTTP 500 means the app is up but broken (ok:false) — call readLog({ source: \"preview\" }) for the error text, fix source, then re-check. HTTP 502/503 / status installing|starting are warm-up — wait and call again. Compile hints may also arrive on writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/httpStatus>=500/user asks. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
+      "Probe preview readiness via HTTP (does not start preview; does not read logs). HTTP 500 means the app is up but broken (ok:false) — exec `tail -n 40 .baby/logs/preview.log` for the error text, fix source, then re-check. HTTP 502/503 / status installing|starting are warm-up — wait and call again. Compile hints may also arrive on writeFile/editFile as compileError. Required before finishing any turn that edited files until ok:true at least once (esp. first turn). After preview is already ready, skip for small HMR edits unless deps/config/large rewrites/compileError/httpStatus>=500/user asks. Set restart=true when the preview cache is corrupt (never delete .next manually). Returns { ok, status, url, httpStatus, buildError, retried, restarted }.",
     inputSchema: z.object({
       restart: z
         .boolean()

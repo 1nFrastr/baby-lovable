@@ -34,8 +34,8 @@ export function packageManagerPromptLines(
 ): string[] {
   const pm = resolvePackageManager();
   return [
-    `Use the installPackage and installDependencies tools for package management (platform runs ${pm.pm} internally).`,
-    `After editing dependencies, call installPackage or installDependencies — never run arbitrary shell commands.`,
+    `Use exec with ${pm.pm} add/remove/install for package management (platform runs ${pm.pm} internally).`,
+    `After adding or removing packages, call checkPreview — never run the dev server yourself.`,
     `The platform automatically installs dependencies and runs the dev server (${pm.dev(devPort)}) in the background. NEVER run dev server commands yourself — the platform owns the dev server lifecycle.`,
     `Writable lockfile: ${pm.lockfile}.`,
   ];

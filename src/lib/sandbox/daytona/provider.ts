@@ -150,7 +150,10 @@ class DaytonaSandboxProcessRunner implements SandboxProcessRunner {
           .join(" ")
       : "";
 
-    const shell = envPrefix ? `${envPrefix} ${command}` : command;
+    const inner = envPrefix ? `${envPrefix} ${command}` : command;
+    // Daytona ExecuteResponse only exposes stdout (`result` / artifacts.stdout).
+    // Merge stderr so CLI errors are not dropped.
+    const shell = `bash -lc ${JSON.stringify(`${inner} 2>&1`)}`;
 
     const response = await this.sdkSandbox.process.executeCommand(
       shell,
@@ -159,8 +162,11 @@ class DaytonaSandboxProcessRunner implements SandboxProcessRunner {
       timeout,
     );
 
-    const stdout = response.artifacts?.stdout ?? response.result ?? "";
-    const stderr = "";
+    const artifacts = response.artifacts as
+      | { stdout?: string; stderr?: string }
+      | undefined;
+    const stdout = artifacts?.stdout ?? response.result ?? "";
+    const stderr = artifacts?.stderr ?? "";
 
     return {
       exitCode: response.exitCode,

@@ -1,6 +1,6 @@
 /**
  * checkRuntimePreview: HTTP-only. Application 500 → ready (ok:false upstream);
- * 502/503 stay starting. Log text is on-demand via readLog — no remote log read here.
+ * 502/503 stay starting. Log text is on-demand via exec tail of `.baby/logs/preview.log` — no remote log read here.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,7 +153,7 @@ describe("checkRuntimePreview", () => {
     });
   });
 
-  it("fast path: HTTP 500 is ready without buildError (use readLog)", async () => {
+  it("fast path: HTTP 500 is ready without buildError (use preview log)", async () => {
     await withMemoryRuntime(async ({ sessionId }) => {
       ctx.sessionId = sessionId;
       httpStatus.mockResolvedValue(500);

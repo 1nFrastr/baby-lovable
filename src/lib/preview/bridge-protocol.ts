@@ -51,7 +51,7 @@ export interface PreviewElementPickPayload {
   textSnippet?: string;
   ariaLabel?: string;
   testId?: string;
-  /** Best-effort CSS selector for searchContent / readFile targeting. */
+  /** Best-effort CSS selector for rg / readFile targeting. */
   selector: string;
   /** Preview route path when the element was picked (e.g. `/todos`). */
   path: string;

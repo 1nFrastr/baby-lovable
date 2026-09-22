@@ -24,3 +24,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# platform runtime (skills, logs) — not user source
+.baby/

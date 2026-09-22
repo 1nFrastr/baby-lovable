@@ -1,14 +1,12 @@
 import { isCompactedFilePayload } from "@/lib/agent/context-compact";
 import { applyEdit } from "@/lib/agent/edit-apply";
+import { buildAllowedShellCommand, parseAllowedCommand } from "@/lib/sandbox/command-policy";
+import { clipHeadTail } from "@/lib/sandbox/exec-output";
 import {
-  buildAllowedShellCommand,
-  validateRunCommand,
-} from "@/lib/sandbox/command-policy";
-import {
-  filterListedFiles,
-  isProtectedPath,
-  workspacePathViolation,
-} from "@/lib/sandbox/protected-paths";
+  capExecTimeout,
+  evaluateExecPolicy,
+} from "@/lib/sandbox/exec-policy";
+import { workspacePathViolation } from "@/lib/sandbox/protected-paths";
 
 function pathGuard(
   operation: Parameters<typeof workspacePathViolation>[0],
@@ -55,22 +53,20 @@ export async function readFileStep(
   }
 
   const sandbox = await getSandboxFromContext(context);
+  const normalized = input.path.replace(/\\/g, "/");
+  if (normalized === ".baby" || normalized.startsWith(".baby/")) {
+    const { ensureBabyRuntime } = await import(
+      "@/lib/agent/skills/ensure-runtime"
+    );
+    await ensureBabyRuntime(sandbox);
+  }
+
   const content = await sandbox.fs.readTextFile(input.path);
 
   return {
     path: input.path,
     content,
   };
-}
-
-export async function readLogStep(
-  input: { source: "preview"; lines?: number },
-  { context }: { context: ToolContext },
-) {
-  "use step";
-
-  const { readSessionLog } = await import("@/lib/sandbox/read-log");
-  return readSessionLog(context.sessionId, input.source, input.lines);
 }
 
 export async function writeFileStep(
@@ -208,118 +204,6 @@ export async function editFileStep(
   };
 }
 
-export async function listFilesStep(
-  input: { path?: string },
-  { context }: { context: ToolContext },
-) {
-  "use step";
-
-  const targetPath = input.path ?? ".";
-  const blocked = pathGuard("list", targetPath);
-  if (blocked) {
-    return { ...blocked, path: targetPath };
-  }
-
-  const sandbox = await getSandboxFromContext(context);
-  const files = filterListedFiles(
-    await sandbox.fs.listFiles(input.path ?? "."),
-  );
-
-  return {
-    path: input.path ?? ".",
-    files,
-  };
-}
-
-export async function searchFilesStep(
-  input: { path?: string; pattern: string },
-  { context }: { context: ToolContext },
-) {
-  "use step";
-
-  const {
-    looksLikePathGlob,
-    normalizeFilenameSearch,
-    SEARCH_FILES_PATH_GLOB_HINT,
-  } = await import("@/lib/sandbox/search-files");
-
-  const requestedPath = input.path ?? ".";
-  const requestedPattern = input.pattern;
-  const blocked = pathGuard("search", requestedPath, {
-    searchPattern: requestedPattern,
-  });
-  if (blocked) {
-    return { ...blocked, path: requestedPath, pattern: requestedPattern };
-  }
-
-  const normalized = normalizeFilenameSearch(requestedPath, requestedPattern);
-  const rewrittenBlocked = pathGuard("search", normalized.path, {
-    searchPattern: normalized.pattern,
-  });
-  if (rewrittenBlocked) {
-    return {
-      ...rewrittenBlocked,
-      path: requestedPath,
-      pattern: requestedPattern,
-    };
-  }
-
-  const sandbox = await getSandboxFromContext(context);
-  const files = (
-    await sandbox.fs.searchFiles(normalized.path, normalized.pattern)
-  ).filter((filePath) => !isProtectedPath(filePath));
-
-  return {
-    path: normalized.path,
-    pattern: normalized.pattern,
-    files,
-    ...(normalized.rewritten
-      ? { requestedPath, requestedPattern }
-      : {}),
-    ...(files.length === 0 && looksLikePathGlob(requestedPattern)
-      ? { hint: SEARCH_FILES_PATH_GLOB_HINT }
-      : {}),
-  };
-}
-
-export async function searchContentStep(
-  input: { path?: string; query: string },
-  { context }: { context: ToolContext },
-) {
-  "use step";
-
-  const query = input.query.trim();
-  const targetPath = input.path ?? ".";
-
-  if (!query) {
-    return {
-      ok: false as const,
-      path: targetPath,
-      query: input.query,
-      error: "searchContent requires a non-empty query string.",
-    };
-  }
-
-  const blocked = pathGuard("searchContent", targetPath);
-  if (blocked) {
-    return { ...blocked, path: targetPath, query };
-  }
-
-  const { boundContentMatches } = await import("@/lib/sandbox/search-content");
-  const sandbox = await getSandboxFromContext(context);
-  const raw = await sandbox.fs.searchContent(targetPath, query);
-  const { matches, truncated, totalMatches } = boundContentMatches(raw);
-
-  return {
-    path: targetPath,
-    query,
-    matches,
-    matchCount: matches.length,
-    totalMatches,
-    truncated,
-  };
-}
-
 async function restartPreviewAfterInstall(context: ToolContext): Promise<void> {
   const { restartAppServer } = await import("@/lib/sandbox/preview");
   void restartAppServer(context.sessionId).catch(() => {
@@ -327,92 +211,7 @@ async function restartPreviewAfterInstall(context: ToolContext): Promise<void> {
   });
 }
 
-async function executeAllowedPnpmCommand(
-  context: ToolContext,
-  allowed: ReturnType<typeof validateRunCommand> & { ok: true },
-  cwd?: string,
-  timeout?: number,
-) {
-  await awaitMutationGate(context);
-  const sandbox = await getSandboxFromContext(context);
-  const result = await sandbox.process.executeCommand(
-    allowed.shell,
-    cwd,
-    undefined,
-    timeout,
-  );
-
-  if (result.exitCode === 0 && allowed.allowed.kind === "pkg-install") {
-    await restartPreviewAfterInstall(context);
-  }
-
-  return {
-    command: allowed.shell,
-    cwd: cwd ?? ".",
-    exitCode: result.exitCode,
-    stdout: result.stdout.slice(0, 20_000),
-    stderr: result.stderr.slice(0, 20_000),
-  };
-}
-
-export async function installPackageStep(
-  input: {
-    packages: string[];
-    dev?: boolean;
-    remove?: boolean;
-  },
-  { context }: { context: ToolContext },
-) {
-  "use step";
-
-  const allowed = input.remove
-    ? buildAllowedShellCommand({ kind: "pkg-remove", packages: input.packages })
-    : buildAllowedShellCommand(
-        {
-          kind: "pkg-add",
-          packages: input.packages,
-          dev: input.dev ?? false,
-        },
-      );
-
-  const validation = validateRunCommand(allowed);
-  if (!validation.ok) {
-    return {
-      ok: false,
-      error: validation.error,
-    };
-  }
-
-  const result = await executeAllowedPnpmCommand(context, validation);
-  return {
-    ok: result.exitCode === 0,
-    ...result,
-  };
-}
-
-export async function installDependenciesStep(
-  _input: Record<string, never>,
-  { context }: { context: ToolContext },
-) {
-  "use step";
-
-  const pm = (await import("@/lib/sandbox/package-manager")).resolvePackageManager();
-  const validation = validateRunCommand(pm.install);
-  if (!validation.ok) {
-    return {
-      ok: false,
-      error: validation.error,
-    };
-  }
-
-  const result = await executeAllowedPnpmCommand(context, validation);
-  return {
-    ok: result.exitCode === 0,
-    ...result,
-  };
-}
-
-export async function runCommandStep(
+export async function execStep(
   input: {
     command: string;
     cwd?: string;
@@ -422,28 +221,75 @@ export async function runCommandStep(
 ) {
   "use step";
 
-  const validation = validateRunCommand(input.command);
-  if (!validation.ok) {
+  const command = input.command.trim();
+  const cwd = input.cwd ?? ".";
+  const policy = evaluateExecPolicy(command);
+  if (!policy.ok) {
     return {
       ok: false,
-      command: input.command,
-      cwd: input.cwd ?? ".",
+      command,
+      cwd,
       exitCode: 1,
       stdout: "",
-      stderr: validation.error,
+      stderr: policy.error,
+      truncated: false,
     };
   }
 
-  const result = await executeAllowedPnpmCommand(
-    context,
-    validation,
-    input.cwd,
-    input.timeout,
+  const mutating = policy.kind === "pkg" || policy.kind === "skill-script";
+  if (mutating) {
+    try {
+      await awaitMutationGate(context);
+    } catch (error) {
+      return {
+        ok: false,
+        command,
+        cwd,
+        exitCode: 1,
+        stdout: "",
+        stderr: error instanceof Error ? error.message : String(error),
+        truncated: false,
+      };
+    }
+  }
+
+  const sandbox = await getSandboxFromContext(context);
+  const { ensureBabyRuntime, refreshPreviewLogMirror } = await import(
+    "@/lib/agent/skills/ensure-runtime"
   );
+  await ensureBabyRuntime(sandbox);
+  await refreshPreviewLogMirror(sandbox);
+
+  const timeout = capExecTimeout(input.timeout ?? policy.timeoutDefault);
+  let shell = command;
+  const wholePkg = parseAllowedCommand(command);
+  if (policy.kind === "pkg" && wholePkg) {
+    shell = buildAllowedShellCommand(wholePkg);
+  }
+  const wrapped = `export PATH="$(pwd)/.baby/bin:$PATH"; ${shell}`;
+
+  const result = await sandbox.process.executeCommand(
+    wrapped,
+    cwd,
+    undefined,
+    timeout,
+  );
+
+  if (result.exitCode === 0 && mutating) {
+    await restartPreviewAfterInstall(context);
+  }
+
+  const stdout = clipHeadTail(result.stdout);
+  const stderr = clipHeadTail(result.stderr);
 
   return {
     ok: result.exitCode === 0,
-    ...result,
+    command,
+    cwd,
+    exitCode: result.exitCode,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    truncated: stdout.truncated || stderr.truncated,
   };
 }
 

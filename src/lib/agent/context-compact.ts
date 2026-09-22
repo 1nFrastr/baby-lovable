@@ -21,6 +21,7 @@ const LARGE_RESULT_TOOLS = new Set([
   "searchFiles",
   "searchContent",
   "runCommand",
+  "exec",
   "testPreview",
 ]);
 

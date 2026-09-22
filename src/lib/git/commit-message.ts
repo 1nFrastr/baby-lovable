@@ -8,8 +8,7 @@ const WRITE_TOOLS = new Set([
   "tool-writeFile",
   "tool-editFile",
   "tool-deleteFile",
-  "tool-installPackage",
-  "tool-installDependencies",
+  "tool-exec",
 ]);
 
 function truncate(value: string, max: number): string {
