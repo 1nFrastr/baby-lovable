@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { CheckpointBarrierError } from "@/lib/git/await-checkpoint";
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
-import { DURABLE_SOURCE_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import { DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
 import { exportWorkspaceArchive } from "@/lib/sandbox/daytona/export-archive";
 import {
   requireSessionAuth,
@@ -27,9 +27,9 @@ export async function GET(
     throw error;
   }
 
-  if (!isDurableSourceOfTruthEnabled()) {
+  if (isDaytonaFreePlan()) {
     return NextResponse.json(
-      { error: DURABLE_SOURCE_UNAVAILABLE_MESSAGE },
+      { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
       { status: 403 },
     );
   }

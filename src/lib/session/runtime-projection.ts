@@ -1,5 +1,5 @@
 import type { AppTestLatestStatus, AppTestRunStatus } from "@/lib/browser-run/types";
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import type { SourceControlProjection } from "@/lib/git/types";
 import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 
@@ -12,8 +12,8 @@ export type RuntimeAppServerStatus =
   | "needs_install";
 
 export interface SessionRuntimeCapabilities {
-  /** Freestyle SoT, turn checkpoints, GitHub Sync, History, Export. */
-  durableSourceOfTruth: boolean;
+  /** Ephemeral Daytona without Freestyle SoT / GitHub Sync / History / Export. */
+  daytonaFreePlan: boolean;
 }
 
 export interface SessionRuntimeProjection {
@@ -49,7 +49,7 @@ export type RuntimeProjectionPatch = {
 
 export function currentRuntimeCapabilities(): SessionRuntimeCapabilities {
   return {
-    durableSourceOfTruth: isDurableSourceOfTruthEnabled(),
+    daytonaFreePlan: isDaytonaFreePlan(),
   };
 }
 
@@ -168,8 +168,7 @@ export function runtimeUiSignature(
       githubRepoName: sourceControl.githubRepoName ?? null,
     },
     capabilities: {
-      durableSourceOfTruth:
-        projection.capabilities?.durableSourceOfTruth ?? true,
+      daytonaFreePlan: projection.capabilities?.daytonaFreePlan ?? false,
     },
   });
 }

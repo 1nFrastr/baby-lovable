@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import { assertSupabaseMetadataConfigured } from "@/lib/supabase/config";
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     // response so "New Project" is not blocked on git/VM (UI already shows
     // preparing; hydrate still calls ensureFreestyleRepository if needed).
     after(async () => {
-      const provision = isDurableSourceOfTruthEnabled()
+      const provision = !isDaytonaFreePlan()
         ? (async () => {
             try {
               const { kickFreestyleProvisionWorkflow } = await import(

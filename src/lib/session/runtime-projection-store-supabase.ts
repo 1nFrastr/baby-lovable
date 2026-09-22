@@ -32,7 +32,7 @@ function isProjection(
     };
   }
   if (!obj.capabilities || typeof obj.capabilities !== "object") {
-    obj.capabilities = { durableSourceOfTruth: true };
+    obj.capabilities = { daytonaFreePlan: false };
   }
   // Older rows mirrored chat lifecycle here. It is no longer part of the
   // runtime projection or returned to clients.

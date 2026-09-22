@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
-import { DURABLE_SOURCE_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import { DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
 import {
   getGithubSyncStatus,
   GithubSyncError,
@@ -24,7 +24,7 @@ function githubSyncErrorResponse(error: GithubSyncError) {
 
 function durableSourceDisabledResponse() {
   return NextResponse.json(
-    { error: DURABLE_SOURCE_UNAVAILABLE_MESSAGE },
+    { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
     { status: 403 },
   );
 }
@@ -50,7 +50,7 @@ export async function GET(
     throw error;
   }
 
-  if (!isDurableSourceOfTruthEnabled()) {
+  if (isDaytonaFreePlan()) {
     return durableSourceDisabledResponse();
   }
 
@@ -100,7 +100,7 @@ export async function POST(
     throw error;
   }
 
-  if (!isDurableSourceOfTruthEnabled()) {
+  if (isDaytonaFreePlan()) {
     return durableSourceDisabledResponse();
   }
 
@@ -169,7 +169,7 @@ export async function DELETE(
     throw error;
   }
 
-  if (!isDurableSourceOfTruthEnabled()) {
+  if (isDaytonaFreePlan()) {
     return durableSourceDisabledResponse();
   }
 

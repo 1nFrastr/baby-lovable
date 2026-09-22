@@ -1,5 +1,5 @@
 /** Daytona workspace filesystem — fast POSIX, safe for pnpm / .next / git. */
-import { isDaytonaFreePlan } from "@/lib/features/durable-source-of-truth";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 
 export const DAYTONA_WORKSPACE_ROOT =
   process.env.DAYTONA_WORKSPACE_ROOT ?? "/home/daytona/workspace";

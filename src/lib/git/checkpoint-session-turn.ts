@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import { deriveTurnCommitInput } from "@/lib/git/commit-message";
 import { newLocalCheckpointRunId } from "@/lib/git/provision-repo";
 import { enqueueTurnCheckpoint } from "@/lib/git/turn-sync";
@@ -9,7 +9,7 @@ import type { GitTurnOutcome } from "@/lib/git/types";
 /**
  * Shared Web/CLI entry: enqueue turn checkpoint and kick durable worker.
  * Does not wait for commit/push — chat unlocks immediately.
- * No-op when durable source of truth is disabled (free-tier ephemeral mode).
+ * No-op on DAYTONA_FREE_PLAN (ephemeral free-tier mode).
  */
 export async function checkpointSessionTurn(input: {
   sessionId: string;
@@ -19,7 +19,7 @@ export async function checkpointSessionTurn(input: {
   userId?: string | null;
   sessionTitle?: string;
 }): Promise<{ ran: boolean; runId?: string; workflowRunId?: string | null }> {
-  if (!isDurableSourceOfTruthEnabled()) {
+  if (isDaytonaFreePlan()) {
     return { ran: false };
   }
 

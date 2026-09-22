@@ -10,7 +10,7 @@ export {
   assertFreestyleForDaytona,
   shouldUseFreestyle,
 } from "./freestyle-config";
-export { isDurableSourceOfTruthEnabled, isDaytonaFreePlan } from "@/lib/features/durable-source-of-truth";
+export { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 export { checkpointSessionTurn } from "./checkpoint-session-turn";
 export { awaitPreviousCheckpoint } from "./await-checkpoint";
 export {

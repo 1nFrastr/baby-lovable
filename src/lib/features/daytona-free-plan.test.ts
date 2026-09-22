@@ -1,21 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  isDaytonaFreePlan,
-  isDurableSourceOfTruthEnabled,
-} from "./durable-source-of-truth";
+import { isDaytonaFreePlan } from "./daytona-free-plan";
 import { shouldUseFreestyle } from "@/lib/git/freestyle-config";
 
-describe("isDaytonaFreePlan / isDurableSourceOfTruthEnabled", () => {
+describe("isDaytonaFreePlan", () => {
   afterEach(() => {
     delete process.env.DAYTONA_FREE_PLAN;
     delete process.env.FREESTYLE_API_KEY;
   });
 
-  it("defaults to pro (SoT on) when unset", () => {
+  it("defaults to pro when unset", () => {
     delete process.env.DAYTONA_FREE_PLAN;
     expect(isDaytonaFreePlan()).toBe(false);
-    expect(isDurableSourceOfTruthEnabled()).toBe(true);
   });
 
   it.each(["1", "true", "on", "yes", "TRUE", " On "])(
@@ -23,7 +19,6 @@ describe("isDaytonaFreePlan / isDurableSourceOfTruthEnabled", () => {
     (value) => {
       process.env.DAYTONA_FREE_PLAN = value;
       expect(isDaytonaFreePlan()).toBe(true);
-      expect(isDurableSourceOfTruthEnabled()).toBe(false);
     },
   );
 
@@ -32,7 +27,6 @@ describe("isDaytonaFreePlan / isDurableSourceOfTruthEnabled", () => {
     (value) => {
       process.env.DAYTONA_FREE_PLAN = value;
       expect(isDaytonaFreePlan()).toBe(false);
-      expect(isDurableSourceOfTruthEnabled()).toBe(true);
     },
   );
 });

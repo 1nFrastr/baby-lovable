@@ -1,4 +1,4 @@
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import { readGitRepository } from "./repository-store";
 import { listOpenGitSyncTasks } from "./sync-task-store";
 import { isWorkflowRunActive } from "./workflow-run";
@@ -19,7 +19,7 @@ export class CheckpointBarrierError extends Error {
  *
  * Wait-only: never runs commit/push itself. If an open task has no live
  * workflow, CAS-kick at most one durable worker (shared across parallel tools).
- * No-op when durable source of truth is disabled (free-tier ephemeral mode).
+ * No-op on DAYTONA_FREE_PLAN (ephemeral free-tier mode).
  */
 export async function awaitPreviousCheckpoint(
   sessionId: string,
@@ -29,7 +29,7 @@ export async function awaitPreviousCheckpoint(
     signal?: AbortSignal;
   } = {},
 ): Promise<void> {
-  if (!isDurableSourceOfTruthEnabled()) {
+  if (isDaytonaFreePlan()) {
     return;
   }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import { listGitSyncTasks } from "@/lib/git/sync-task-store";
 import type {
   SessionGitSyncTask,
@@ -53,7 +53,7 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    if (!isDurableSourceOfTruthEnabled()) {
+    if (isDaytonaFreePlan()) {
       return NextResponse.json(
         { versions: [], available: false },
         { headers: { "Cache-Control": "no-store" } },

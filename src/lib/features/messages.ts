@@ -1,3 +1,3 @@
-/** Shared copy when durable SoT / Freestyle product features are off. */
-export const DURABLE_SOURCE_UNAVAILABLE_MESSAGE =
-  "Durable source of truth is disabled (DAYTONA_FREE_PLAN). Free-tier sessions are ephemeral Daytona only.";
+/** Shared copy when free-plan sessions cannot use Freestyle product features. */
+export const DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE =
+  "This feature requires Freestyle durable source of truth. It is unavailable on DAYTONA_FREE_PLAN.";

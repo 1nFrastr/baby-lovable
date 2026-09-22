@@ -244,9 +244,9 @@ export function PreviewPanel({
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
-  /** Default true until projection loads so pro UI does not flash-hide. */
-  const durableSourceOfTruth =
-    projection?.capabilities?.durableSourceOfTruth !== false;
+  /** Default false until projection loads so free-plan UI does not flash pro controls. */
+  const daytonaFreePlan = projection?.capabilities?.daytonaFreePlan === true;
+  const showSourceControlUi = !daytonaFreePlan;
   const prevAgentRunStatusRef = useRef<SessionRunStatus | null>(null);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -494,7 +494,7 @@ export function PreviewPanel({
 
   // Checkpoint finishes after the chat unlocks — refresh History when save settles.
   useEffect(() => {
-    if (!durableSourceOfTruth || !sourceControl) {
+    if (!showSourceControlUi || !sourceControl) {
       return;
     }
     if (
@@ -506,14 +506,14 @@ export function PreviewPanel({
         setVersionsRefreshKey((key) => key + 1);
       });
     }
-  }, [durableSourceOfTruth, sourceControl]);
+  }, [showSourceControlUi, sourceControl]);
 
-  // Free-tier: leave History if SoT was disabled after the tab was open.
+  // Free-tier: leave History if SoT features were disabled after the tab was open.
   useEffect(() => {
-    if (!durableSourceOfTruth && panelTab === "history") {
+    if (!showSourceControlUi && panelTab === "history") {
       setPanelTab("preview");
     }
-  }, [durableSourceOfTruth, panelTab]);
+  }, [showSourceControlUi, panelTab]);
 
   const applyPreviewRefresh = useCallback(() => {
     window.clearTimeout(previewReloadSpinTimerRef.current);
@@ -847,7 +847,7 @@ export function PreviewPanel({
                 [
                   { id: "preview", label: "Preview" },
                   { id: "files", label: "Files" },
-                  ...(durableSourceOfTruth
+                  ...(showSourceControlUi
                     ? ([{ id: "history", label: "History" }] as const)
                     : []),
                 ] as const
@@ -877,7 +877,7 @@ export function PreviewPanel({
                 </button>
               ))}
             </div>
-            {durableSourceOfTruth ? (
+            {showSourceControlUi ? (
               <SourceControlStatusChip
                 sourceControl={sourceControl}
                 visible
@@ -942,7 +942,7 @@ export function PreviewPanel({
             </button>
           ) : (
             <>
-              {durableSourceOfTruth ? (
+              {showSourceControlUi ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -967,7 +967,7 @@ export function PreviewPanel({
                   )}
                 </button>
               ) : null}
-              {durableSourceOfTruth ? (
+              {showSourceControlUi ? (
                 <GithubSyncPanel
                   sessionId={sessionId}
                   visible
@@ -1115,7 +1115,7 @@ export function PreviewPanel({
           }`}
           aria-hidden={panelTab !== "history"}
         >
-          {historyMounted && durableSourceOfTruth ? (
+          {historyMounted && showSourceControlUi ? (
             <VersionHistoryPanel
               key={sessionId}
               sessionId={sessionId}

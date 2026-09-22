@@ -18,8 +18,3 @@ export function isDaytonaFreePlan(): boolean {
   }
   return false;
 }
-
-/** Inverse of free plan — Freestyle durable source of truth is on. */
-export function isDurableSourceOfTruthEnabled(): boolean {
-  return !isDaytonaFreePlan();
-}
