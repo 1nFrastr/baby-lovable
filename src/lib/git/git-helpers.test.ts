@@ -7,7 +7,7 @@ import {
 import { redactSecrets } from "./provision-repo";
 import { sourceControlFromRepository, emptyGitRepository } from "./types";
 import { buildTurnCommitMessage } from "./commit-message";
-import { FakeDaytonaGitRunner } from "@/lib/sandbox/daytona/git-runner";
+import { FakeSandboxGitRunner } from "@/lib/sandbox/git-runner";
 
 describe("freestyle git helpers", () => {
   it("redacts tokens from error strings", () => {
@@ -86,9 +86,9 @@ describe("freestyle git helpers", () => {
   });
 });
 
-describe("FakeDaytonaGitRunner contract", () => {
+describe("FakeSandboxGitRunner contract", () => {
   it("records SDK-style calls without shell git", async () => {
-    const git = new FakeDaytonaGitRunner();
+    const git = new FakeSandboxGitRunner();
     git.dirty = true;
     await git.initMain();
     await git.ensureRemote("https://git.freestyle.sh/r1");

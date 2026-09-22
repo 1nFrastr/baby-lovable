@@ -17,7 +17,10 @@ import type {
   SandboxStatus,
 } from "./preview-types";
 
-/** Daytona is the sole preview backend in every environment. */
+/**
+ * Shared preview facade. Reconciler + session-sticky `sandbox_mode` choose
+ * Daytona or Vercel; callers stay provider-agnostic.
+ */
 export interface PreviewBackend {
   getSandboxStatus(sessionId: string): Promise<SandboxStatus>;
   getAppServerStatus(sessionId: string): Promise<AppServerStatus>;

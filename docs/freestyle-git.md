@@ -1,13 +1,13 @@
 # Freestyle Git source of truth
 
-Every session uses Freestyle private-repo `main` as the durable source of truth for code; the Daytona working tree is a runtime projection.
+Every session uses Freestyle private-repo `main` as the durable source of truth for code; the sandbox working tree (Daytona or Vercel) is a runtime projection.
 
 ## Behavior summary
 
 - One session → one Freestyle private repository (`session_git_repositories`)
 - The Agent only edits sandbox files and does not get Git tools; `.git` is protected by `protected-paths`
 - After each turn ends (success / failure) the platform automatically runs `status → add → commit → push`
-- Git operations go only through Daytona SDK `sandbox.git.*`; `process.executeCommand("git …")` is forbidden
+- Git operations go through the sandbox provider git runner (Daytona SDK `sandbox.git.*`, or argv `git` inside the Vercel adapter). Agent tools still cannot run `git`.
 - The chat input only looks at `run` status; `sourceControl` is projected separately for syncing / failed / conflict
 - Web UI (Daytona): preview-bar status chip + read-only **History** version list (`GET /api/sessions/:id/versions`); revert is not supported yet
 - **GitHub Sync (optional)**: install the platform App from the preview bar → pick one personal repo already authorized by the installation → Freestyle `githubSync.enable`; Freestyle handles two-way mirroring (no force-push)

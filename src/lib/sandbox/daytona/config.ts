@@ -1,19 +1,16 @@
 /** Daytona workspace filesystem — fast POSIX, safe for pnpm / .next / git. */
 import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import { getDefaultDevPort, getSandboxIdleMinutes } from "../config";
 
 export const DAYTONA_WORKSPACE_ROOT =
   process.env.DAYTONA_WORKSPACE_ROOT ?? "/home/daytona/workspace";
 
 export function getDaytonaDevPort(): number {
-  const raw = process.env.DAYTONA_DEV_PORT;
-  const parsed = raw ? Number(raw) : 3000;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3000;
+  return getDefaultDevPort();
 }
 
 export function getDaytonaIdleMinutes(): number {
-  const raw = process.env.DAYTONA_SANDBOX_IDLE_MINUTES;
-  const parsed = raw ? Number(raw) : 30;
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30;
+  return getSandboxIdleMinutes();
 }
 
 /**

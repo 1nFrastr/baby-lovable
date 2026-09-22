@@ -1,4 +1,5 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { parseSandboxMode } from "../types";
 
 import {
   emptyRuntimeSnapshot,
@@ -12,6 +13,8 @@ interface RuntimeRow {
   generation: number;
   desired: string;
   observed: string;
+  provider: string | null;
+  provider_meta: Record<string, unknown> | null;
   sandbox_id: string | null;
   dev_session_name: string | null;
   dev_cmd_id: string | null;
@@ -32,6 +35,8 @@ function rowToSnapshot(row: RuntimeRow): DaytonaRuntimeSnapshot {
     generation: row.generation,
     desired: row.desired as DaytonaRuntimeSnapshot["desired"],
     observed: row.observed as DaytonaRuntimeSnapshot["observed"],
+    provider: parseSandboxMode(row.provider) ?? "daytona",
+    providerMeta: row.provider_meta ?? {},
     sandboxId: row.sandbox_id,
     devSessionName: row.dev_session_name,
     devCmdId: row.dev_cmd_id ?? null,
@@ -56,6 +61,8 @@ function snapshotToRow(
     generation: snapshot.generation,
     desired: snapshot.desired,
     observed: snapshot.observed,
+    provider: snapshot.provider,
+    provider_meta: snapshot.providerMeta ?? {},
     sandbox_id: snapshot.sandboxId,
     dev_session_name: snapshot.devSessionName,
     dev_cmd_id: snapshot.devCmdId,
@@ -75,7 +82,7 @@ export async function readRuntimeSupabase(
   const supabase = getSupabaseAdminClient();
 
   const { data, error } = await supabase
-    .from("session_daytona_runtime")
+    .from("session_sandbox_runtime")
     .select("*")
     .eq("session_id", sessionId)
     .maybeSingle();
@@ -104,7 +111,7 @@ export async function writeRuntimeSupabase(
 
   if (expectedRevision === null) {
     const { data, error } = await supabase
-      .from("session_daytona_runtime")
+      .from("session_sandbox_runtime")
       .insert(row)
       .select("*")
       .single();
@@ -121,7 +128,7 @@ export async function writeRuntimeSupabase(
   }
 
   const { data, error } = await supabase
-    .from("session_daytona_runtime")
+    .from("session_sandbox_runtime")
     .update(row)
     .eq("session_id", snapshot.sessionId)
     .eq("revision", expectedRevision)
@@ -145,7 +152,7 @@ export async function deleteRuntimeSupabase(sessionId: string): Promise<void> {
   const supabase = getSupabaseAdminClient();
 
   const { error } = await supabase
-    .from("session_daytona_runtime")
+    .from("session_sandbox_runtime")
     .delete()
     .eq("session_id", sessionId);
 

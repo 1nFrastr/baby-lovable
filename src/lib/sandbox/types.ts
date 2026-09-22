@@ -1,16 +1,29 @@
-export const SANDBOX_MODE = "daytona" as const;
-export type SandboxMode = typeof SANDBOX_MODE;
+import type { SandboxGitRunner } from "./git-runner";
+
+export const SANDBOX_MODES = ["daytona", "vercel"] as const;
+export type SandboxMode = (typeof SANDBOX_MODES)[number];
+
+const SANDBOX_MODE_SET = new Set<string>(SANDBOX_MODES);
 
 /** Parse a sandbox mode string; returns null if invalid. */
 export function parseSandboxMode(value: unknown): SandboxMode | null {
-  return value === SANDBOX_MODE ? SANDBOX_MODE : null;
+  if (typeof value !== "string") {
+    return null;
+  }
+  return SANDBOX_MODE_SET.has(value) ? (value as SandboxMode) : null;
+}
+
+function readProviderEnv(): SandboxMode | null {
+  const raw = process.env.SANDBOX_PROVIDER?.trim().toLowerCase();
+  return parseSandboxMode(raw);
 }
 
 /**
- * The only supported sandbox for every environment.
+ * New sessions pick a provider from SANDBOX_PROVIDER (daytona | vercel).
+ * Default is Vercel Sandbox. Existing sessions stay sticky on sandbox_mode.
  */
 export function getDefaultSandboxMode(): SandboxMode {
-  return SANDBOX_MODE;
+  return readProviderEnv() ?? "vercel";
 }
 
 export function assertSandboxMode(
@@ -22,7 +35,7 @@ export function assertSandboxMode(
   }
   const suffix = sessionId ? ` for session ${sessionId}` : "";
   throw new Error(
-    `Unsupported sandbox mode${suffix}: ${String(value)}. Only Daytona + Freestyle sessions are supported.`,
+    `Unsupported sandbox mode${suffix}: ${String(value)}. Supported: ${SANDBOX_MODES.join(", ")}.`,
   );
 }
 
@@ -34,7 +47,7 @@ export interface FileInfo {
   modifiedAt?: string;
 }
 
-/** One hit from workspace text search (`searchContent` → Daytona `findFiles`). */
+/** One hit from workspace text search (`searchContent`). */
 export interface ContentSearchMatch {
   path: string;
   line: number;
@@ -56,9 +69,9 @@ export interface SandboxFileSystem {
   createFolder(path: string, mode?: string): Promise<void>;
   deleteFile(path: string, recursive?: boolean): Promise<void>;
   moveFiles(source: string, destination: string): Promise<void>;
-  /** Filename glob match (Daytona `searchFiles`). */
+  /** Filename glob match. */
   searchFiles(path: string, pattern: string): Promise<string[]>;
-  /** Text inside files (Daytona `findFiles`; public tool is `searchContent`). */
+  /** Text inside files (public tool is `searchContent`). */
   searchContent(path: string, query: string): Promise<ContentSearchMatch[]>;
   getFileDetails(path: string): Promise<FileInfo>;
 }
@@ -74,10 +87,13 @@ export interface SandboxProcessRunner {
 
 export interface ProjectSandbox {
   readonly id: string;
+  /** Provider VM / named-sandbox id (opaque to callers). */
+  readonly sandboxId: string;
   readonly description: string;
   readonly rootDir: string;
   fs: SandboxFileSystem;
   process: SandboxProcessRunner;
-  /** Freestyle sync uses Daytona SDK git, never shell git. */
-  git: import("./daytona/git-runner").DaytonaGitRunner;
+  git: SandboxGitRunner;
 }
+
+export type { SandboxGitRunner } from "./git-runner";

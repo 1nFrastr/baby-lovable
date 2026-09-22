@@ -13,7 +13,7 @@ This repo has two layers:
 | Layer | Path | Role |
 | --- | --- | --- |
 | **Host app** | `src/` | Next.js UI, API routes, CLI, WorkflowAgent, sandbox/dev-server management |
-| **Generated apps** | Daytona workspace + Freestyle `main` | Per-session Next.js projects scaffolded from `templates/nextjs-starter` |
+| **Generated apps** | Daytona or Vercel Sandbox workspace + Freestyle `main` | Per-session Next.js projects scaffolded from `templates/nextjs-starter` |
 
 Stack: Vercel AI SDK v7 + WorkflowAgent + Workflow DevKit — `ai@7`, `@ai-sdk/workflow@1`, `workflow@4`, `@ai-sdk/react@4`, Next.js 16 with `withWorkflow()`.
 
@@ -46,7 +46,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
 - **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks). For isolated local DB debugging (Studio + migrations, no remote foot-guns), see `docs/local-supabase.md`. Schema changes: local Docker only; production is applied by GitHub Actions — see **Supabase schema changes** below.
-- **Daytona + Freestyle** — Freestyle `main` is the durable source of truth; the Daytona working tree is a projection. There is no local sandbox mode. See `docs/freestyle-git.md`. Set `DAYTONA_FREE_PLAN=1` for free-tier ephemeral mode (Daytona only; no Freestyle / GitHub Sync / History / Export).
+- **Daytona + Vercel Sandbox + Freestyle** — Freestyle `main` is the durable source of truth; the sandbox working tree is a projection. New sessions default to Vercel Sandbox (`SANDBOX_PROVIDER`, override with `daytona`). There is no local sandbox mode. See `docs/freestyle-git.md`. Set `DAYTONA_FREE_PLAN=1` for free-tier ephemeral mode (Daytona only; no Freestyle / GitHub Sync / History / Export).
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
 ## CLI — headless agent runner (preferred for AI verification)
@@ -159,7 +159,7 @@ For host-app code changes (not generated apps), also run `npm run lint` and `npm
 | `src/workflow/builder-agent.ts` | Shared WorkflowAgent + system prompt |
 | `src/workflow/builder-chat.ts` | Durable web workflow (`'use workflow'`) |
 | `src/lib/session/store.ts` | Supabase session CRUD facade |
-| `src/lib/sandbox/` | Daytona sandbox, runtime reconciliation, dev-server |
+| `src/lib/sandbox/` | Multi-provider sandbox (Daytona + Vercel), shared reconciler, preview |
 | `src/tools/` | Builder tools and `'use step'` implementations |
 | `templates/nextjs-starter/` | Workspace scaffold copied per session |
 | `src/app/api/sessions/` | REST: chat stream, preview status |
@@ -172,7 +172,10 @@ See `.env.example`:
 - `AI_MODEL` — default `zai/glm-5.3-flash`
 - `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend. Local Host: `.env.local` → Docker Supabase (`docs/local-supabase.md`). Production: Vercel Dashboard only.
 - `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs (local seed: `11111111-1111-1111-1111-111111111111`)
-- `DAYTONA_API_KEY` — required remote workspace
+- `DAYTONA_API_KEY` — Daytona provider (when `SANDBOX_PROVIDER=daytona` or sticky Daytona sessions)
+- `SANDBOX_PROVIDER` — `vercel` (default for new sessions) or `daytona`
+- `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_ID` — Vercel Sandbox (OIDC on Vercel production)
+- `VERCEL_SANDBOX_SNAPSHOT` — optional prebaked snapshot from `npm run build:vercel-snapshot`
 - `FREESTYLE_API_KEY` — durable Git source of truth (required unless `DAYTONA_FREE_PLAN=1`)
 - `DAYTONA_FREE_PLAN` — optional; `1`/`true`/`on` enables free-tier ephemeral Daytona (no Freestyle SoT)
 

@@ -1,9 +1,13 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 
-import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
-import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
+import {
+  assertFreestyleForDaytona,
+  shouldUseFreestyle,
+} from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
+import { isVercelSandboxConfigured } from "@/lib/sandbox/vercel/config";
+import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 import { assertSupabaseMetadataConfigured } from "@/lib/supabase/config";
 import { awaitRuntimeDesired } from "@/lib/sandbox/preview";
 import {
@@ -54,7 +58,18 @@ export async function POST(request: Request) {
     title?: string;
   };
 
-  if (!isDaytonaConfigured()) {
+  const mode = getDefaultSandboxMode();
+  if (mode === "vercel") {
+    if (!isVercelSandboxConfigured()) {
+      return NextResponse.json(
+        {
+          error:
+            "Vercel Sandbox is not configured. Set VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID (or deploy on Vercel with OIDC).",
+        },
+        { status: 400 },
+      );
+    }
+  } else if (!isDaytonaConfigured()) {
     return NextResponse.json(
       {
         error:
@@ -65,7 +80,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    assertFreestyleForDaytona();
+    assertFreestyleForDaytona(mode);
   } catch (error) {
     return NextResponse.json(
       {
@@ -90,7 +105,7 @@ export async function POST(request: Request) {
     // response so "New Project" is not blocked on git/VM (UI already shows
     // preparing; hydrate still calls ensureFreestyleRepository if needed).
     after(async () => {
-      const provision = !isDaytonaFreePlan()
+      const provision = shouldUseFreestyle(session.sandboxMode)
         ? (async () => {
             try {
               const { kickFreestyleProvisionWorkflow } = await import(

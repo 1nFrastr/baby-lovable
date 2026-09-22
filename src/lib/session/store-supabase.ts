@@ -220,7 +220,6 @@ export async function listSessionsSupabase(
       "id, user_id, title, created_at, updated_at, last_run_id, run_status, message_count",
     )
     .eq("user_id", userId)
-    .eq("sandbox_mode", "daytona")
     .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 

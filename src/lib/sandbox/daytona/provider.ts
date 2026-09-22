@@ -9,7 +9,8 @@ import {
   type SandboxProcessRunner,
 } from "../types";
 import { DAYTONA_WORKSPACE_ROOT } from "./config";
-import { DaytonaSdkGitRunner, type DaytonaGitRunner } from "./git-runner";
+import { DaytonaSdkGitRunner } from "./git-runner";
+import type { SandboxGitRunner } from "../git-runner";
 
 function normalizeRelativePath(targetPath: string): string {
   const normalized = targetPath.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -171,16 +172,19 @@ class DaytonaSandboxProcessRunner implements SandboxProcessRunner {
 
 export class DaytonaProjectSandbox implements ProjectSandbox {
   readonly id: string;
+  readonly sandboxId: string;
   readonly rootDir: string;
   readonly description: string;
   readonly fs: SandboxFileSystem;
   readonly process: SandboxProcessRunner;
-  readonly git: DaytonaGitRunner;
+  readonly git: SandboxGitRunner;
+  /** Daytona SDK handle — adapter-internal; not part of ProjectSandbox. */
   readonly sdkSandbox: Sandbox;
 
   constructor(sessionId: string, sdkSandbox: Sandbox) {
     this.id = sessionId;
     this.sdkSandbox = sdkSandbox;
+    this.sandboxId = sdkSandbox.id;
     this.rootDir = DAYTONA_WORKSPACE_ROOT;
     this.description = `Daytona sandbox ${sdkSandbox.id} for session ${sessionId}`;
     this.fs = new DaytonaSandboxFileSystem(sdkSandbox);

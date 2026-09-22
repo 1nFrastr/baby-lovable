@@ -5,7 +5,7 @@
  * (including pnpm-lock.yaml) but not node_modules — install from the lockfile.
  */
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
-import type { DaytonaProjectSandbox } from "./provider";
+import type { ProjectSandbox } from "../types";
 import { resolvePackageManager } from "../package-manager";
 
 /** Generous enough for incremental install on top of snapshot node_modules. */
@@ -17,7 +17,7 @@ const restoreInFlight = new Map<
 >();
 
 export async function installWorkspaceFromLockfile(
-  sandbox: DaytonaProjectSandbox,
+  sandbox: ProjectSandbox,
   sessionId: string,
 ): Promise<void> {
   const command = resolvePackageManager().installFrozen;
@@ -51,7 +51,7 @@ export async function installWorkspaceFromLockfile(
  */
 export async function restoreHydratedWorkspace(
   sessionId: string,
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   userId: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const pending = restoreInFlight.get(sessionId);

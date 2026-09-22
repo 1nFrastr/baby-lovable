@@ -17,7 +17,6 @@ import { Daytona } from "@daytona/sdk";
 
 import { streamDevCommandLogs } from "@/lib/sandbox/daytona/dev-log-stream";
 import { resolveDevCmdId } from "@/lib/sandbox/daytona/resolve-dev-cmd-id";
-import { getExistingDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
 import { getRuntimeSnapshot } from "@/lib/sandbox/daytona/runtime-store";
 import { getSession } from "@/lib/session/store";
 
@@ -173,46 +172,39 @@ async function probeSession(sessionId: string, followMs: number) {
   });
   log(
     "RUNTIME",
-    `observed=${snap.observed} desired=${snap.desired} gen=${snap.generation} rev=${snap.revision}`,
+    `provider=${snap.provider} observed=${snap.observed} desired=${snap.desired} gen=${snap.generation} rev=${snap.revision}`,
   );
   log(
     "RUNTIME",
     `sandbox=${snap.sandboxId ?? "null"} session=${snap.devSessionName ?? "null"} cmdId=${snap.devCmdId ?? "null"}`,
   );
 
-  if (!snap.devSessionName) {
+  const { getSandboxDriverForSession } = await import(
+    "@/lib/sandbox/providers"
+  );
+  const driver = await getSandboxDriverForSession(sessionId);
+  const sessionName =
+    snap.devSessionName ?? driver.defaultDevSessionName(sessionId);
+  if (!sessionName) {
     throw new Error("devSessionName missing — start preview first");
   }
 
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: true });
-  if (!sandbox) {
-    throw new Error("Could not attach Daytona sandbox");
+  if (!snap.sandboxId) {
+    throw new Error("Could not attach sandbox");
+  }
+  const project = await driver.reconnect(sessionId, snap.sandboxId, true);
+  if (!project) {
+    throw new Error("Could not attach sandbox");
   }
 
-  const cmdId = await resolveDevCmdId(
-    sandbox.sdkSandbox,
-    snap.devSessionName,
+  const cmdId = await driver.resolveDevCmdId(
+    project,
+    sessionName,
     snap.devCmdId,
   );
   log("CMD", `resolved cmdId=${cmdId ?? "null"}`);
   if (!cmdId) {
-    throw new Error("Could not resolve devCmdId from runtime or session list");
-  }
-
-  // List session commands for diagnostics
-  try {
-    const sess = await sandbox.sdkSandbox.process.getSession(snap.devSessionName);
-    for (const c of sess.commands ?? []) {
-      log(
-        "SESSCMD",
-        `id=${c.id} exit=${c.exitCode ?? "running"} cmd=${(c.command ?? "").slice(0, 80)}`,
-      );
-    }
-  } catch (error) {
-    log(
-      "SESSCMD",
-      `list failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new Error("Could not resolve devCmdId from runtime or provider");
   }
 
   const events: Array<{ t: number; type: string }> = [];
@@ -221,11 +213,13 @@ async function probeSession(sessionId: string, followMs: number) {
   const timer = setTimeout(() => ac.abort(), followMs);
 
   try {
-    await streamDevCommandLogs(
-      sandbox.sdkSandbox,
-      snap.devSessionName,
+    await driver.streamDevLogs({
+      project,
+      sessionId,
+      sessionName,
       cmdId,
-      (event) => {
+      generation: snap.generation,
+      onEvent: (event) => {
         events.push({ t: Date.now() - t0, type: event.type });
         if (event.type === "snapshot") {
           const text = `${event.stdout ?? ""}${event.stderr ?? ""}`;
@@ -243,8 +237,8 @@ async function probeSession(sessionId: string, followMs: number) {
           log("ERROR", event.message);
         }
       },
-      ac.signal,
-    );
+      signal: ac.signal,
+    });
   } finally {
     clearTimeout(timer);
   }

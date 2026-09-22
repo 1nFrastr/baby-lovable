@@ -3,7 +3,7 @@
  * Each source is a fixed, allowlisted stream — not arbitrary shell or paths.
  */
 
-import { getExistingDaytonaSandbox } from "./daytona/sandbox";
+import { getExistingProjectSandbox } from "./factory";
 import { readDevLogLines } from "./daytona/app-server-health";
 
 export const READ_LOG_SOURCES = ["preview"] as const;
@@ -47,7 +47,7 @@ export async function readSessionLog(
     };
   }
 
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
+  const sandbox = await getExistingProjectSandbox(sessionId, { wake: false });
   if (!sandbox) {
     return {
       ok: false,

@@ -5,24 +5,16 @@
 import { randomUUID } from "node:crypto";
 
 import { getSessionOwner } from "@/lib/session/store";
-import {
-  DEV_SESSION,
-  formatStartError,
-  startDevSession,
-  stopDevSession,
-} from "./app-server-boot";
+import { getDefaultDevPort } from "../config";
+import { getSandboxDriver, clearSandboxDriverCache } from "../providers";
+import type { ProjectSandbox } from "../types";
+import type { SandboxVmDriver } from "../vm-driver";
 import {
   httpStatus,
   STARTING_DEV_HTTP_TIMEOUT_MS,
 } from "./app-server-health";
 import { logDaytonaBootstrap, logDaytonaTiming } from "./bootstrap-log";
-import { getDaytonaDevPort } from "./config";
-import { clearDaytonaAttachCache } from "./fs-attach-cache";
-import type { DaytonaProjectSandbox } from "./provider";
-import {
-  observeRuntime,
-  type ObservedRuntime,
-} from "./runtime-observer";
+import type { ObservedRuntime } from "./runtime-observer";
 import {
   deriveAllStatus,
   deriveAppServerStatus,
@@ -42,18 +34,14 @@ import {
   upsertRuntimeSnapshot,
 } from "./runtime-store";
 import {
-  createSandbox,
-  deleteSandboxById,
-  ensureSandboxPublic,
-  reconnectSandbox,
-  sandboxRecordExists,
-  wrapSandbox,
-} from "./vm";
-import {
   clearWorkspaceRestoreForTests,
   isWorkspaceRestoreInFlight,
   restoreHydratedWorkspace,
 } from "./workspace-restore";
+
+function driverOf(snapshot: DaytonaRuntimeSnapshot): SandboxVmDriver {
+  return getSandboxDriver(snapshot.provider ?? "daytona");
+}
 
 const LEASE_TTL_MS = 45_000;
 const RECONCILE_TIMEOUT_MS = 180_000;
@@ -82,7 +70,7 @@ async function observeStartingDevLight(
   snapshot: DaytonaRuntimeSnapshot,
 ): Promise<ObservedRuntime> {
   const url = snapshot.previewUrl!;
-  const port = snapshot.previewPort ?? getDaytonaDevPort();
+  const port = snapshot.previewPort ?? getDefaultDevPort();
   const t0 = Date.now();
   const probe = await httpStatus(
     url,
@@ -146,7 +134,7 @@ function applyObservation(
 ): Partial<DaytonaRuntimeSnapshot> {
   // Console / external delete: clear durable id so recreate + Freestyle hydrate run.
   if (observed.confirmedAbsent) {
-    clearDaytonaAttachCache(snapshot.sessionId);
+    driverOf(snapshot).clearAttachCache(snapshot.sessionId);
     return {
       observed: "missing",
       sandboxId: null,
@@ -265,12 +253,16 @@ async function attachProject(
   sessionId: string,
   sandboxId: string,
   wake: boolean,
-): Promise<DaytonaProjectSandbox | null> {
-  const sdk = await reconnectSandbox(sessionId, sandboxId, wake);
-  if (!sdk) {
-    return null;
+  snapshot?: DaytonaRuntimeSnapshot,
+): Promise<ProjectSandbox | null> {
+  const current =
+    snapshot ?? (await getRuntimeSnapshot(sessionId, null, { fresh: true }));
+  const driver = driverOf(current);
+  const project = await driver.reconnect(sessionId, sandboxId, wake);
+  if (project) {
+    await driver.extendSessionIfNeeded(project);
   }
-  return wrapSandbox(sessionId, sdk);
+  return project;
 }
 
 async function upsertWithRetry(
@@ -325,7 +317,7 @@ export async function markSandboxExternallyDeleted(
     `external delete — clear ${current.sandboxId.slice(0, 12)}`,
   );
   // Drop process-local FS handle so files/tools never keep using the dead id.
-  clearDaytonaAttachCache(sessionId);
+  driverOf(current).clearAttachCache(sessionId);
   return upsertWithRetry(sessionId, {
     sandboxId: null,
     observed: "missing",
@@ -437,7 +429,7 @@ function needsBlockingFreestyleHydrate(remoteHeadSha: string | null | undefined)
  */
 function kickBackgroundFreestyleHydrate(
   sessionId: string,
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   userId: string | null,
 ): void {
   if (hydrateInFlight.has(sessionId)) {
@@ -528,48 +520,42 @@ async function actionCreateSandbox(
     }
 
     const tCreate = Date.now();
-    const sdk = await createSandbox(sessionId);
+    const driver = driverOf(latest);
+    const created = await driver.create(sessionId);
     logDaytonaTiming(
       sessionId,
       "action.createSandbox",
       Date.now() - tCreate,
-      `id=${sdk.id}`,
+      `id=${created.sandboxId}`,
     );
 
     // CAS: only the first writer keeps the id; losers delete the orphan VM.
     latest = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-    if (latest.sandboxId && latest.sandboxId !== sdk.id) {
+    if (latest.sandboxId && latest.sandboxId !== created.sandboxId) {
       logDaytonaBootstrap(
         sessionId,
         "reconcile",
         `create orphan — peer won kept=${latest.sandboxId.slice(0, 12)}`,
       );
-      await deleteSandboxById(sessionId, sdk.id);
+      await driver.deleteById(sessionId, created.sandboxId);
       return;
     }
 
-    const previewPort = getDaytonaDevPort();
-    let previewUrl: string | null = null;
-    try {
-      await ensureSandboxPublic(sdk);
-      const link = await sdk.getPreviewLink(previewPort);
-      previewUrl = link.url;
-    } catch {
-      // iframe can wait until startDev; create still succeeds
-    }
+    const previewPort = created.previewPort;
+    const previewUrl = created.previewUrl;
+    const project = created.project;
 
     // Freestyle: recreate (remoteHeadSha set) blocks pull+install; new sessions
     // defer hydrate so snapshot-baked workspace can start pnpm immediately.
     const { shouldUseFreestyle } = await import("@/lib/git/freestyle-config");
-    if (shouldUseFreestyle()) {
+    if (shouldUseFreestyle(latest.provider)) {
       const { readGitRepository } = await import("@/lib/git/repository-store");
       const repo = await readGitRepository(sessionId, userId);
       const blockHydrate = needsBlockingFreestyleHydrate(repo?.remoteHeadSha);
-      const project = wrapSandbox(sessionId, sdk);
 
       if (blockHydrate) {
         await upsertWithRetry(sessionId, {
-          sandboxId: sdk.id,
+          sandboxId: created.sandboxId,
           observed: "bootstrapping-workspace",
           lastError: null,
           previewPort,
@@ -602,7 +588,7 @@ async function actionCreateSandbox(
     }
 
     const createdPatch = {
-      sandboxId: sdk.id,
+      sandboxId: created.sandboxId,
       observed: "workspace-ready" as const,
       lastError: null,
       previewPort,
@@ -617,13 +603,13 @@ async function actionCreateSandbox(
       });
     } catch {
       const again = await getRuntimeSnapshot(sessionId, null, { fresh: true });
-      if (again.sandboxId && again.sandboxId !== sdk.id) {
+      if (again.sandboxId && again.sandboxId !== created.sandboxId) {
         logDaytonaBootstrap(
           sessionId,
           "reconcile",
           `create orphan — CAS lost kept=${again.sandboxId.slice(0, 12)}`,
         );
-        await deleteSandboxById(sessionId, sdk.id);
+        await driver.deleteById(sessionId, created.sandboxId);
         return;
       }
       await upsertWithRetry(sessionId, createdPatch);
@@ -675,19 +661,13 @@ async function actionStartDev(
   });
 
   const tStart = Date.now();
-  const started = await startDevSession(project, sessionId);
+  const driver = driverOf(snapshot);
+  const started = await driver.startDev(project, sessionId);
   logDaytonaTiming(sessionId, "action.startDev.session", Date.now() - tStart);
 
   // Publish the public proxy URL immediately so the UI can mount the iframe
   // while Next is still booting (502 until ready). Do not wait for observe.
-  let previewUrl = snapshot.previewUrl;
-  try {
-    await ensureSandboxPublic(project.sdkSandbox);
-    const link = await project.sdkSandbox.getPreviewLink(started.port);
-    previewUrl = link.url;
-  } catch {
-    // keep prior url if any
-  }
+  const previewUrl = started.previewUrl ?? snapshot.previewUrl;
 
   await upsertWithRetry(sessionId, {
     observed: "starting-devserver",
@@ -712,7 +692,7 @@ async function actionStopPreview(
   const project = sandboxId
     ? await attachProject(sessionId, sandboxId, false)
     : null;
-  await stopDevSession(project, sessionId);
+  await driverOf(latest).stopDev(project, sessionId);
 
   await upsertWithRetry(sessionId, {
     observed: sandboxId ? "workspace-ready" : "missing",
@@ -741,7 +721,7 @@ async function actionDelete(
       const { shouldUseFreestyle } = await import(
         "@/lib/git/freestyle-config"
       );
-      if (shouldUseFreestyle()) {
+      if (shouldUseFreestyle(latest.provider)) {
         try {
           const { flushPendingCheckpoints } = await import("@/lib/git/turn-sync");
           await flushPendingCheckpoints(sessionId, project);
@@ -755,23 +735,21 @@ async function actionDelete(
           throw error;
         }
       }
-      await stopDevSession(project, sessionId);
-      try {
-        await project.sdkSandbox.delete(60);
-      } catch {
-        // already gone
-      }
+      await driverOf(latest).stopDev(project, sessionId);
+      await driverOf(latest).deleteProject(project);
     } else {
-      await deleteSandboxById(sessionId, sandboxId);
+      await driverOf(latest).deleteById(sessionId, sandboxId);
     }
   }
 
+  clearSandboxDriverCache(sessionId);
   await clearRuntimeSnapshot(sessionId);
   // Re-seed empty deleted state.
   await upsertRuntimeSnapshot(sessionId, {
     expectedRevision: 0,
     desired: "deleted",
     observed: "missing",
+    provider: snapshot.provider,
     sandboxId: null,
     devSessionName: null,
     devCmdId: null,
@@ -834,7 +812,7 @@ async function reconcileOnce(
       "reconcile",
       `clear stale sandbox after external delete ${latest.sandboxId.slice(0, 12)}`,
     );
-    clearDaytonaAttachCache(sessionId);
+    driverOf(latest).clearAttachCache(sessionId);
     latest = await upsertWithRetry(sessionId, {
       sandboxId: null,
       observed: "missing",
@@ -887,7 +865,7 @@ async function reconcileOnce(
       return false;
     }
     const { shouldUseFreestyle } = await import("@/lib/git/freestyle-config");
-    if (!shouldUseFreestyle()) {
+    if (!shouldUseFreestyle(latest.provider)) {
       await upsertWithRetry(sessionId, {
         observed: "workspace-ready",
         lastError: null,
@@ -958,7 +936,7 @@ async function maybeKickBackgroundHydrate(
     return "ok";
   }
   const { shouldUseFreestyle } = await import("@/lib/git/freestyle-config");
-  if (!shouldUseFreestyle()) {
+  if (!shouldUseFreestyle(latest.provider)) {
     return "ok";
   }
   const { readGitRepository } = await import("@/lib/git/repository-store");
@@ -1062,13 +1040,13 @@ async function reconcileLoop(
         isStalePreviewLinkStatus(observed.httpStatus)
       ) {
         usedLightProbe = false;
-        observed = await observeRuntime(sessionId, {
+        observed = await driverOf(snapshot).observe(sessionId, {
           wake: true,
           snapshot,
         });
       }
     } else {
-      observed = await observeRuntime(sessionId, {
+      observed = await driverOf(snapshot).observe(sessionId, {
         wake:
           snapshot.desired === "sandbox-ready" ||
           snapshot.desired === "preview-ready" ||
@@ -1122,7 +1100,7 @@ async function reconcileLoop(
       snapshot = await upsertWithRetry(
         sessionId,
         {
-          devSessionName: DEV_SESSION(sessionId),
+          devSessionName: driverOf(snapshot).defaultDevSessionName(sessionId),
           lastError: null,
         },
         8,
@@ -1215,12 +1193,17 @@ export async function ensureDesiredState(
   if (!sessionOwner) {
     throw new Error(`Session not found: ${sessionId}`);
   }
-  if (sessionOwner.sandboxMode !== "daytona") {
-    throw new Error(`Session ${sessionId} is not in daytona mode`);
+  if (sessionOwner.sandboxMode !== "daytona" && sessionOwner.sandboxMode !== "vercel") {
+    throw new Error(`Session ${sessionId} is not in a supported sandbox mode`);
   }
   const userId = sessionOwner.userId;
 
   let snapshot = await getRuntimeSnapshot(sessionId, userId, { fresh: true });
+  if (snapshot.revision === 0 || snapshot.provider !== sessionOwner.sandboxMode) {
+    if (snapshot.revision === 0) {
+      snapshot = { ...snapshot, provider: sessionOwner.sandboxMode };
+    }
+  }
 
   // What the caller needs vs what we write as durable desired.
   // FS attach requests sandbox-ready; UI warm may already have preview-ready —
@@ -1246,7 +1229,7 @@ export async function ensureDesiredState(
       (requestedDesired === "sandbox-ready" ||
         requestedDesired === "preview-ready")
     ) {
-      const exists = await sandboxRecordExists(snapshot.sandboxId);
+      const exists = await driverOf(snapshot).exists(snapshot.sandboxId);
       if (!exists) {
         // Console / external delete left a zombie id — clear and fall through to recreate.
         snapshot = await markSandboxExternallyDeleted(sessionId);
@@ -1273,16 +1256,18 @@ export async function ensureDesiredState(
           }
           if (!snapshot.devSessionName) {
             snapshot = await upsertWithRetry(sessionId, {
-              devSessionName: DEV_SESSION(sessionId),
+              devSessionName: driverOf(snapshot).defaultDevSessionName(sessionId),
               lastError: null,
             });
           }
+          heartbeatSandboxInBackground(sessionId);
           return snapshot;
         }
         snapshot = await demoteStalePreviewReady(sessionId, probe);
         // Fall through → reconcile actionStartDev (keep VM + .next).
       } else {
         // sandbox-ready: VM record exists is enough.
+        heartbeatSandboxInBackground(sessionId);
         return snapshot;
       }
     } else {
@@ -1316,6 +1301,7 @@ export async function ensureDesiredState(
         desired: targetDesired,
         generation: intentGeneration,
         lastError: null,
+        provider: sessionOwner.sandboxMode,
       };
       if (options?.restart) {
         // Force another startDev cycle; keep preview URL (port unchanged).
@@ -1383,7 +1369,7 @@ export async function ensureDesiredState(
         userId,
       );
     } catch (error) {
-      const detail = formatStartError(error);
+      const detail = driverOf(snapshot).formatStartError(error);
       logDaytonaBootstrap(sessionId, "reconcile", `failed: ${detail.slice(0, 200)}`, {
         generation: snapshot.generation,
         leaseOwner: owner,
@@ -1489,6 +1475,58 @@ export function refreshRuntimeInBackground(sessionId: string): void {
   });
 }
 
+const HEARTBEAT_MIN_INTERVAL_MS = 60_000;
+
+/**
+ * Vercel sessions die at `timeout` unless `extendTimeout` runs.
+ * Daytona is a no-op. Rate-limited so UI poll + log SSE stay under API limits.
+ */
+export function heartbeatSandboxInBackground(sessionId: string): void {
+  void heartbeatSandboxSession(sessionId).catch(() => {
+    // best-effort
+  });
+}
+
+export async function heartbeatSandboxSession(
+  sessionId: string,
+): Promise<void> {
+  const snapshot = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+  if (!snapshot.sandboxId) {
+    return;
+  }
+  if (
+    snapshot.desired !== "preview-ready" &&
+    snapshot.desired !== "sandbox-ready"
+  ) {
+    return;
+  }
+
+  const lastRaw = snapshot.providerMeta.lastHeartbeatAt;
+  const last =
+    typeof lastRaw === "string" ? Date.parse(lastRaw) : Number.NaN;
+  if (Number.isFinite(last) && Date.now() - last < HEARTBEAT_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  const driver = driverOf(snapshot);
+  const project = await driver.reconnect(sessionId, snapshot.sandboxId, true);
+  if (!project) {
+    return;
+  }
+  await driver.extendSessionIfNeeded(project);
+  try {
+    await upsertRuntimeSnapshot(sessionId, {
+      expectedRevision: snapshot.revision,
+      providerMeta: {
+        ...snapshot.providerMeta,
+        lastHeartbeatAt: new Date().toISOString(),
+      },
+    });
+  } catch {
+    // CAS loss is fine — next poll retries
+  }
+}
+
 /**
  * Soft observe without waking — updates durable snapshot.
  * Prefer peekRuntime* for UI; use this when status must be re-probed.
@@ -1505,7 +1543,7 @@ export async function readRuntime(
     return snapshot;
   }
 
-  const observed = await observeRuntime(sessionId, {
+  const observed = await driverOf(snapshot).observe(sessionId, {
     wake: false,
     snapshot,
   });
@@ -1626,7 +1664,7 @@ export async function checkRuntimePreview(sessionId: string) {
   }
 
   const tObserve = Date.now();
-  const observed = await observeRuntime(sessionId, {
+  const observed = await driverOf(snapshot).observe(sessionId, {
     wake: false,
     snapshot,
   });
@@ -1744,4 +1782,4 @@ export async function checkRuntimePreview(sessionId: string) {
   };
 }
 
-export { getDaytonaDevPort };
+export { getDefaultDevPort as getDaytonaDevPort };

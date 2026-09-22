@@ -54,4 +54,11 @@ describe("shouldUseFreestyle", () => {
     process.env.FREESTYLE_API_KEY = "fs_test_key";
     expect(shouldUseFreestyle()).toBe(true);
   });
+
+  it("is true for Vercel even when Daytona free plan is on", () => {
+    process.env.DAYTONA_FREE_PLAN = "1";
+    process.env.FREESTYLE_API_KEY = "fs_test_key";
+    expect(shouldUseFreestyle("vercel")).toBe(true);
+    expect(shouldUseFreestyle("daytona")).toBe(false);
+  });
 });

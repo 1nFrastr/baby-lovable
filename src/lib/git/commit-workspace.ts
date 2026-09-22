@@ -1,4 +1,4 @@
-import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
+import type { ProjectSandbox } from "@/lib/sandbox/types";
 import type { SandboxFileSystem } from "@/lib/sandbox/types";
 import {
   isProtectedPath,
@@ -77,7 +77,7 @@ async function collectWorkspaceCommitFiles(
 }
 
 async function realignSandboxGitToFreestyle(
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   remoteUrl: string,
   credentials: FreestyleGitCredentials,
   branch: string,
@@ -101,7 +101,7 @@ async function realignSandboxGitToFreestyle(
  * pull so later Daytona push/pull share history with Freestyle.
  */
 export async function commitWorkspaceViaFreestyleApi(
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   input: {
     repoId: string;
     remoteUrl: string;

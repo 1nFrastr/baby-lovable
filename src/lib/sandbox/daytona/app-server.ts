@@ -9,14 +9,20 @@ import {
   readRuntimeAppServerStatus,
 } from "./runtime-reconciler";
 import { deriveAppServerStatus } from "./runtime-state";
-import { getExistingDaytonaSandbox } from "./sandbox";
+import { getRuntimeSnapshot } from "./runtime-store";
+import { getSandboxDriverForSession } from "../providers";
 import { extractCompileError, readDevLog } from "./app-server-health";
 import { getDaytonaDevPort } from "./config";
 
 export async function getDaytonaBuildError(
   sessionId: string,
 ): Promise<string | null> {
-  const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: false });
+  const driver = await getSandboxDriverForSession(sessionId);
+  const snapshot = await getRuntimeSnapshot(sessionId);
+  if (!snapshot.sandboxId) {
+    return null;
+  }
+  const sandbox = await driver.reconnect(sessionId, snapshot.sandboxId, false);
   if (!sandbox) {
     return null;
   }

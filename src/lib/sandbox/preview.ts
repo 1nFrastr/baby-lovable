@@ -68,13 +68,16 @@ export async function getAllStatus(sessionId: string): Promise<AllStatus> {
 }
 
 /**
- * Fast UI status: durable Daytona runtime snapshot only.
+ * Fast UI status: durable runtime snapshot only.
  * When not ready / URL stale, kicks background soft-observe for the next poll.
+ * When already ready, heartbeats Vercel session timeout.
  */
 export async function peekAllStatus(sessionId: string): Promise<AllStatus> {
-  const { peekRuntimeAllStatus, refreshRuntimeInBackground } = await import(
-    "./daytona/runtime-reconciler"
-  );
+  const {
+    peekRuntimeAllStatus,
+    refreshRuntimeInBackground,
+    heartbeatSandboxInBackground,
+  } = await import("./daytona/runtime-reconciler");
   const { getRuntimeSnapshot } = await import("./daytona/runtime-store");
   const { hasFreshPreviewEmbed } = await import("./daytona/runtime-state");
 
@@ -83,6 +86,8 @@ export async function peekAllStatus(sessionId: string): Promise<AllStatus> {
 
   if (all.appServer.status !== "ready" || !hasFreshPreviewEmbed(snapshot)) {
     refreshRuntimeInBackground(sessionId);
+  } else {
+    heartbeatSandboxInBackground(sessionId);
   }
 
   return all;
