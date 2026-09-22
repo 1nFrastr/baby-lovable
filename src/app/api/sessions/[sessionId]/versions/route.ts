@@ -53,7 +53,7 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    if (isDaytonaFreePlan()) {
+    if (isDaytonaFreePlan(session.sandboxMode)) {
       return NextResponse.json(
         { versions: [], available: false },
         { headers: { "Cache-Control": "no-store" } },

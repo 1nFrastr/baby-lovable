@@ -4,14 +4,11 @@ import {
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { getSession } from "@/lib/session/store";
-import { DEV_SESSION } from "@/lib/sandbox/daytona/app-server-boot";
-import { streamDevCommandLogs } from "@/lib/sandbox/daytona/dev-log-stream";
-import { resolveDevCmdId } from "@/lib/sandbox/daytona/resolve-dev-cmd-id";
+import { getSandboxDriverForSession } from "@/lib/sandbox/providers";
 import {
   getRuntimeSnapshot,
   upsertRuntimeSnapshot,
 } from "@/lib/sandbox/daytona/runtime-store";
-import { getExistingDaytonaSandbox } from "@/lib/sandbox/daytona/sandbox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,30 +101,32 @@ export async function GET(
     if (!session) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
+    const driver = await getSandboxDriverForSession(sessionId);
     const snapshot = await getRuntimeSnapshot(sessionId, auth.userId, {
       fresh: true,
     });
-    // The preview URL can recover before a stale-ready reconciliation stores
-    // the process identity. Session names are deterministic, so recover the
-    // live command instead of leaving Console waiting forever.
     const sessionName =
       snapshot.devSessionName ??
-      (snapshot.observed === "preview-ready" ? DEV_SESSION(sessionId) : null);
+      (snapshot.observed === "preview-ready"
+        ? driver.defaultDevSessionName(sessionId)
+        : null);
     const generation = snapshot.generation;
 
     if (!sessionName) {
       return waitingResponse("Dev session not started yet");
     }
 
-    const sandbox = await getExistingDaytonaSandbox(sessionId, { wake: true });
+    const sandbox = snapshot.sandboxId
+      ? await driver.reconnect(sessionId, snapshot.sandboxId, true)
+      : null;
     if (!sandbox) {
       return waitingResponse(
         "Sandbox unavailable — waiting for preview to start",
       );
     }
 
-    const cmdId = await resolveDevCmdId(
-      sandbox.sdkSandbox,
+    const cmdId = await driver.resolveDevCmdId(
+      sandbox,
       sessionName,
       snapshot.devCmdId,
     );
@@ -226,11 +225,13 @@ export async function GET(
 
         void (async () => {
           try {
-            await streamDevCommandLogs(
-              sandbox.sdkSandbox,
+            await driver.streamDevLogs({
+              project: sandbox,
+              sessionId,
               sessionName,
               cmdId,
-              (event) => {
+              generation,
+              onEvent: (event) => {
                 send(event.type === "snapshot" ? boundSnapshot(event) : event);
                 if (
                   event.type === "waiting" ||
@@ -240,8 +241,8 @@ export async function GET(
                   cleanup();
                 }
               },
-              followAbort!.signal,
-            );
+              signal: followAbort!.signal,
+            });
           } catch (error) {
             if (!followAbort!.signal.aborted) {
               const message =

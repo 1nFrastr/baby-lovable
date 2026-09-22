@@ -120,10 +120,8 @@ async function runCheckpointInline(
   userId: string | null,
 ): Promise<void> {
   try {
-    const { getOrCreateDaytonaSandbox } = await import(
-      "@/lib/sandbox/daytona/sandbox"
-    );
-    const project = await getOrCreateDaytonaSandbox(sessionId);
+    const { getProjectSandbox } = await import("@/lib/sandbox/factory");
+    const project = await getProjectSandbox(sessionId);
     await runTurnCheckpoint(sessionId, runId, project, userId);
   } catch (error) {
     console.warn(

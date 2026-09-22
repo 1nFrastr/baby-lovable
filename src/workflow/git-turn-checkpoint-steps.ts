@@ -10,10 +10,8 @@ export async function gitTurnCheckpointStep(
   "use step";
 
   const { runTurnCheckpoint } = await import("@/lib/git/turn-sync");
-  const { getOrCreateDaytonaSandbox } = await import(
-    "@/lib/sandbox/daytona/sandbox"
-  );
-  const project = await getOrCreateDaytonaSandbox(sessionId);
+  const { getProjectSandbox } = await import("@/lib/sandbox/factory");
+  const project = await getProjectSandbox(sessionId);
   const task = await runTurnCheckpoint(
     sessionId,
     runId,

@@ -1,4 +1,4 @@
-import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
+import type { ProjectSandbox } from "@/lib/sandbox/types";
 
 import { getFreestyleAdapter } from "./freestyle-client";
 import { isEmptyRemoteGitError } from "./empty-remote-error";
@@ -18,7 +18,7 @@ export interface HydrateResult {
 }
 
 /**
- * Prepare Daytona workspace from Freestyle `main` using Daytona SDK git.
+ * Prepare sandbox workspace from Freestyle `main` using the provider git runner.
  *
  * Freestyle repos are seeded at provision (Commits API) so Daytona never has
  * to git-push the first commit. Hydrate then pull/checkout. An empty-remote
@@ -27,7 +27,7 @@ export interface HydrateResult {
  */
 export async function hydrateWorkspaceFromFreestyle(
   sessionId: string,
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   userId: string | null = null,
 ): Promise<HydrateResult> {
   try {
@@ -41,7 +41,7 @@ export async function hydrateWorkspaceFromFreestyle(
 
     const git = project.git;
     if (!git) {
-      throw new Error("Daytona sandbox missing git runner");
+      throw new Error("Sandbox missing git runner");
     }
 
     const credentials = await getFreestyleAdapter().issueWriteToken(identityId);

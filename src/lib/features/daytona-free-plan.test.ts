@@ -29,6 +29,13 @@ describe("isDaytonaFreePlan", () => {
       expect(isDaytonaFreePlan()).toBe(false);
     },
   );
+
+  it("never applies to Vercel sessions", () => {
+    process.env.DAYTONA_FREE_PLAN = "1";
+    expect(isDaytonaFreePlan("vercel")).toBe(false);
+    expect(isDaytonaFreePlan("daytona")).toBe(true);
+    expect(isDaytonaFreePlan()).toBe(true);
+  });
 });
 
 describe("shouldUseFreestyle", () => {
@@ -53,5 +60,12 @@ describe("shouldUseFreestyle", () => {
     delete process.env.DAYTONA_FREE_PLAN;
     process.env.FREESTYLE_API_KEY = "fs_test_key";
     expect(shouldUseFreestyle()).toBe(true);
+  });
+
+  it("is true for Vercel even when Daytona free plan is on", () => {
+    process.env.DAYTONA_FREE_PLAN = "1";
+    process.env.FREESTYLE_API_KEY = "fs_test_key";
+    expect(shouldUseFreestyle("vercel")).toBe(true);
+    expect(shouldUseFreestyle("daytona")).toBe(false);
   });
 });

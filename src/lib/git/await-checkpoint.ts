@@ -1,4 +1,5 @@
 import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import type { SandboxMode } from "@/lib/sandbox/types";
 import { readGitRepository } from "./repository-store";
 import { listOpenGitSyncTasks } from "./sync-task-store";
 import { isWorkflowRunActive } from "./workflow-run";
@@ -19,7 +20,7 @@ export class CheckpointBarrierError extends Error {
  *
  * Wait-only: never runs commit/push itself. If an open task has no live
  * workflow, CAS-kick at most one durable worker (shared across parallel tools).
- * No-op on DAYTONA_FREE_PLAN (ephemeral free-tier mode).
+ * No-op only for Daytona sessions on DAYTONA_FREE_PLAN. Vercel always waits.
  */
 export async function awaitPreviousCheckpoint(
   sessionId: string,
@@ -29,7 +30,15 @@ export async function awaitPreviousCheckpoint(
     signal?: AbortSignal;
   } = {},
 ): Promise<void> {
-  if (isDaytonaFreePlan()) {
+  let mode: SandboxMode | undefined;
+  try {
+    const { getSessionOwner } = await import("@/lib/session/store");
+    const owner = await getSessionOwner(sessionId);
+    mode = owner?.sandboxMode;
+  } catch {
+    // tests / missing session row — fall through to env-only Daytona gate
+  }
+  if (isDaytonaFreePlan(mode)) {
     return;
   }
 

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getExistingDaytonaSandbox, readDevLogLines } = vi.hoisted(() => ({
-  getExistingDaytonaSandbox: vi.fn(),
+const { getExistingProjectSandbox, readDevLogLines } = vi.hoisted(() => ({
+  getExistingProjectSandbox: vi.fn(),
   readDevLogLines: vi.fn(),
 }));
 
-vi.mock("./daytona/sandbox", () => ({
-  getExistingDaytonaSandbox,
+vi.mock("./factory", () => ({
+  getExistingProjectSandbox,
 }));
 
 vi.mock("./daytona/app-server-health", () => ({
@@ -22,7 +22,7 @@ import {
 describe("readSessionLog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getExistingDaytonaSandbox.mockResolvedValue({ id: "sb" });
+    getExistingProjectSandbox.mockResolvedValue({ id: "sb" });
     readDevLogLines.mockResolvedValue(" GET / 500 in 12ms\n");
   });
 
@@ -56,7 +56,7 @@ describe("readSessionLog", () => {
   });
 
   it("fails when sandbox is missing", async () => {
-    getExistingDaytonaSandbox.mockResolvedValue(null);
+    getExistingProjectSandbox.mockResolvedValue(null);
     const result = await readSessionLog("sess_1", "preview");
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/not available/);

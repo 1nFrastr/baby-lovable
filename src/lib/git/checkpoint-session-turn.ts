@@ -9,7 +9,7 @@ import type { GitTurnOutcome } from "@/lib/git/types";
 /**
  * Shared Web/CLI entry: enqueue turn checkpoint and kick durable worker.
  * Does not wait for commit/push — chat unlocks immediately.
- * No-op on DAYTONA_FREE_PLAN (ephemeral free-tier mode).
+ * No-op only for Daytona sessions on DAYTONA_FREE_PLAN. Vercel always checkpoints.
  */
 export async function checkpointSessionTurn(input: {
   sessionId: string;
@@ -19,14 +19,13 @@ export async function checkpointSessionTurn(input: {
   userId?: string | null;
   sessionTitle?: string;
 }): Promise<{ ran: boolean; runId?: string; workflowRunId?: string | null }> {
-  if (isDaytonaFreePlan()) {
-    return { ran: false };
-  }
-
   const { getSession } = await import("@/lib/session/store");
   const session = await getSession(input.sessionId);
   if (!session) {
     throw new Error(`Session not found: ${input.sessionId}`);
+  }
+  if (isDaytonaFreePlan(session.sandboxMode)) {
+    return { ran: false };
   }
 
   const runId =

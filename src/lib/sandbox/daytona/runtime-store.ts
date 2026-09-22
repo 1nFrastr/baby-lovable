@@ -1,6 +1,6 @@
 /**
  * Daytona runtime store — durable snapshot + lease for single-writer reconcile.
- * Supabase `session_daytona_runtime` is the production durable store.
+ * Supabase `session_sandbox_runtime` is the production durable store.
  *
  * L1 `memory` is process-local (one serverless isolate). Writers CAS against
  * durable state (`WHERE revision = expected`). When L1 already matches
@@ -134,7 +134,16 @@ export async function getRuntimeSnapshot(
   let loaded = await loadDurable(sessionId);
 
   if (!loaded) {
-    loaded = emptyRuntimeSnapshot(sessionId);
+    let provider: DaytonaRuntimeSnapshot["provider"] = "daytona";
+    try {
+      const owner = await getSessionOwner(sessionId);
+      if (owner?.sandboxMode) {
+        provider = owner.sandboxMode;
+      }
+    } catch {
+      // tests / missing session row
+    }
+    loaded = emptyRuntimeSnapshot(sessionId, provider);
   }
 
   memory.set(sessionId, loaded);

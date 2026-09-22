@@ -2,6 +2,7 @@ import type { AppTestLatestStatus, AppTestRunStatus } from "@/lib/browser-run/ty
 import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import type { SourceControlProjection } from "@/lib/git/types";
 import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
+import type { SandboxMode } from "@/lib/sandbox/types";
 
 export type RuntimeAppServerStatus =
   | "stopped"
@@ -47,19 +48,22 @@ export type RuntimeProjectionPatch = {
   sourceControl?: Partial<SourceControlProjection>;
 };
 
-export function currentRuntimeCapabilities(): SessionRuntimeCapabilities {
+export function currentRuntimeCapabilities(
+  mode?: SandboxMode,
+): SessionRuntimeCapabilities {
   return {
-    daytonaFreePlan: isDaytonaFreePlan(),
+    daytonaFreePlan: isDaytonaFreePlan(mode),
   };
 }
 
 /** Overlay live env capabilities onto a stored projection. */
 export function withLiveCapabilities(
   projection: SessionRuntimeProjection,
+  mode?: SandboxMode,
 ): SessionRuntimeProjection {
   return {
     ...projection,
-    capabilities: currentRuntimeCapabilities(),
+    capabilities: currentRuntimeCapabilities(mode),
   };
 }
 
@@ -101,6 +105,7 @@ export function appTestFromLatest(
 export function emptyRuntimeProjection(
   sessionId: string,
   updatedAt: string = new Date().toISOString(),
+  mode?: SandboxMode,
 ): SessionRuntimeProjection {
   return {
     sessionId,
@@ -113,13 +118,14 @@ export function emptyRuntimeProjection(
     },
     appTest: { status: "idle", updatedAt },
     sourceControl: { status: "idle", updatedAt },
-    capabilities: currentRuntimeCapabilities(),
+    capabilities: currentRuntimeCapabilities(mode),
   };
 }
 
 export function mergeRuntimeProjection(
   current: SessionRuntimeProjection,
   patch: RuntimeProjectionPatch,
+  mode?: SandboxMode,
 ): SessionRuntimeProjection {
   const sourceControl =
     current.sourceControl ??
@@ -137,7 +143,7 @@ export function mergeRuntimeProjection(
     sourceControl: patch.sourceControl
       ? { ...sourceControl, ...patch.sourceControl }
       : sourceControl,
-    capabilities: currentRuntimeCapabilities(),
+    capabilities: currentRuntimeCapabilities(mode),
   };
 }
 

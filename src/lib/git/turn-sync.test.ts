@@ -12,8 +12,8 @@ import {
   readGitSyncTask,
 } from "./sync-task-store";
 import { enqueueTurnCheckpoint, runTurnCheckpoint } from "./turn-sync";
-import { FakeDaytonaGitRunner } from "@/lib/sandbox/daytona/git-runner";
-import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
+import { FakeSandboxGitRunner } from "@/lib/sandbox/git-runner";
+import type { ProjectSandbox } from "@/lib/sandbox/types";
 import type { FileInfo, SandboxFileSystem } from "@/lib/sandbox/types";
 
 const ZERO_ID_PUSH_ERROR =
@@ -77,7 +77,7 @@ function memoryWorkspaceFs(files: Record<string, string>): SandboxFileSystem {
 
 describe("git repository + turn sync", () => {
   let adapter: FakeFreestyleAdapter;
-  let git: FakeDaytonaGitRunner;
+  let git: FakeSandboxGitRunner;
   let resetStores: () => void;
 
   beforeEach(() => {
@@ -86,7 +86,7 @@ describe("git repository + turn sync", () => {
 
     adapter = new FakeFreestyleAdapter();
     setFreestyleAdapterForTests(adapter);
-    git = new FakeDaytonaGitRunner();
+    git = new FakeSandboxGitRunner();
   });
 
   afterEach(() => {
@@ -100,9 +100,10 @@ describe("git repository + turn sync", () => {
       "package.json": '{"name":"app"}',
       "src/app/page.tsx": "export default function Page() { return null; }",
     },
-  ): DaytonaProjectSandbox {
+  ): ProjectSandbox {
     return {
       id: "sess_test",
+      sandboxId: "sb_test",
       description: "fake",
       rootDir: "/home/daytona/workspace",
       fs: memoryWorkspaceFs(files),
@@ -112,7 +113,6 @@ describe("git repository + turn sync", () => {
         }),
       },
       git,
-      sdkSandbox: {} as DaytonaProjectSandbox["sdkSandbox"],
     };
   }
 

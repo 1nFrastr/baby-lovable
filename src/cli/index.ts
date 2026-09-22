@@ -19,8 +19,13 @@ import {
 import { executeSlashCommand } from "@/lib/chat/run-slash-command";
 import { resolveComposerSubmit } from "@/lib/chat/slash-commands";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
+import { isVercelSandboxConfigured } from "@/lib/sandbox/vercel/config";
+import { getDefaultSandboxMode } from "@/lib/sandbox/types";
 import type { Session } from "@/lib/session/types";
-import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
+import {
+  assertFreestyleForDaytona,
+  shouldUseFreestyle,
+} from "@/lib/git/freestyle-config";
 import {
   assertSupabaseMetadataConfigured,
   getDevUserId,
@@ -61,7 +66,7 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--sandbox":
         throw new Error(
-          `--sandbox has been removed; Daytona + Freestyle is always used (received ${argv[++i] ?? "no mode"}).`,
+          `--sandbox has been removed; set SANDBOX_PROVIDER=vercel|daytona instead (received ${argv[++i] ?? "no mode"}).`,
         );
       case "--max-steps":
         args.maxSteps = Number(argv[++i]) || 30;
@@ -109,6 +114,7 @@ function printHelp(): void {
       `  npm run agent -- --session sess_abc123 -p "Add a gradient to the title"\n` +
       `  npm run agent            # interactive REPL (new session)\n` +
       `  npm run agent -- -s sess_abc123   # interactive REPL on an existing session\n\n` +
+      `Env: SANDBOX_PROVIDER=vercel|daytona (default vercel). Existing sessions stay sticky.\n` +
       `REPL commands: /summarize [guidance], /exit, /quit\n`,
   );
 }
@@ -149,14 +155,21 @@ function requireRemoteWorkspaceConfig(): void {
     );
     process.exit(1);
   }
-  if (!isDaytonaConfigured()) {
+  const mode = getDefaultSandboxMode();
+  if (mode === "vercel" && !isVercelSandboxConfigured()) {
+    logger.error(
+      "Missing Vercel Sandbox credentials. Set VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID, or SANDBOX_PROVIDER=daytona.",
+    );
+    process.exit(1);
+  }
+  if (mode === "daytona" && !isDaytonaConfigured()) {
     logger.error(
       "Missing DAYTONA_API_KEY. Set it in .env.local.",
     );
     process.exit(1);
   }
   try {
-    assertFreestyleForDaytona();
+    assertFreestyleForDaytona(mode);
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
@@ -176,6 +189,22 @@ async function resolveSession(args: CliArgs): Promise<Session> {
 
   const session = await createSession();
   logger.info(`Created session ${session.id}`);
+  if (shouldUseFreestyle(session.sandboxMode)) {
+    try {
+      // CLI has no Workflow world (`start()` rejects 'use workflow' fns).
+      // Provision inline; hydrate still no-ops if the repo is already bound.
+      const { ensureFreestyleRepository } = await import(
+        "@/lib/git/provision-repo"
+      );
+      await ensureFreestyleRepository(session.id, session.userId);
+    } catch (error) {
+      logger.warn(
+        `Freestyle provision failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
   return session;
 }
 

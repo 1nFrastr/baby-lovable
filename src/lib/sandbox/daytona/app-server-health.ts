@@ -1,6 +1,6 @@
 /** App-server health: probe helpers and compile-error parsing. */
 import { isUnreliableCompileError } from "../preview-errors";
-import type { DaytonaProjectSandbox } from "./provider";
+import type { ProjectSandbox } from "../types";
 
 /**
  * Short HTTP probe while Next may still be booting.
@@ -35,7 +35,7 @@ const COMPILE_MARKERS = [
 ];
 
 export async function remoteFileExists(
-  sandbox: DaytonaProjectSandbox,
+  sandbox: ProjectSandbox,
   path: string,
 ): Promise<boolean> {
   try {
@@ -51,7 +51,7 @@ export async function remoteFileExists(
  * Platform-side only — agents use the `readLog` tool, not raw paths under `.next`.
  */
 export async function readDevLogLines(
-  sandbox: DaytonaProjectSandbox,
+  sandbox: ProjectSandbox,
   lines: number,
 ): Promise<string> {
   const n = Math.max(1, Math.floor(lines));
@@ -72,7 +72,7 @@ export async function readDevLogLines(
 }
 
 /** Compile-peek helper: recent log lines only. */
-export async function readDevLog(sandbox: DaytonaProjectSandbox): Promise<string> {
+export async function readDevLog(sandbox: ProjectSandbox): Promise<string> {
   return readDevLogLines(sandbox, DEV_LOG_COMPILE_PEEK_LINES);
 }
 

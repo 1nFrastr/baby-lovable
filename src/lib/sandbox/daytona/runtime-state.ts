@@ -9,7 +9,8 @@ import type {
   PreviewUrlStatus,
   SandboxStatus,
 } from "../preview-types";
-import { getDaytonaDevPort } from "./config";
+import { getDefaultDevPort } from "../config";
+import type { SandboxMode } from "../types";
 
 export type DaytonaDesiredState =
   | "deleted"
@@ -39,9 +40,14 @@ export interface DaytonaRuntimeSnapshot {
   desired: DaytonaDesiredState;
   observed: DaytonaObservedPhase;
 
+  /** Sticky provider for this runtime row (daytona | vercel). */
+  provider: SandboxMode;
+  /** Provider-specific extras (e.g. Vercel expiresAt). */
+  providerMeta: Record<string, unknown>;
+
   sandboxId: string | null;
   devSessionName: string | null;
-  /** Daytona session command id for `pnpm dev` — used to reattach log streaming. */
+  /** Session command / detached process id for `pnpm dev`. */
   devCmdId: string | null;
 
   previewUrl: string | null;
@@ -57,6 +63,10 @@ export interface DaytonaRuntimeSnapshot {
   clearNextCache?: boolean;
 }
 
+export type RuntimeSnapshot = DaytonaRuntimeSnapshot;
+export type RuntimeDesiredState = DaytonaDesiredState;
+export type RuntimeObservedPhase = DaytonaObservedPhase;
+
 export type DaytonaRuntimePatch = Partial<
   Omit<DaytonaRuntimeSnapshot, "sessionId" | "revision">
 > & {
@@ -66,6 +76,7 @@ export type DaytonaRuntimePatch = Partial<
 
 export function emptyRuntimeSnapshot(
   sessionId: string,
+  provider: SandboxMode = "daytona",
 ): DaytonaRuntimeSnapshot {
   return {
     sessionId,
@@ -73,6 +84,8 @@ export function emptyRuntimeSnapshot(
     generation: 0,
     desired: "stopped",
     observed: "missing",
+    provider,
+    providerMeta: {},
     sandboxId: null,
     devSessionName: null,
     devCmdId: null,
@@ -107,7 +120,7 @@ export function deriveSandboxStatus(
 export function deriveAppServerStatus(
   snapshot: DaytonaRuntimeSnapshot,
 ): AppServerStatus {
-  const port = snapshot.previewPort ?? getDaytonaDevPort();
+  const port = snapshot.previewPort ?? getDefaultDevPort();
 
   if (snapshot.observed === "error" && snapshot.lastError) {
     return { status: "error", error: snapshot.lastError };
@@ -209,6 +222,8 @@ export function runtimePatchChangesState(
     "generation",
     "desired",
     "observed",
+    "provider",
+    "providerMeta",
     "sandboxId",
     "devSessionName",
     "devCmdId",

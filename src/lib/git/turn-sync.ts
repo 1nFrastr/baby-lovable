@@ -1,4 +1,4 @@
-import type { DaytonaProjectSandbox } from "@/lib/sandbox/daytona/provider";
+import type { ProjectSandbox } from "@/lib/sandbox/types";
 
 import { commitWorkspaceViaFreestyleApi } from "./commit-workspace";
 import { isZeroIdRefError } from "./empty-remote-error";
@@ -54,7 +54,7 @@ export async function enqueueTurnCheckpoint(input: {
 export async function runTurnCheckpoint(
   sessionId: string,
   runId: string,
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   userId: string | null = null,
   leaseOwner: string = `sync_${Date.now()}`,
 ): Promise<SessionGitSyncTask> {
@@ -68,7 +68,7 @@ export async function runTurnCheckpoint(
 
   const git = project.git;
   if (!git) {
-    throw new Error("Daytona sandbox missing git runner");
+    throw new Error("Sandbox missing git runner");
   }
 
   let task = await readGitSyncTask(sessionId, runId, userId);
@@ -299,7 +299,7 @@ export async function runTurnCheckpoint(
 /** Flush all open sync tasks before sandbox deletion. */
 export async function flushPendingCheckpoints(
   sessionId: string,
-  project: DaytonaProjectSandbox,
+  project: ProjectSandbox,
   userId: string | null = null,
 ): Promise<void> {
   const open = await listOpenGitSyncTasks(sessionId, userId);

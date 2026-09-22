@@ -30,7 +30,7 @@ function durableSourceDisabledResponse() {
 }
 
 /**
- * Freestyle ↔ GitHub Sync for a Daytona session.
+ * Freestyle ↔ GitHub Sync for a session.
  *
  * POST accepts only a repository id returned by the installation repository API.
  */
@@ -50,14 +50,14 @@ export async function GET(
     throw error;
   }
 
-  if (isDaytonaFreePlan()) {
-    return durableSourceDisabledResponse();
-  }
-
   try {
     const session = await getSession(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (isDaytonaFreePlan(session.sandboxMode)) {
+      return durableSourceDisabledResponse();
     }
 
     const url = new URL(request.url);
@@ -100,14 +100,14 @@ export async function POST(
     throw error;
   }
 
-  if (isDaytonaFreePlan()) {
-    return durableSourceDisabledResponse();
-  }
-
   try {
     const session = await getSession(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (isDaytonaFreePlan(session.sandboxMode)) {
+      return durableSourceDisabledResponse();
     }
 
     const body = (await request.json().catch(() => null)) as {
@@ -169,14 +169,14 @@ export async function DELETE(
     throw error;
   }
 
-  if (isDaytonaFreePlan()) {
-    return durableSourceDisabledResponse();
-  }
-
   try {
     const session = await getSession(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (isDaytonaFreePlan(session.sandboxMode)) {
+      return durableSourceDisabledResponse();
     }
 
     const repo = await unlinkGithubRepo(sessionId, auth.userId);

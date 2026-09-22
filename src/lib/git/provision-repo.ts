@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
+import type { SandboxMode } from "@/lib/sandbox/types";
 import { getFreestyleAdapter } from "./freestyle-client";
 import { shouldUseFreestyle } from "./freestyle-config";
 import {
@@ -18,9 +19,17 @@ export async function ensureFreestyleRepository(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionGitRepository> {
-  if (!shouldUseFreestyle()) {
+  let mode: SandboxMode | undefined;
+  try {
+    const { getSessionOwner } = await import("@/lib/session/store");
+    const owner = await getSessionOwner(sessionId);
+    mode = owner?.sandboxMode;
+  } catch {
+    // tests / missing session row — fall through to env-only Daytona gate
+  }
+  if (!shouldUseFreestyle(mode)) {
     throw new Error(
-      "Freestyle Git is disabled (DAYTONA_FREE_PLAN) or FREESTYLE_API_KEY is missing",
+      "Freestyle Git is disabled (DAYTONA_FREE_PLAN on a Daytona session) or FREESTYLE_API_KEY is missing",
     );
   }
 
