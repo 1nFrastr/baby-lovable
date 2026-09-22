@@ -220,3 +220,10 @@ Next, in order:
 - [ ] Turn-level scores: task completion, compile health, `checkPreview`, browser accept, incomplete turns
 - [ ] Offline eval from production traces: prompt / model / tool-set diffs vs a baseline
 - [ ] Online monitoring of live sessions (not only local CLI logs)
+
+**7. Admin & billing** — Today the product is multi-user (Auth + RLS) but there is no staff console, and users cannot see what they spent. Token counts exist only in `[agent-trace]` stdout and CLI `agent.log`; they are not a credit ledger. Host-product plans, subscriptions, and invoices do not exist (the Stripe item under Build & Ship is for *generated* apps).
+
+- [ ] Staff admin console: users, sessions, live runs, sandboxes. Not Supabase Studio and not the eval dashboard
+- [ ] Usage metering: persist credit consumption per user / session / turn so it can be shown as a statement
+- [ ] User billing: plans, subscriptions, remaining credits, and a consumption statement the user can open for themselves
+- [ ] Admin billing view: the same statements, grouped and filterable per user (not infra cost vs revenue)
