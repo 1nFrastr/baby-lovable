@@ -12,6 +12,11 @@ import {
   isVercelSandboxConfigured,
   vercelSandboxName,
 } from "./config";
+import {
+  describeVercelSandboxGone,
+  isVercelSandboxGoneError,
+  isVercelSandboxLiveStatus,
+} from "./errors";
 import { VercelProjectSandbox } from "./provider";
 import { ensureVercelWorkspaceRoot } from "./workspace-root";
 
@@ -34,6 +39,83 @@ export function wrapVercelSandbox(
   return new VercelProjectSandbox(sessionId, sandbox);
 }
 
+export type VercelSandboxPeek =
+  | { state: "live"; sandbox: Sandbox; status: string }
+  | { state: "gone"; reason: string; status: string | null }
+  | { state: "unknown"; reason: string };
+
+/**
+ * Classify a stored Vercel sandbox id without resuming it.
+ * `persistent: false` — stopped / 410 is gone, not Daytona-style asleep.
+ */
+export async function peekVercelSandbox(
+  sandboxId: string,
+): Promise<VercelSandboxPeek> {
+  try {
+    const sandbox = await Sandbox.get({
+      name: sandboxId,
+      resume: false,
+      ...vercelAuthOptions(),
+    });
+    const status = sandbox.status ?? "unknown";
+    if (isVercelSandboxLiveStatus(status)) {
+      return { state: "live", sandbox, status };
+    }
+    return {
+      state: "gone",
+      reason: describeVercelSandboxGone(status),
+      status,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (isVercelSandboxGoneError(error)) {
+      return {
+        state: "gone",
+        reason: describeVercelSandboxGone(detail),
+        status: null,
+      };
+    }
+    return { state: "unknown", reason: detail.slice(0, 200) };
+  }
+}
+
+type VercelCreateParams = {
+  name: string;
+  ports: number[];
+  timeout: number;
+  persistent: false;
+  resources: { vcpus: number };
+  networkPolicy: ReturnType<typeof getVercelNetworkPolicy>;
+  onResume: (sandbox: Sandbox) => Promise<void>;
+  image?: string;
+  source?: { type: "snapshot"; snapshotId: string };
+  token?: string;
+  teamId?: string;
+  projectId?: string;
+};
+
+function vercelCreateParams(
+  sessionId: string,
+  name: string,
+): VercelCreateParams {
+  const port = getVercelDevPort();
+  const snapshotId = getVercelSnapshotId();
+  const auth = vercelAuthOptions();
+  return {
+    name,
+    ports: [port],
+    timeout: getVercelIdleMs(),
+    persistent: false,
+    resources: getVercelResources(),
+    networkPolicy: getVercelNetworkPolicy(),
+    onResume: onResume(sessionId),
+    ...(snapshotId
+      ? { source: { type: "snapshot" as const, snapshotId } }
+      : { image: getVercelSandboxImage() }),
+    ...auth,
+  };
+}
+
 export async function createVercelSandbox(
   sessionId: string,
 ): Promise<Sandbox> {
@@ -44,61 +126,79 @@ export async function createVercelSandbox(
   }
 
   const name = vercelSandboxName(sessionId);
-  const port = getVercelDevPort();
-  const snapshotId = getVercelSnapshotId();
-  const timeout = getVercelIdleMs();
-  const resources = getVercelResources();
-  const auth = vercelAuthOptions();
-  const networkPolicy = getVercelNetworkPolicy();
-  const resume = onResume(sessionId);
-
+  const params = vercelCreateParams(sessionId, name);
   logVercel(
     sessionId,
     "sandbox",
-    snapshotId
-      ? `create name=${name} snapshot=${snapshotId} vcpus=${resources.vcpus} timeoutMs=${timeout}`
-      : `create name=${name} image=${getVercelSandboxImage()} vcpus=${resources.vcpus} timeoutMs=${timeout}`,
+    params.source
+      ? `create name=${name} snapshot=${params.source.snapshotId} vcpus=${params.resources.vcpus} timeoutMs=${params.timeout}`
+      : `create name=${name} image=${params.image} vcpus=${params.resources.vcpus} timeoutMs=${params.timeout}`,
   );
 
-  const createParams = snapshotId
-    ? {
-        name,
-        ports: [port],
-        timeout,
-        persistent: false as const,
-        resources,
-        source: { type: "snapshot" as const, snapshotId },
-        networkPolicy,
-        onResume: resume,
-        ...auth,
-      }
-    : {
-        name,
-        ports: [port],
-        timeout,
-        persistent: false as const,
-        resources,
-        image: getVercelSandboxImage(),
-        networkPolicy,
-        onResume: resume,
-        ...auth,
-      };
-
-  let sandbox: Sandbox;
-  try {
-    sandbox = await Sandbox.create(createParams);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    logVercel(sessionId, "sandbox", `create failed, getOrCreate: ${detail.slice(0, 160)}`);
-    sandbox = await Sandbox.getOrCreate({
-      ...createParams,
-      resume: true,
-    });
-  }
-
-  logVercel(sessionId, "sandbox", `started ${sandbox.name} status=${sandbox.status}`);
+  const sandbox = await createVercelSandboxWithReuse(sessionId, name, params);
+  logVercel(
+    sessionId,
+    "sandbox",
+    `started ${sandbox.name} status=${sandbox.status}`,
+  );
   await ensureVercelWorkspaceRoot(sandbox);
   return sandbox;
+}
+
+async function createVercelSandboxWithReuse(
+  sessionId: string,
+  name: string,
+  params: VercelCreateParams,
+): Promise<Sandbox> {
+  try {
+    return await Sandbox.create(params);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logVercel(
+      sessionId,
+      "sandbox",
+      `create failed: ${detail.slice(0, 160)}`,
+    );
+
+    if (isVercelSandboxGoneError(error)) {
+      return createVercelSandboxReplacingGone(sessionId, name, params);
+    }
+
+    try {
+      return await Sandbox.getOrCreate({
+        ...params,
+        resume: true,
+      });
+    } catch (retryError) {
+      if (isVercelSandboxGoneError(retryError)) {
+        return createVercelSandboxReplacingGone(sessionId, name, params);
+      }
+      throw retryError;
+    }
+  }
+}
+
+async function createVercelSandboxReplacingGone(
+  sessionId: string,
+  name: string,
+  params: VercelCreateParams,
+): Promise<Sandbox> {
+  logVercel(sessionId, "sandbox", `replace stopped name=${name}`);
+  await deleteVercelSandboxById(sessionId, name);
+  try {
+    return await Sandbox.create(params);
+  } catch {
+    const unique = vercelSandboxName(sessionId, Date.now().toString(36));
+    logVercel(
+      sessionId,
+      "sandbox",
+      `name still claimed — create unique=${unique}`,
+    );
+    return Sandbox.create({
+      ...params,
+      name: unique,
+    });
+  }
 }
 
 export async function fetchVercelSandbox(
@@ -106,27 +206,27 @@ export async function fetchVercelSandbox(
   sandboxId: string,
   wake: boolean,
 ): Promise<Sandbox | null> {
-  const auth = vercelAuthOptions();
-  try {
-    const sandbox = await Sandbox.get({
-      name: sandboxId,
-      resume: wake,
-      onResume: onResume(sessionId),
-      ...auth,
-    });
-    if (!wake && sandbox.status !== "running") {
-      logVercel(sessionId, "sandbox", `${sandboxId} is ${sandbox.status}`);
-      return null;
-    }
-    if (wake) {
-      await ensureVercelWorkspaceRoot(sandbox);
-    }
-    return sandbox;
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    logVercel(sessionId, "sandbox", `${sandboxId} unavailable: ${detail.slice(0, 160)}`);
+  const peeked = await peekVercelSandbox(sandboxId);
+  if (peeked.state === "gone") {
+    logVercel(
+      sessionId,
+      "sandbox",
+      `${sandboxId} gone: ${peeked.reason.slice(0, 160)}`,
+    );
     return null;
   }
+  if (peeked.state === "unknown") {
+    logVercel(
+      sessionId,
+      "sandbox",
+      `${sandboxId} unavailable: ${peeked.reason.slice(0, 160)}`,
+    );
+    return null;
+  }
+  if (wake) {
+    await ensureVercelWorkspaceRoot(peeked.sandbox);
+  }
+  return peeked.sandbox;
 }
 
 export async function reconnectVercelSandbox(
@@ -134,24 +234,13 @@ export async function reconnectVercelSandbox(
   sandboxId: string,
   wake: boolean,
 ): Promise<Sandbox | null> {
-  const sandbox = await fetchVercelSandbox(sessionId, sandboxId, wake);
-  if (!sandbox) {
-    return null;
-  }
-  return sandbox;
+  return fetchVercelSandbox(sessionId, sandboxId, wake);
 }
 
+/** True unless the provider confirmed the VM is gone. Transient get failures stay true. */
 export async function vercelSandboxExists(sandboxId: string): Promise<boolean> {
-  try {
-    await Sandbox.get({
-      name: sandboxId,
-      resume: false,
-      ...vercelAuthOptions(),
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  const peeked = await peekVercelSandbox(sandboxId);
+  return peeked.state !== "gone";
 }
 
 export async function deleteVercelSandboxById(

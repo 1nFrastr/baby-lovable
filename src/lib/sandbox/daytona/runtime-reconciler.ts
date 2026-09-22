@@ -38,9 +38,22 @@ import {
   isWorkspaceRestoreInFlight,
   restoreHydratedWorkspace,
 } from "./workspace-restore";
+import { isVercelSandboxGoneHttp } from "../vercel/errors";
 
 function driverOf(snapshot: DaytonaRuntimeSnapshot): SandboxVmDriver {
   return getSandboxDriver(snapshot.provider ?? "daytona");
+}
+
+function externalDeleteMessage(
+  snapshot: DaytonaRuntimeSnapshot,
+  observedError?: string | null,
+): string {
+  if (observedError) {
+    return observedError;
+  }
+  return snapshot.provider === "vercel"
+    ? "Vercel sandbox stopped or deleted externally — recreating from Freestyle"
+    : "Daytona sandbox deleted externally — recreating from Freestyle";
 }
 
 const LEASE_TTL_MS = 45_000;
@@ -142,9 +155,7 @@ function applyObservation(
       devCmdId: null,
       previewUrl: null,
       previewPort: null,
-      lastError:
-        observed.lastError ??
-        "Daytona sandbox deleted externally — recreating from Freestyle",
+      lastError: externalDeleteMessage(snapshot, observed.lastError),
       lastObservedAt: new Date().toISOString(),
       ...(snapshot.sandboxId
         ? { generation: snapshot.generation + 1 }
@@ -299,13 +310,13 @@ async function upsertWithRetry(
 }
 
 /**
- * Clear durable sandbox binding after Daytona confirms the VM is gone
- * (console delete / GC). Bumps generation so stale observes drop.
+ * Clear durable sandbox binding after the provider confirms the VM is gone
+ * (Daytona console delete / Vercel idle SANDBOX_STOPPED). Bumps generation
+ * so stale observes drop.
  */
 export async function markSandboxExternallyDeleted(
   sessionId: string,
-  lastError =
-    "Daytona sandbox deleted externally — recreating from Freestyle",
+  lastError?: string,
 ): Promise<DaytonaRuntimeSnapshot> {
   const current = await getRuntimeSnapshot(sessionId, null, { fresh: true });
   if (!current.sandboxId) {
@@ -326,7 +337,7 @@ export async function markSandboxExternallyDeleted(
     previewUrl: null,
     previewPort: null,
     generation: current.generation + 1,
-    lastError,
+    lastError: lastError ?? externalDeleteMessage(current),
   });
 }
 
@@ -821,9 +832,7 @@ async function reconcileOnce(
       previewUrl: null,
       previewPort: null,
       generation: latest.generation + 1,
-      lastError:
-        observed.lastError ??
-        "Daytona sandbox deleted externally — recreating from Freestyle",
+      lastError: externalDeleteMessage(latest, observed.lastError),
     });
   }
 
@@ -1245,7 +1254,16 @@ export async function ensureDesiredState(
           Date.now() - tProbe,
           `http=${probe}`,
         );
-        if (!shouldRestartOnPreviewProbe(probe)) {
+        if (
+          snapshot.provider === "vercel" &&
+          isVercelSandboxGoneHttp(probe)
+        ) {
+          snapshot = await markSandboxExternallyDeleted(
+            sessionId,
+            externalDeleteMessage(snapshot, `Preview returned HTTP ${probe}`),
+          );
+          // Fall through → recreate from Freestyle (non-persistent Vercel).
+        } else if (!shouldRestartOnPreviewProbe(probe)) {
           if (probe >= 400) {
             logDaytonaTiming(
               sessionId,
@@ -1262,9 +1280,10 @@ export async function ensureDesiredState(
           }
           heartbeatSandboxInBackground(sessionId);
           return snapshot;
+        } else {
+          snapshot = await demoteStalePreviewReady(sessionId, probe);
+          // Fall through → reconcile actionStartDev (keep VM + .next).
         }
-        snapshot = await demoteStalePreviewReady(sessionId, probe);
-        // Fall through → reconcile actionStartDev (keep VM + .next).
       } else {
         // sandbox-ready: VM record exists is enough.
         heartbeatSandboxInBackground(sessionId);
@@ -1512,6 +1531,43 @@ export async function heartbeatSandboxSession(
   const driver = driverOf(snapshot);
   const project = await driver.reconnect(sessionId, snapshot.sandboxId, true);
   if (!project) {
+    // Vercel idle stop cannot be resumed (`persistent: false`). Daytona
+    // auto-stop is wakeable; a reconnect miss there is usually transient.
+    if (snapshot.provider === "vercel") {
+      const exists = await driver.exists(snapshot.sandboxId);
+      if (!exists) {
+        logDaytonaBootstrap(
+          sessionId,
+          "sandbox",
+          `heartbeat miss — ${snapshot.sandboxId.slice(0, 12)} gone; recreating`,
+        );
+        await markSandboxExternallyDeleted(
+          sessionId,
+          externalDeleteMessage(snapshot),
+        );
+        const desired =
+          snapshot.desired === "sandbox-ready"
+            ? "sandbox-ready"
+            : "preview-ready";
+        void ensureDesiredState(sessionId, desired, { wait: false }).catch(
+          () => {
+            // logged inside
+          },
+        );
+        return;
+      }
+    }
+    try {
+      await upsertRuntimeSnapshot(sessionId, {
+        expectedRevision: snapshot.revision,
+        providerMeta: {
+          ...snapshot.providerMeta,
+          lastHeartbeatAt: new Date().toISOString(),
+        },
+      });
+    } catch {
+      // CAS loss is fine — next poll retries
+    }
     return;
   }
   await driver.extendSessionIfNeeded(project);
@@ -1628,6 +1684,33 @@ export async function checkRuntimePreview(sessionId: string) {
       );
       return {
         status: "ready" as const,
+        url: snapshot.previewUrl,
+        buildError: null,
+        httpStatus: probe,
+      };
+    }
+
+    if (
+      snapshot.provider === "vercel" &&
+      isVercelSandboxGoneHttp(probe)
+    ) {
+      logDaytonaTiming(
+        sessionId,
+        "checkRuntimePreview.total",
+        Date.now() - t0,
+        "path=fast status=starting http=410 vercel-gone",
+      );
+      await markSandboxExternallyDeleted(
+        sessionId,
+        externalDeleteMessage(snapshot, `Preview returned HTTP ${probe}`),
+      );
+      void ensureDesiredState(sessionId, "preview-ready", { wait: false }).catch(
+        () => {
+          // logged inside
+        },
+      );
+      return {
+        status: "starting" as const,
         url: snapshot.previewUrl,
         buildError: null,
         httpStatus: probe,
