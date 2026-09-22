@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
 import { getFreestyleAdapter } from "./freestyle-client";
-import { isFreestyleConfigured } from "./freestyle-config";
+import { shouldUseFreestyle } from "./freestyle-config";
 import {
   ensureGitRepository,
   updateGitRepositoryWithRetry,
@@ -18,8 +18,10 @@ export async function ensureFreestyleRepository(
   sessionId: string,
   userId: string | null = null,
 ): Promise<SessionGitRepository> {
-  if (!isFreestyleConfigured()) {
-    throw new Error("FREESTYLE_API_KEY is required for Daytona Git provisioning");
+  if (!shouldUseFreestyle()) {
+    throw new Error(
+      "Freestyle Git is disabled (DAYTONA_FREE_PLAN) or FREESTYLE_API_KEY is missing",
+    );
   }
 
   const current = await ensureGitRepository(sessionId, userId);

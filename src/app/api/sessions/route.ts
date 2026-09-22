@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 
+import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
 import { assertFreestyleForDaytona } from "@/lib/git/freestyle-config";
 import { isDaytonaConfigured } from "@/lib/sandbox/daytona/config";
 import { assertSupabaseMetadataConfigured } from "@/lib/supabase/config";
@@ -89,19 +90,21 @@ export async function POST(request: Request) {
     // response so "New Project" is not blocked on git/VM (UI already shows
     // preparing; hydrate still calls ensureFreestyleRepository if needed).
     after(async () => {
-      const provision = (async () => {
-        try {
-          const { kickFreestyleProvisionWorkflow } = await import(
-            "@/workflow/git-provision-kick"
-          );
-          await kickFreestyleProvisionWorkflow(session.id, session.userId);
-        } catch (error) {
-          console.warn(
-            `[sessions] freestyle provision kick failed session=${session.id}:`,
-            error instanceof Error ? error.message : error,
-          );
-        }
-      })();
+      const provision = isDurableSourceOfTruthEnabled()
+        ? (async () => {
+            try {
+              const { kickFreestyleProvisionWorkflow } = await import(
+                "@/workflow/git-provision-kick"
+              );
+              await kickFreestyleProvisionWorkflow(session.id, session.userId);
+            } catch (error) {
+              console.warn(
+                `[sessions] freestyle provision kick failed session=${session.id}:`,
+                error instanceof Error ? error.message : error,
+              );
+            }
+          })()
+        : Promise.resolve();
       await Promise.all([
         provision,
         awaitRuntimeDesired(session.id, "sandbox-ready"),

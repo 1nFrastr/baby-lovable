@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+import { DURABLE_SOURCE_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
 import {
   getGithubSyncStatus,
   GithubSyncError,
@@ -17,6 +19,13 @@ function githubSyncErrorResponse(error: GithubSyncError) {
   return NextResponse.json(
     { error: error.message },
     { status: error.status },
+  );
+}
+
+function durableSourceDisabledResponse() {
+  return NextResponse.json(
+    { error: DURABLE_SOURCE_UNAVAILABLE_MESSAGE },
+    { status: 403 },
   );
 }
 
@@ -39,6 +48,10 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (!isDurableSourceOfTruthEnabled()) {
+    return durableSourceDisabledResponse();
   }
 
   try {
@@ -85,6 +98,10 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (!isDurableSourceOfTruthEnabled()) {
+    return durableSourceDisabledResponse();
   }
 
   try {
@@ -150,6 +167,10 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (!isDurableSourceOfTruthEnabled()) {
+    return durableSourceDisabledResponse();
   }
 
   try {

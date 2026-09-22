@@ -560,8 +560,8 @@ async function actionCreateSandbox(
 
     // Freestyle: recreate (remoteHeadSha set) blocks pull+install; new sessions
     // defer hydrate so snapshot-baked workspace can start pnpm immediately.
-    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
-    if (isFreestyleConfigured()) {
+    const { shouldUseFreestyle } = await import("@/lib/git/freestyle-config");
+    if (shouldUseFreestyle()) {
       const { readGitRepository } = await import("@/lib/git/repository-store");
       const repo = await readGitRepository(sessionId, userId);
       const blockHydrate = needsBlockingFreestyleHydrate(repo?.remoteHeadSha);
@@ -738,10 +738,10 @@ async function actionDelete(
   if (sandboxId) {
     const project = await attachProject(sessionId, sandboxId, true);
     if (project) {
-      const { isFreestyleConfigured } = await import(
+      const { shouldUseFreestyle } = await import(
         "@/lib/git/freestyle-config"
       );
-      if (isFreestyleConfigured()) {
+      if (shouldUseFreestyle()) {
         try {
           const { flushPendingCheckpoints } = await import("@/lib/git/turn-sync");
           await flushPendingCheckpoints(sessionId, project);
@@ -886,8 +886,8 @@ async function reconcileOnce(
     ) {
       return false;
     }
-    const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
-    if (!isFreestyleConfigured()) {
+    const { shouldUseFreestyle } = await import("@/lib/git/freestyle-config");
+    if (!shouldUseFreestyle()) {
       await upsertWithRetry(sessionId, {
         observed: "workspace-ready",
         lastError: null,
@@ -957,8 +957,8 @@ async function maybeKickBackgroundHydrate(
   if (!latest.sandboxId) {
     return "ok";
   }
-  const { isFreestyleConfigured } = await import("@/lib/git/freestyle-config");
-  if (!isFreestyleConfigured()) {
+  const { shouldUseFreestyle } = await import("@/lib/git/freestyle-config");
+  if (!shouldUseFreestyle()) {
     return "ok";
   }
   const { readGitRepository } = await import("@/lib/git/repository-store");

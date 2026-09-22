@@ -1,13 +1,24 @@
 /** Freestyle Git configuration and enablement gates. */
 
+import { isDurableSourceOfTruthEnabled } from "@/lib/features/durable-source-of-truth";
+
 export function isFreestyleConfigured(): boolean {
   return Boolean(process.env.FREESTYLE_API_KEY?.trim());
 }
 
+/** Product gate: SoT flag on and Freestyle API key present. */
+export function shouldUseFreestyle(): boolean {
+  return isDurableSourceOfTruthEnabled() && isFreestyleConfigured();
+}
+
 /**
- * Freestyle is the durable source of truth for every Daytona workspace.
+ * Freestyle is the durable source of truth when SoT is enabled.
+ * No-op when DAYTONA_FREE_PLAN is enabled (ephemeral free-tier mode).
  */
 export function assertFreestyleForDaytona(): void {
+  if (!isDurableSourceOfTruthEnabled()) {
+    return;
+  }
   if (!isFreestyleConfigured()) {
     throw new Error(
       "FREESTYLE_API_KEY is required. Freestyle Git is the durable source of truth for Daytona sessions.",

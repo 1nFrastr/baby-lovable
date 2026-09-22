@@ -20,6 +20,7 @@ const {
   observeRuntime,
   httpStatus,
   isFreestyleConfigured,
+  shouldUseFreestyle,
   readGitRepository,
   hydrateWorkspaceFromFreestyle,
 } = vi.hoisted(() => {
@@ -36,9 +37,10 @@ const {
     stopDevSession: vi.fn(),
     observeRuntime: vi.fn(),
     httpStatus: vi.fn(async () => 200),
-    isFreestyleConfigured: vi.fn(() => true),
-    readGitRepository: vi.fn(),
-    hydrateWorkspaceFromFreestyle: vi.fn(),
+  isFreestyleConfigured: vi.fn(() => true),
+  shouldUseFreestyle: vi.fn(() => true),
+  readGitRepository: vi.fn(),
+  hydrateWorkspaceFromFreestyle: vi.fn(),
   };
 });
 
@@ -89,6 +91,7 @@ vi.mock("./runtime-observer", () => ({
 
 vi.mock("@/lib/git/freestyle-config", () => ({
   isFreestyleConfigured,
+  shouldUseFreestyle,
 }));
 
 vi.mock("@/lib/git/repository-store", () => ({
@@ -128,6 +131,7 @@ describe("runtime-reconciler Freestyle hydrate deferral", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isFreestyleConfigured.mockReturnValue(true);
+    shouldUseFreestyle.mockReturnValue(true);
     createSandbox.mockImplementation(async () => ({
       id: "sb_1",
       state: "started",
@@ -319,6 +323,57 @@ describe("runtime-reconciler Freestyle hydrate deferral", () => {
         undefined,
         expect.any(Number),
       );
+    });
+  });
+
+  it("skips Freestyle hydrate when durable SoT is disabled even if key present", async () => {
+    await withMemoryRuntime(async ({ sessionId }) => {
+      ctx.sessionId = sessionId;
+      isFreestyleConfigured.mockReturnValue(true);
+      shouldUseFreestyle.mockReturnValue(false);
+      readGitRepository.mockResolvedValue({
+        remoteHeadSha: "user-sha",
+        provisionStatus: "ready",
+      });
+
+      let started = false;
+      observeRuntime.mockImplementation(async (_sid, opts) => {
+        const snap = opts?.snapshot ?? (await getRuntimeSnapshot(sessionId));
+        if (started || snap.devSessionName) {
+          return observed({
+            phase: "preview-ready",
+            sandboxId: "sb_1",
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+            httpStatus: 200,
+          });
+        }
+        if (snap.sandboxId) {
+          return observed({
+            phase: "workspace-ready",
+            sandboxId: "sb_1",
+            previewUrl: "https://preview.example/app",
+            previewPort: 3000,
+            httpStatus: 503,
+          });
+        }
+        return observed({ phase: "missing" });
+      });
+      startDevSession.mockImplementation(async () => {
+        started = true;
+        return { sessionName: "preview-sess", port: 3000 };
+      });
+
+      const result = await withFreshIsolate(sessionId, () =>
+        ensureDesiredState(sessionId, "preview-ready", {
+          wait: true,
+          owner: "sot-disabled",
+        }),
+      );
+
+      expect(result.observed).toBe("preview-ready");
+      expect(hydrateWorkspaceFromFreestyle).not.toHaveBeenCalled();
+      expect(startDevSession).toHaveBeenCalled();
     });
   });
 });

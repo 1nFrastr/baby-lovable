@@ -1,4 +1,6 @@
 /** Daytona workspace filesystem — fast POSIX, safe for pnpm / .next / git. */
+import { isDaytonaFreePlan } from "@/lib/features/durable-source-of-truth";
+
 export const DAYTONA_WORKSPACE_ROOT =
   process.env.DAYTONA_WORKSPACE_ROOT ?? "/home/daytona/workspace";
 
@@ -38,6 +40,36 @@ export function getDaytonaSnapshotName(): string | null {
 export function allowDaytonaSnapshotFallback(): boolean {
   const raw = process.env.DAYTONA_SNAPSHOT_FALLBACK?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes";
+}
+
+/**
+ * Sandbox-level domain allow list for Freestyle / npm / GitHub.
+ *
+ * Tier 1–2 orgs reject `domainAllowList` on create — omit it on free plan and
+ * rely on Daytona's default essential-services policy instead.
+ * Pro (SoT) still needs Freestyle hosts explicitly allow-listed on Tier 3+.
+ *
+ * @returns undefined when the field must be omitted from `daytona.create`.
+ */
+export function getDaytonaDomainAllowList(): string | undefined {
+  if (isDaytonaFreePlan()) {
+    return undefined;
+  }
+  const fromEnv = process.env.DAYTONA_DOMAIN_ALLOW_LIST?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  return [
+    "git.freestyle.sh",
+    "api.freestyle.sh",
+    "*.freestyle.sh",
+    "github.com",
+    "*.github.com",
+    "*.githubusercontent.com",
+    "registry.npmjs.org",
+    "registry.npmjs.com",
+    "nodejs.org",
+  ].join(",");
 }
 
 export function isDaytonaConfigured(): boolean {
