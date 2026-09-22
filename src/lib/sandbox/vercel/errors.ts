@@ -1,7 +1,7 @@
 /**
  * Vercel Sandbox is created with `persistent: false` — a stopped session cannot
- * be resumed. Treat stop / 410 like Daytona console-delete: confirmedAbsent,
- * then recreate + Freestyle hydrate.
+ * be resumed. Treat stop / 410 / "no snapshot available" like Daytona
+ * console-delete: confirmedAbsent, then recreate + Freestyle hydrate.
  */
 
 const GONE_STATUSES = new Set(["stopped", "stopping", "failed"]);
@@ -25,6 +25,8 @@ export function isVercelSandboxGoneError(error: unknown): boolean {
     text.includes("sandbox_stopped") ||
     text.includes("sandbox was stopped") ||
     text.includes("no longer reachable") ||
+    text.includes("no snapshot available") ||
+    text.includes("cannot resume sandbox") ||
     (text.includes("410") && text.includes("sandbox")) ||
     text.includes("sandbox_not_found") ||
     /sandbox.*not found/i.test(raw)

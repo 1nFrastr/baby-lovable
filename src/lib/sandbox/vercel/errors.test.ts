@@ -29,6 +29,11 @@ describe("vercel sandbox gone classification", () => {
     ).toBe(true);
     expect(isVercelSandboxGoneError("SANDBOX_STOPPED")).toBe(true);
     expect(isVercelSandboxGoneError("sandbox not found")).toBe(true);
+    expect(
+      isVercelSandboxGoneError(
+        "Status code 400 is not ok: Cannot resume sandbox: no snapshot available.",
+      ),
+    ).toBe(true);
     expect(isVercelSandboxGoneError("timeout connecting to sandbox")).toBe(
       false,
     );
