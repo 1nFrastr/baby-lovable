@@ -154,21 +154,18 @@ async function createVercelSandboxWithReuse(
       `create failed: ${detail.slice(0, 160)}`,
     );
 
-    if (isVercelSandboxGoneError(error)) {
+    // persistent: false cannot resume. Reuse only a still-running VM;
+    // a stopped name (no snapshot / SANDBOX_STOPPED) is replaced and
+    // Freestyle hydrate runs after create, same as Daytona console-delete.
+    const peeked = await peekVercelSandbox(name);
+    if (peeked.state === "live") {
+      logVercel(sessionId, "sandbox", `create raced — reuse live ${name}`);
+      return peeked.sandbox;
+    }
+    if (peeked.state === "gone" || isVercelSandboxGoneError(error)) {
       return createVercelSandboxReplacingGone(sessionId, name, params);
     }
-
-    try {
-      return await Sandbox.getOrCreate({
-        ...params,
-        resume: true,
-      });
-    } catch (retryError) {
-      if (isVercelSandboxGoneError(retryError)) {
-        return createVercelSandboxReplacingGone(sessionId, name, params);
-      }
-      throw retryError;
-    }
+    throw error;
   }
 }
 

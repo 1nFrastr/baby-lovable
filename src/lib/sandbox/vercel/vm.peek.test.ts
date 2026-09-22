@@ -61,6 +61,18 @@ describe("peekVercelSandbox / exists", () => {
     await expect(vercelSandboxExists("sess-1")).resolves.toBe(false);
   });
 
+  it("is gone when resume is impossible without a snapshot", async () => {
+    getMock.mockRejectedValue(
+      new Error(
+        "Status code 400 is not ok: Cannot resume sandbox: no snapshot available.",
+      ),
+    );
+    await expect(peekVercelSandbox("sess-1")).resolves.toMatchObject({
+      state: "gone",
+    });
+    await expect(vercelSandboxExists("sess-1")).resolves.toBe(false);
+  });
+
   it("is unknown (not gone) on a transient get failure", async () => {
     getMock.mockRejectedValue(new Error("network timeout"));
     await expect(peekVercelSandbox("sess-1")).resolves.toMatchObject({
