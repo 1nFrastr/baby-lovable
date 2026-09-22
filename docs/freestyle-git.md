@@ -22,7 +22,8 @@ Every session uses Freestyle private-repo `main` as the durable source of truth 
 | Delete sandbox | Flush unfinished checkpoint first (kick + wait for terminal state); refuse delete on failure |
 | Recreate sandbox | Pull/restore from Freestyle `main`; run `pnpm install --frozen-lockfile`; do not overwrite an existing repo with the starter |
 | VM deleted outside Console | observe confirms `confirmedAbsent` → clear zombie `sandboxId` → recreate and hydrate (unpushed changes are unrecoverable) |
-| Switch session preview | `ensureDesired(preview-ready)` HTTP-probes the cached URL first; reuse if healthy; on 502/4xx only relaunch `pnpm dev` (do not delete VM or hydrate) |
+| Vercel idle timeout (`410 SANDBOX_STOPPED`) | Non-persistent Vercel VMs cannot resume. Same recover path as console delete: heartbeat / preview 410 / observe mark the id gone, then recreate and hydrate from Freestyle |
+| Switch session preview | `ensureDesired(preview-ready)` HTTP-probes the cached URL first; reuse if healthy; on 502/4xx only relaunch `pnpm dev` (do not delete VM or hydrate). Vercel preview `410` is sandbox-gone, not a stale preview token — recreate instead |
 | Export download | After checkpoint, use Freestyle `contents.downloadZip` (source tree at a revision; **does not** include `.git` history; does not include uncommitted sandbox changes) |
 | Connect GitHub Sync | GitHub App Setup callback only stores installation metadata → `GET …/github-sync/repositories` lists authorized repos → `POST …/github-sync` `{ repositoryId }` re-validates then `githubSync.enable`; disconnect via `DELETE` |
 

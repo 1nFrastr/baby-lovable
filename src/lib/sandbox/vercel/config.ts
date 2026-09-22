@@ -71,9 +71,14 @@ export function vercelIdleExtendMs(input: {
   return Math.max(0, Math.ceil(input.idleMs - remaining));
 }
 
-export function vercelSandboxName(sessionId: string): string {
+export function vercelSandboxName(
+  sessionId: string,
+  uniqueness?: string,
+): string {
   const slug = sessionId.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  return slug.slice(0, 64) || "session";
+  const suffix = uniqueness ? `-${uniqueness}` : "";
+  const maxBase = Math.max(1, 64 - suffix.length);
+  return `${slug.slice(0, maxBase)}${suffix}` || "session";
 }
 
 export const VERCEL_DEFAULT_IMAGE = "baby-lovable-nextjs-starter";

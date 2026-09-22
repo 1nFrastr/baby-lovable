@@ -28,6 +28,7 @@ describe("vercel sandbox config", () => {
 
   it("sanitizes session ids into sandbox names", () => {
     expect(vercelSandboxName("sess_AbC123")).toBe("sess-abc123");
+    expect(vercelSandboxName("sess_AbC123", "xyz")).toBe("sess-abc123-xyz");
   });
 
   it("defaults Vercel idle to 15 minutes", () => {

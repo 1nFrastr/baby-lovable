@@ -5,7 +5,11 @@ import type { ObservedRuntime } from "../daytona/runtime-observer";
 import type { DaytonaRuntimeSnapshot } from "../daytona/runtime-state";
 import { getRuntimeSnapshot } from "../daytona/runtime-store";
 import { getVercelDevPort } from "./config";
-import { reconnectVercelSandbox, wrapVercelSandbox } from "./vm";
+import {
+  describeVercelSandboxGone,
+  isVercelSandboxGoneHttp,
+} from "./errors";
+import { peekVercelSandbox, wrapVercelSandbox } from "./vm";
 
 function emptyObserved(
   lastError: string | null = null,
@@ -62,7 +66,6 @@ export async function observeVercelRuntime(
   sessionId: string,
   options?: { wake?: boolean; snapshot?: DaytonaRuntimeSnapshot },
 ): Promise<ObservedRuntime> {
-  const wake = options?.wake ?? false;
   const snapshot =
     options?.snapshot ??
     (await getRuntimeSnapshot(sessionId, null, { fresh: true }));
@@ -71,33 +74,22 @@ export async function observeVercelRuntime(
     return emptyObserved();
   }
 
-  const sdk = await reconnectVercelSandbox(sessionId, snapshot.sandboxId, wake);
-  if (!sdk) {
-    try {
-      const exists = await reconnectVercelSandbox(
-        sessionId,
-        snapshot.sandboxId,
-        false,
-      );
-      if (exists) {
-        return {
-          ...emptyObserved(null, true),
-          phase: "workspace-ready",
-          sandboxId: snapshot.sandboxId,
-          sandboxState: exists.status ?? null,
-        };
-      }
-    } catch {
-      // fall through
-    }
+  const peeked = await peekVercelSandbox(snapshot.sandboxId);
+  if (peeked.state === "gone") {
     return {
-      ...emptyObserved(
-        `Vercel sandbox deleted externally (${snapshot.sandboxId})`,
-      ),
+      ...emptyObserved(peeked.reason),
       confirmedAbsent: true,
     };
   }
+  if (peeked.state === "unknown") {
+    return {
+      ...emptyObserved(peeked.reason, true),
+      phase: "workspace-ready",
+      sandboxId: snapshot.sandboxId,
+    };
+  }
 
+  const sdk = peeked.sandbox;
   const project = wrapVercelSandbox(sessionId, sdk);
   const port = snapshot.previewPort ?? getVercelDevPort();
   let url = snapshot.previewUrl;
@@ -122,6 +114,13 @@ export async function observeVercelRuntime(
   }
 
   const probe = await probeUrl(url);
+  if (probe.http != null && isVercelSandboxGoneHttp(probe.http)) {
+    return {
+      ...emptyObserved(describeVercelSandboxGone(`HTTP ${probe.http}`)),
+      httpStatus: probe.http,
+      confirmedAbsent: true,
+    };
+  }
   if (probe.ready) {
     return {
       phase: "preview-ready",
