@@ -46,7 +46,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
 - **Supabase** — the only session metadata store in every environment (messages, drafts, runtime projections, Daytona runtime, Git bindings/tasks). For isolated local DB debugging (Studio + migrations, no remote foot-guns), see `docs/local-supabase.md`. Schema changes: local Docker only; production is applied by GitHub Actions — see **Supabase schema changes** below.
-- **Daytona + Freestyle** — Freestyle `main` is the durable source of truth; the Daytona working tree is a projection. There is no local sandbox mode. See `docs/freestyle-git.md`.
+- **Daytona + Freestyle** — Freestyle `main` is the durable source of truth; the Daytona working tree is a projection. There is no local sandbox mode. See `docs/freestyle-git.md`. Set `DAYTONA_FREE_PLAN=1` for free-tier ephemeral mode (Daytona only; no Freestyle / GitHub Sync / History / Export).
 - Sessions are created on first use (web UI or CLI). Reuse a session with `-s <id>` to keep history and workspace state.
 
 ## CLI — headless agent runner (preferred for AI verification)
@@ -173,7 +173,8 @@ See `.env.example`:
 - `NEXT_PUBLIC_SUPABASE_URL`, publishable key, `SUPABASE_SECRET_KEY` — required metadata/auth backend. Local Host: `.env.local` → Docker Supabase (`docs/local-supabase.md`). Production: Vercel Dashboard only.
 - `BABY_LOVABLE_DEV_USER_ID` — required real Supabase user for CLI/headless runs (local seed: `11111111-1111-1111-1111-111111111111`)
 - `DAYTONA_API_KEY` — required remote workspace
-- `FREESTYLE_API_KEY` — required durable Git source of truth
+- `FREESTYLE_API_KEY` — durable Git source of truth (required unless `DAYTONA_FREE_PLAN=1`)
+- `DAYTONA_FREE_PLAN` — optional; `1`/`true`/`on` enables free-tier ephemeral Daytona (no Freestyle SoT)
 
 ## Supabase schema changes
 

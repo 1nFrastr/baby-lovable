@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import { DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
 import {
   getGithubSyncStatus,
   GithubSyncError,
@@ -17,6 +19,13 @@ function githubSyncErrorResponse(error: GithubSyncError) {
   return NextResponse.json(
     { error: error.message },
     { status: error.status },
+  );
+}
+
+function durableSourceDisabledResponse() {
+  return NextResponse.json(
+    { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
+    { status: 403 },
   );
 }
 
@@ -39,6 +48,10 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (isDaytonaFreePlan()) {
+    return durableSourceDisabledResponse();
   }
 
   try {
@@ -85,6 +98,10 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (isDaytonaFreePlan()) {
+    return durableSourceDisabledResponse();
   }
 
   try {
@@ -150,6 +167,10 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (isDaytonaFreePlan()) {
+    return durableSourceDisabledResponse();
   }
 
   try {

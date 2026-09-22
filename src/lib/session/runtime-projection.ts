@@ -1,4 +1,5 @@
 import type { AppTestLatestStatus, AppTestRunStatus } from "@/lib/browser-run/types";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import type { SourceControlProjection } from "@/lib/git/types";
 import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
 
@@ -9,6 +10,11 @@ export type RuntimeAppServerStatus =
   | "ready"
   | "error"
   | "needs_install";
+
+export interface SessionRuntimeCapabilities {
+  /** Ephemeral Daytona without Freestyle SoT / GitHub Sync / History / Export. */
+  daytonaFreePlan: boolean;
+}
 
 export interface SessionRuntimeProjection {
   sessionId: string;
@@ -31,6 +37,8 @@ export interface SessionRuntimeProjection {
     updatedAt: string;
   };
   sourceControl: SourceControlProjection;
+  /** Live product gates; overlaid from env on every read. */
+  capabilities: SessionRuntimeCapabilities;
 }
 
 export type RuntimeProjectionPatch = {
@@ -38,6 +46,22 @@ export type RuntimeProjectionPatch = {
   appTest?: Partial<SessionRuntimeProjection["appTest"]>;
   sourceControl?: Partial<SourceControlProjection>;
 };
+
+export function currentRuntimeCapabilities(): SessionRuntimeCapabilities {
+  return {
+    daytonaFreePlan: isDaytonaFreePlan(),
+  };
+}
+
+/** Overlay live env capabilities onto a stored projection. */
+export function withLiveCapabilities(
+  projection: SessionRuntimeProjection,
+): SessionRuntimeProjection {
+  return {
+    ...projection,
+    capabilities: currentRuntimeCapabilities(),
+  };
+}
 
 export function previewFromAllStatus(
   all: AllStatus,
@@ -89,6 +113,7 @@ export function emptyRuntimeProjection(
     },
     appTest: { status: "idle", updatedAt },
     sourceControl: { status: "idle", updatedAt },
+    capabilities: currentRuntimeCapabilities(),
   };
 }
 
@@ -112,6 +137,7 @@ export function mergeRuntimeProjection(
     sourceControl: patch.sourceControl
       ? { ...sourceControl, ...patch.sourceControl }
       : sourceControl,
+    capabilities: currentRuntimeCapabilities(),
   };
 }
 
@@ -140,6 +166,9 @@ export function runtimeUiSignature(
       shortSha: sourceControl.shortSha ?? null,
       error: sourceControl.error ?? null,
       githubRepoName: sourceControl.githubRepoName ?? null,
+    },
+    capabilities: {
+      daytonaFreePlan: projection.capabilities?.daytonaFreePlan ?? false,
     },
   });
 }

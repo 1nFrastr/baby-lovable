@@ -31,6 +31,9 @@ function isProjection(
       updatedAt: new Date().toISOString(),
     };
   }
+  if (!obj.capabilities || typeof obj.capabilities !== "object") {
+    obj.capabilities = { daytonaFreePlan: false };
+  }
   // Older rows mirrored chat lifecycle here. It is no longer part of the
   // runtime projection or returned to clients.
   delete (obj as unknown as Record<string, unknown>).run;

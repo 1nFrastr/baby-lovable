@@ -16,7 +16,7 @@ Every session uses Freestyle private-repo `main` as the durable source of truth 
 
 | When | Behavior |
 | --- | --- |
-| Create Daytona session | Validate `FREESTYLE_API_KEY`; start durable `provisionFreestyleRepoWorkflow`; reconciler hydrates after creating the VM |
+| Create Daytona session | When SoT enabled: validate `FREESTYLE_API_KEY`; start durable `provisionFreestyleRepoWorkflow`; reconciler hydrates after creating the VM. When `DAYTONA_FREE_PLAN=1`: skip Freestyle entirely |
 | Turn ends | Unlock UI → enqueue sync task → start durable `gitTurnCheckpointWorkflow` (do not wait for push) |
 | Next turn writes files | `awaitPreviousCheckpoint` only waits; on a dead worker, CAS kicks a background task once |
 | Delete sandbox | Flush unfinished checkpoint first (kick + wait for terminal state); refuse delete on failure |
@@ -61,6 +61,8 @@ Boundaries:
 ```bash
 FREESTYLE_API_KEY=
 FREESTYLE_REPO_RETENTION_DAYS=30
+# Optional free-tier stand-in (default off):
+# DAYTONA_FREE_PLAN=1
 GITHUB_APP_ID=
 GITHUB_APP_PRIVATE_KEY=
 GITHUB_APP_INSTALL_URL=https://github.com/apps/<slug>/installations/new
@@ -68,4 +70,15 @@ GITHUB_APP_INSTALL_URL=https://github.com/apps/<slug>/installations/new
 # GITHUB_APP_SLUG=
 ```
 
-If `FREESTYLE_API_KEY` is missing, session creation fails immediately and does not silently fall back to sandbox-only.
+If `FREESTYLE_API_KEY` is missing while durable SoT is enabled, session creation fails immediately and does not silently fall back to sandbox-only.
+
+## Free-tier / ephemeral mode
+
+Set `DAYTONA_FREE_PLAN=1` (or `true` / `on`) to run Daytona without Freestyle:
+
+- No Freestyle repo provision, hydrate, or turn checkpoint
+- No GitHub Sync, History, or Export (APIs return unavailable; UI hides the controls)
+- Sandbox recreate uses the snapshot/starter tree only — work is lost when the VM is destroyed
+- Omits `domainAllowList` on sandbox create (Daytona Tier 1–2 rejects sandbox-level network overrides)
+
+Unset or `0` / `false` keeps current pro behavior (Freestyle required). This is a global env stand-in until per-user entitlements exist.

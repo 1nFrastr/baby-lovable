@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import { DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
 import {
   GithubSyncError,
   listAvailableGithubRepositories,
@@ -25,6 +27,13 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (isDaytonaFreePlan()) {
+    return NextResponse.json(
+      { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
+      { status: 403 },
+    );
   }
 
   try {

@@ -4,6 +4,7 @@ import {
   mergeRuntimeProjection,
   previewFromAllStatus,
   shouldBumpRuntimeVersion,
+  withLiveCapabilities,
   type RuntimeProjectionPatch,
   type SessionRuntimeProjection,
 } from "./runtime-projection";
@@ -32,7 +33,8 @@ export async function readRuntimeProjectionStore(
   userId: string | null = null,
 ): Promise<SessionRuntimeProjection | null> {
   void userId;
-  return readRuntimeProjectionSupabase(sessionId);
+  const projection = await readRuntimeProjectionSupabase(sessionId);
+  return projection ? withLiveCapabilities(projection) : null;
 }
 
 export async function writeRuntimeProjectionStore(

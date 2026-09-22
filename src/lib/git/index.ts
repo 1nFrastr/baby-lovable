@@ -5,7 +5,12 @@ export {
   emptyGitRepository,
   sourceControlFromRepository,
 } from "./types";
-export { isFreestyleConfigured, assertFreestyleForDaytona } from "./freestyle-config";
+export {
+  isFreestyleConfigured,
+  assertFreestyleForDaytona,
+  shouldUseFreestyle,
+} from "./freestyle-config";
+export { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 export { checkpointSessionTurn } from "./checkpoint-session-turn";
 export { awaitPreviousCheckpoint } from "./await-checkpoint";
 export {

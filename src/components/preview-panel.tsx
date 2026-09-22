@@ -244,6 +244,9 @@ export function PreviewPanel({
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
+  /** Default false until projection loads so free-plan UI does not flash pro controls. */
+  const daytonaFreePlan = projection?.capabilities?.daytonaFreePlan === true;
+  const showSourceControlUi = !daytonaFreePlan;
   const prevAgentRunStatusRef = useRef<SessionRunStatus | null>(null);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -491,7 +494,7 @@ export function PreviewPanel({
 
   // Checkpoint finishes after the chat unlocks — refresh History when save settles.
   useEffect(() => {
-    if (!sourceControl) {
+    if (!showSourceControlUi || !sourceControl) {
       return;
     }
     if (
@@ -503,7 +506,14 @@ export function PreviewPanel({
         setVersionsRefreshKey((key) => key + 1);
       });
     }
-  }, [sourceControl]);
+  }, [showSourceControlUi, sourceControl]);
+
+  // Free-tier: leave History if SoT features were disabled after the tab was open.
+  useEffect(() => {
+    if (!showSourceControlUi && panelTab === "history") {
+      setPanelTab("preview");
+    }
+  }, [showSourceControlUi, panelTab]);
 
   const applyPreviewRefresh = useCallback(() => {
     window.clearTimeout(previewReloadSpinTimerRef.current);
@@ -837,7 +847,9 @@ export function PreviewPanel({
                 [
                   { id: "preview", label: "Preview" },
                   { id: "files", label: "Files" },
-                  { id: "history", label: "History" },
+                  ...(showSourceControlUi
+                    ? ([{ id: "history", label: "History" }] as const)
+                    : []),
                 ] as const
               ).map((tab) => (
                 <button
@@ -865,10 +877,12 @@ export function PreviewPanel({
                 </button>
               ))}
             </div>
-            <SourceControlStatusChip
-              sourceControl={sourceControl}
-              visible
-            />
+            {showSourceControlUi ? (
+              <SourceControlStatusChip
+                sourceControl={sourceControl}
+                visible
+              />
+            ) : null}
             {appTestBusy ? (
               <span
                 className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-300"
@@ -928,35 +942,39 @@ export function PreviewPanel({
             </button>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleExport();
-                }}
-                disabled={exporting}
-                title={
-                  exporting
-                    ? "Exporting…"
-                    : "Export source zip (synced version, no .git)"
-                }
-                aria-label={exporting ? "Exporting" : "Export source"}
-                className={toolbarIconButtonClass}
-              >
-                {exporting ? (
-                  <RefreshCw
-                    className="h-3.5 w-3.5 animate-spin"
-                    strokeWidth={2}
-                  />
-                ) : (
-                  <Download className="h-3.5 w-3.5" strokeWidth={2} />
-                )}
-              </button>
-              <GithubSyncPanel
-                sessionId={sessionId}
-                visible
-                linkedRepoName={sourceControl?.githubRepoName ?? null}
-                sourceControlStatus={sourceControl?.status ?? null}
-              />
+              {showSourceControlUi ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleExport();
+                  }}
+                  disabled={exporting}
+                  title={
+                    exporting
+                      ? "Exporting…"
+                      : "Export source zip (synced version, no .git)"
+                  }
+                  aria-label={exporting ? "Exporting" : "Export source"}
+                  className={toolbarIconButtonClass}
+                >
+                  {exporting ? (
+                    <RefreshCw
+                      className="h-3.5 w-3.5 animate-spin"
+                      strokeWidth={2}
+                    />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" strokeWidth={2} />
+                  )}
+                </button>
+              ) : null}
+              {showSourceControlUi ? (
+                <GithubSyncPanel
+                  sessionId={sessionId}
+                  visible
+                  linkedRepoName={sourceControl?.githubRepoName ?? null}
+                  sourceControlStatus={sourceControl?.status ?? null}
+                />
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -1097,7 +1115,7 @@ export function PreviewPanel({
           }`}
           aria-hidden={panelTab !== "history"}
         >
-          {historyMounted ? (
+          {historyMounted && showSourceControlUi ? (
             <VersionHistoryPanel
               key={sessionId}
               sessionId={sessionId}

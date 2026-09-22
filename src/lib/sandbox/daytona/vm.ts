@@ -1,6 +1,7 @@
 /** Daytona VM: get / wake / create / delete (SDK only — no session persistence). */
 import {
   allowDaytonaSnapshotFallback,
+  getDaytonaDomainAllowList,
   getDaytonaSnapshotName,
 } from "./config";
 import { getDaytonaClient } from "./client";
@@ -131,23 +132,7 @@ export async function createSandbox(sessionId: string): Promise<Sandbox> {
   const daytona = getDaytonaClient();
   const idleMinutes = Number(process.env.DAYTONA_SANDBOX_IDLE_MINUTES ?? 30);
   const snapshot = getDaytonaSnapshotName();
-
-  // Freestyle Git is not in Daytona Essential Services — must allow explicitly.
-  // Keep GitHub/npm so snapshot tooling and installs still work when allow-list
-  // replaces broader defaults (tier-dependent).
-  const domainAllowList =
-    process.env.DAYTONA_DOMAIN_ALLOW_LIST?.trim() ||
-    [
-      "git.freestyle.sh",
-      "api.freestyle.sh",
-      "*.freestyle.sh",
-      "github.com",
-      "*.github.com",
-      "*.githubusercontent.com",
-      "registry.npmjs.org",
-      "registry.npmjs.com",
-      "nodejs.org",
-    ].join(",");
+  const domainAllowList = getDaytonaDomainAllowList();
 
   const baseParams = {
     language: "typescript" as const,
@@ -155,7 +140,8 @@ export async function createSandbox(sessionId: string): Promise<Sandbox> {
     autoStopInterval: idleMinutes > 0 ? idleMinutes : 0,
     // Public port preview — iframe uses getPreviewLink URL (no signed token).
     public: true,
-    domainAllowList,
+    // Tier 1–2 reject sandbox-level overrides — omit when free plan.
+    ...(domainAllowList ? { domainAllowList } : {}),
   };
 
   logDaytonaBootstrap(

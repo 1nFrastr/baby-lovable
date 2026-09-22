@@ -1,6 +1,6 @@
 import { awaitPreviousCheckpoint } from "@/lib/git/await-checkpoint";
 import { getFreestyleAdapter } from "@/lib/git/freestyle-client";
-import { isFreestyleConfigured } from "@/lib/git/freestyle-config";
+import { shouldUseFreestyle } from "@/lib/git/freestyle-config";
 import { readGitRepository } from "@/lib/git/repository-store";
 import { getSession } from "@/lib/session/store";
 
@@ -35,8 +35,10 @@ async function exportFreestyleArchive(
   title: string | undefined,
   userId: string | null,
 ): Promise<ExportArchiveResult> {
-  if (!isFreestyleConfigured()) {
-    throw new Error("FREESTYLE_API_KEY is required for Daytona export");
+  if (!shouldUseFreestyle()) {
+    throw new Error(
+      "Export requires durable source of truth (Freestyle). It is disabled for this deployment.",
+    );
   }
 
   await awaitPreviousCheckpoint(sessionId, { userId });

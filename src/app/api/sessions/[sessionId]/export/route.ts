@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { CheckpointBarrierError } from "@/lib/git/await-checkpoint";
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
+import { DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE } from "@/lib/features/messages";
 import { exportWorkspaceArchive } from "@/lib/sandbox/daytona/export-archive";
 import {
   requireSessionAuth,
@@ -23,6 +25,13 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     throw error;
+  }
+
+  if (isDaytonaFreePlan()) {
+    return NextResponse.json(
+      { error: DAYTONA_FREE_PLAN_UNAVAILABLE_MESSAGE },
+      { status: 403 },
+    );
   }
 
   try {

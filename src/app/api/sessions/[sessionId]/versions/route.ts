@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import { listGitSyncTasks } from "@/lib/git/sync-task-store";
 import type {
   SessionGitSyncTask,
@@ -50,6 +51,13 @@ export async function GET(
     const session = await getSession(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (isDaytonaFreePlan()) {
+      return NextResponse.json(
+        { versions: [], available: false },
+        { headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const tasks = await listGitSyncTasks(sessionId, auth.userId);
