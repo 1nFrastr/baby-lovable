@@ -48,7 +48,7 @@ export async function remoteFileExists(
 
 /**
  * Read the last N lines of the Next development log via remote `tail -n`.
- * Platform-side only — agents use the `readLog` tool, not raw paths under `.next`.
+ * Platform-side only — agents tail `.baby/logs/preview.log` via exec, not raw paths under `.next`.
  */
 export async function readDevLogLines(
   sandbox: ProjectSandbox,

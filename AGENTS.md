@@ -115,21 +115,24 @@ Incomplete turns emit `WARN` lines (e.g. no `checkPreview`, `finishReason=tool-c
 
 ## Builder agent tools & verification loop
 
-Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`):
+Tools live in `src/tools/builder-tools.ts` (steps in `builder-tool-steps.ts`).
+
+The agent uses a **small tool surface** plus sandbox bash (`exec`) and progressive-disclosure skills (L0 catalog in the system prompt; SKILL.md loaded on demand):
 
 | Tool | Purpose |
 | --- | --- |
 | `readFile` / `writeFile` / `editFile` / `deleteFile` | Workspace file CRUD — **source only** (`src/**`, `public/**`, root configs); `.next`, `node_modules`, `.git` are blocked |
-| `listFiles` / `searchFiles` / `searchContent` | Discover structure (`listFiles`), match **filenames** (`searchFiles`: `path` + filename glob like `*.tsx`, not `src/**/*.tsx`), or search **text inside files** (`searchContent`) |
-| `installPackage` / `installDependencies` | Add/remove packages or run `pnpm install` (whitelisted; no arbitrary shell) |
-| `runCommand` | **Deprecated** — only `pnpm install/add/remove` allowed; rejects curl/ls/find/etc. |
+| `exec` | Sandbox bash — inspect (`ls`/`rg`/`find`), compose pipelines, `pnpm add/remove/install`, skill scripts. Do not edit source with `sed`/redirects; do not start the dev server. Preview logs: `tail .baby/logs/preview.log` |
 | `checkPreview` | **Readiness gate** — HTTP probe only (`{ ok, status, url, httpStatus }`); does not read compile logs. Optional `restart: true` restarts the managed dev server (never delete `.next` manually). Not required after every small HMR edit once preview is ready. |
+| `testPreview` | Optional UI smoke test when the user explicitly asks |
+
+Platform skills live in host `skills/` and are injected into the sandbox at `.baby/skills/` (not Freestyle user source). L0 is name + description only; the agent reads `.baby/skills/<name>/SKILL.md` then execs.
 
 **Verification loop the agent (and you) should follow:**
 
-1. Edit files with tools. After preview is ready, small edits rely on HMR; `writeFile` / `editFile` may return `compileError` when the log already shows a failure.
+1. Inspect with `exec` / `readFile`. Edit source with file tools. After preview is ready, small edits rely on HMR; `writeFile` / `editFile` may return `compileError` when the log already shows a failure.
 2. Before finishing any turn that edited files, call `checkPreview` until `ok: true` at least once (required on first turn). After preview is already ready, small HMR edits may skip end-of-turn check — still check after deps/config/large rewrites or when `compileError` appears.
-3. If `compileError` is non-null, or `checkPreview` reports `httpStatus` >= 500, fix source code and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
+3. If `compileError` is non-null, or `checkPreview` reports `httpStatus` >= 500, `exec` `tail -n 40 .baby/logs/preview.log`, fix source code, and re-check before finishing. Do not touch `.next/` or `node_modules/`; use `checkPreview({ restart: true })` if the preview cache looks corrupt.
 4. Optionally `curl` the preview URL or read workspace source files to assert behavior.
 
 Preview lifecycle is owned by `src/lib/sandbox/daytona/app-server.ts`; agents must **not** run `pnpm dev` themselves.
@@ -161,6 +164,7 @@ For host-app code changes (not generated apps), also run `npm run lint` and `npm
 | `src/lib/session/store.ts` | Supabase session CRUD facade |
 | `src/lib/sandbox/` | Multi-provider sandbox (Daytona + Vercel), shared reconciler, preview |
 | `src/tools/` | Builder tools and `'use step'` implementations |
+| `skills/` | Platform skills (L0 catalog + SKILL.md / scripts injected into sandbox `.baby/skills/`) |
 | `templates/nextjs-starter/` | Workspace scaffold copied per session |
 | `src/app/api/sessions/` | REST: chat stream, preview status |
 

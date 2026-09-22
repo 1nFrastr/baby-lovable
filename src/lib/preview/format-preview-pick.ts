@@ -83,7 +83,7 @@ export function formatPreviewPicksForPrompt(
   });
 
   return [
-    "Selected in preview (edit these targets; use searchContent / readFile to find matching JSX):",
+    "Selected in preview (edit these targets; use exec `rg` / readFile to find matching JSX):",
     ...lines,
   ].join("\n");
 }

@@ -1647,7 +1647,7 @@ export async function readRuntimeAllStatus(sessionId: string) {
  *
  * HTTP-only. Application HTTP 500 → `ready` + `httpStatus: 500` (ok:false via
  * runCheckPreviewProbe) so the agent does not loop on "starting". Log text is
- * on-demand via `readLog` — this probe does not read the Next log.
+ * on-demand via exec tail of `.baby/logs/preview.log` — this probe does not read the Next log.
  * Compile diagnosis on write/edit still uses peekCompileError.
  *
  * Fast path (durable preview-ready + url): HTTP probe only.

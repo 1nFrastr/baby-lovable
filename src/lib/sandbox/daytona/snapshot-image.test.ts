@@ -35,12 +35,20 @@ describe("buildStarterSnapshotImage", () => {
     expect(df).toContain("test -f node_modules/next/package.json");
     expect(df).toContain("test -d node_modules/.pnpm");
     expect(df).toContain("require('next/package.json')");
+    expect(df).toContain("ripgrep");
+    expect(df).toContain(" jq ");
+    expect(df).toContain(".baby/skills");
+    expect(df).toContain(".baby/bin/baby");
+    expect(df).toContain("chmod +x .baby/bin/baby");
     expect(df).toContain(`bash ${NEXT_DEV_WARM_SCRIPT}`);
   });
 
   it("includes the starter template as build context", () => {
     const image = buildStarterSnapshotImage();
-    expect(image.contextList.length).toBeGreaterThan(0);
+    expect(image.contextList.length).toBeGreaterThan(1);
     expect(image.contextList[0]?.sourcePath).toMatch(/templates[/\\]nextjs-starter$/);
+    expect(
+      image.contextList.some((ctx) => /[/\\]skills$/.test(ctx.sourcePath ?? "")),
+    ).toBe(true);
   });
 });

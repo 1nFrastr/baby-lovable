@@ -63,14 +63,14 @@ BabyLovable recovers session streams via Workflow transport. When the frontend r
 
 ## Tool isolation
 
-The Agent orchestration layer should not care how each tool is implemented. BabyLovable splits tool capabilities out and exposes them as independent tools / steps. Typical tools include:
+BabyLovable splits tool capabilities out and exposes a small set of tools / steps. Typical tools include:
 
-- File read / write
-- Directory listing
-- Dependency install
+- File read / write / edit / delete
+- `exec` (sandbox bash for inspect, search, pnpm, skill scripts)
 - Preview check
 - Browser Test
-- Sandbox-related operations
+
+Skills (host `skills/`) are **not** extra tools: the system prompt lists name + description (L0); the agent reads `.baby/skills/<name>/SKILL.md` on demand and runs commands via `exec`.
 
 Orchestration decides when to call tools; the tool layer performs the side effects. That lets the Agent system prompt, tool definitions, sandbox implementation, and UI sync evolve independently without tight coupling.
 

@@ -21,6 +21,9 @@ export async function seedEmptyFreestyleRepo(repoId: string): Promise<string> {
       if (p.startsWith(".next/") || p.includes("/.next/")) {
         return false;
       }
+      if (p.startsWith(".baby/") || p === ".baby") {
+        return false;
+      }
       if (/\.(png|jpg|jpeg|gif|webp|ico|woff2?|ttf|eot)$/i.test(p)) {
         return false;
       }

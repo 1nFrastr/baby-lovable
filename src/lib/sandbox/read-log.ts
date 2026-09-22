@@ -1,6 +1,7 @@
 /**
- * On-demand platform logs for the builder agent (`readLog` tool).
+ * On-demand platform logs (preview Next development log).
  * Each source is a fixed, allowlisted stream — not arbitrary shell or paths.
+ * Agents should tail `.baby/logs/preview.log` via exec; this helper remains for host probes.
  */
 
 import { getExistingProjectSandbox } from "./factory";

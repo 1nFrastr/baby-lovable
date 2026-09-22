@@ -125,7 +125,7 @@ export async function awaitRuntimeDesired(
 
 /**
  * Check app server health (HTTP readiness).
- * Does not start sandbox or app server. Does not read logs (`readLog` tool).
+ * Does not start sandbox or app server. Does not read logs (agents tail `.baby/logs/preview.log`).
  */
 export async function checkAppServer(
   sessionId: string,

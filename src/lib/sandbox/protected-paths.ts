@@ -86,7 +86,7 @@ export function protectedPathError(
   operation: string,
   rawPath: string,
 ): string {
-  return `${operation} is not allowed on managed path "${rawPath}" (.next, node_modules, .git). Use installPackage/installDependencies for dependencies and checkPreview({ restart: true }) for preview cache issues.`;
+  return `${operation} is not allowed on managed path "${rawPath}" (.next, node_modules, .git). Use pnpm via exec for dependencies and checkPreview({ restart: true }) for preview cache issues.`;
 }
 
 export function sourceOnlyPathError(

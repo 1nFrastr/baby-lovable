@@ -136,8 +136,13 @@ async function stageBuildContext(repoRoot: string): Promise<string> {
     "src/lib/sandbox/daytona/scripts/warm-next-dev.sh",
   );
 
+  const babySrc = path.join(repoRoot, "src/lib/agent/skills/baby.sh");
+  const skillsSrc = path.join(repoRoot, "skills");
+
   await mkdir(path.join(ctx, "starter"), { recursive: true });
   await cp(starterSrc, path.join(ctx, "starter"), { recursive: true });
+  await cp(skillsSrc, path.join(ctx, "skills"), { recursive: true });
+  await cp(babySrc, path.join(ctx, "baby"));
   await cp(dockerfileSrc, path.join(ctx, "Dockerfile"));
   await cp(warmSrc, path.join(ctx, "warm-next-dev.sh"));
   await writeFile(

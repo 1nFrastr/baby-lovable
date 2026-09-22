@@ -67,6 +67,31 @@ describe("formatToolPartLabel", () => {
     } as ToolUIPart;
     expect(formatToolPartOutput(part)).toBeNull();
   });
+
+  it("labels exec with the command string", () => {
+    expect(
+      formatToolPartLabel(
+        toolPart("exec", { command: "rg -n TODO src | head" }),
+      ),
+    ).toBe("Running rg -n TODO src | head");
+    expect(
+      formatToolPartLabel(
+        toolPart(
+          "exec",
+          { command: "rg -n TODO src | head" },
+          "output-available",
+        ),
+      ),
+    ).toBe("Ran rg -n TODO src | head");
+  });
+
+  it("summarizes exec output instead of dumping stdout", () => {
+    const part = {
+      ...toolPart("exec", { command: "ls src" }, "output-available"),
+      output: { ok: true, exitCode: 0, stdout: "page.tsx\n", truncated: false },
+    } as ToolUIPart;
+    expect(formatToolPartOutput(part)).toBe("ok · exit 0");
+  });
 });
 
 describe("formatToolPartLabel dynamic tools", () => {
