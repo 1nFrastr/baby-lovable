@@ -24,7 +24,7 @@ describe("runtime projection merge / bump", () => {
     const before = emptyRuntimeProjection("sess_1", "2026-01-01T00:00:00.000Z");
     const after = mergeRuntimeProjection(before, {
       preview: { updatedAt: "2026-01-02T00:00:00.000Z" },
-      appTest: { updatedAt: "2026-01-02T00:00:00.000Z" },
+      sourceControl: { updatedAt: "2026-01-02T00:00:00.000Z" },
     });
 
     expect(shouldBumpRuntimeVersion(before, after)).toBe(false);
@@ -43,19 +43,6 @@ describe("runtime projection merge / bump", () => {
     const before = emptyRuntimeProjection("sess_1");
     const after = mergeRuntimeProjection(before, {
       preview: { generation: 2 },
-    });
-
-    expect(shouldBumpRuntimeVersion(before, after)).toBe(true);
-  });
-
-  it("bumps when appTest liveViewUrl appears", () => {
-    const before = emptyRuntimeProjection("sess_1");
-    const after = mergeRuntimeProjection(before, {
-      appTest: {
-        status: "running",
-        liveViewUrl: "https://example.com/live",
-        runId: "t1",
-      },
     });
 
     expect(shouldBumpRuntimeVersion(before, after)).toBe(true);

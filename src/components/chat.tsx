@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow";
 import { generateId, type FileUIPart, type UIMessage } from "ai";
-import { FlaskConical, MessageSquare, Paperclip } from "lucide-react";
+import { MessageSquare, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -32,7 +32,6 @@ import {
   PromptInputAttachment,
   PromptInputAttachments,
   PromptInputBody,
-  PromptInputButton,
   PromptInputFooter,
   PromptInputStop,
   PromptInputSubmit,
@@ -48,7 +47,6 @@ import { SlashCommandMenu } from "@/components/slash-command-menu";
 import { useQueuedChatMessages } from "@/hooks/use-queued-chat-messages";
 import { useSlashCommandComposer } from "@/hooks/use-slash-command-composer";
 import { resolveChatActivityLabel } from "@/lib/chat/activity-status";
-import { extractAppTestStatusFromMessages } from "@/lib/chat/app-test-from-messages";
 import {
   buildUserMessageParts,
   CHAT_ATTACHMENT_ACCEPT,
@@ -74,10 +72,6 @@ import {
   type SessionRunStatus,
 } from "@/lib/session/types";
 
-/** Sent when the user clicks Auto Test in the composer. */
-const APP_TEST_USER_PROMPT =
-  "Please run a quick happy-path UI test of the main flow.";
-
 /** Cap streamed UI updates so long reasoning/markdown does not trip React #185. */
 const CHAT_STREAM_THROTTLE_MS = 50;
 
@@ -90,10 +84,6 @@ interface ChatProps {
   activeAssistantMessageId?: string;
   runStatus?: SessionRunStatus;
   onSessionRefresh?: () => void;
-  /** Live View URL / running state from streamed testPreview tool output. */
-  onAppTestStatus?: (
-    status: import("@/lib/browser-run/run-status").AppTestLatestStatus | null,
-  ) => void;
   /** Visual Picker chips from Preview (pick-to-chat). */
   previewPicks?: PreviewElementPick[];
   onRemovePreviewPick?: (id: string) => void;
@@ -110,7 +100,6 @@ export function Chat({
   activeAssistantMessageId,
   runStatus = "idle",
   onSessionRefresh,
-  onAppTestStatus,
   previewPicks = [],
   onRemovePreviewPick,
   onClearPreviewPicks,
@@ -271,13 +260,6 @@ export function Chat({
       (localUserMessageId != null && status === "streaming"));
   const localStreamAnimating =
     localUserMessageId != null && status === "streaming";
-
-  useEffect(() => {
-    if (!onAppTestStatus) {
-      return;
-    }
-    onAppTestStatus(extractAppTestStatusFromMessages(chatMessages));
-  }, [chatMessages, onAppTestStatus]);
 
   const sendUserMessage = useCallback(
     (
@@ -496,14 +478,6 @@ export function Chat({
     ],
   );
 
-  const handleRunAppTest = useCallback(() => {
-    if (queueMode || sendStartedRef.current) {
-      queueFollowUp(APP_TEST_USER_PROMPT);
-      return;
-    }
-    sendUserMessage(APP_TEST_USER_PROMPT);
-  }, [queueFollowUp, queueMode, sendUserMessage]);
-
   const canFlushQueue = !turnLocked && !uploadingAttachments;
   const serverUserIds = useMemo(
     () => collectUserMessageIds(messages),
@@ -651,10 +625,6 @@ export function Chat({
   const showStandaloneActivity =
     Boolean(activityLabel) &&
     (!lastDisplayMessage || lastDisplayMessage.role === "user");
-
-  const showAppTestButton =
-    !composerLocked &&
-    chatMessages.some((message) => message.role === "assistant");
 
   const submitStatus = summarizing || uploadingAttachments
     ? "submitted"
@@ -828,20 +798,6 @@ export function Chat({
             <PromptInputFooter>
               <PromptInputTools>
                 <AttachFilesButton disabled={composerLocked} />
-                {showAppTestButton ? (
-                  <PromptInputButton
-                    disabled={composerLocked}
-                    onClick={handleRunAppTest}
-                    tooltip={
-                      queueMode
-                        ? "Queue a happy-path UI test after this reply"
-                        : "Send a message asking the agent to run a happy-path UI test"
-                    }
-                  >
-                    <FlaskConical className="size-4" />
-                    Auto Test
-                  </PromptInputButton>
-                ) : null}
               </PromptInputTools>
               <div className="flex items-center gap-1">
                 {showStop || stopping ? (

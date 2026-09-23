@@ -40,8 +40,7 @@ Default data root: `.baby-lovable/` (override with `BABY_LOVABLE_DATA_DIR`).
 .baby-lovable/
 └── sessions/
     └── sess_<id>/
-        ├── agent.log         # CLI per-turn trace file (optional; Web uses stdout)
-        └── app-tests/        # optional screenshots and reports
+        └── agent.log         # CLI per-turn trace file (optional; Web uses stdout)
 ```
 
 - **`agent.log`** — CLI turns mirror trace to this file. **Web UI** does not write it (avoids log workflow steps); use tagged stdout instead (see below).
@@ -124,7 +123,6 @@ The agent uses a **small tool surface** plus sandbox bash (`exec`) and progressi
 | `readFile` / `writeFile` / `editFile` / `deleteFile` | Workspace file CRUD — **source only** (`src/**`, `public/**`, root configs); `.next`, `node_modules`, `.git` are blocked |
 | `exec` | Sandbox bash — inspect (`ls`/`rg`/`find`), compose pipelines, `pnpm add/remove/install`, skill scripts. Do not edit source with `sed`/redirects; do not start the dev server. Preview logs: `tail .baby/logs/preview.log` |
 | `checkPreview` | **Readiness gate** — HTTP probe only (`{ ok, status, url, httpStatus }`); does not read compile logs. Optional `restart: true` restarts the managed dev server (never delete `.next` manually). Not required after every small HMR edit once preview is ready. |
-| `testPreview` | Optional UI smoke test when the user explicitly asks |
 
 Platform skills live in host `skills/` and are injected into the sandbox at `.baby/skills/` (not Freestyle user source). L0 is name + description only; the agent reads `.baby/skills/<name>/SKILL.md` then execs.
 

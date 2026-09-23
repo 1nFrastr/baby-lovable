@@ -68,7 +68,6 @@ BabyLovable splits tool capabilities out and exposes a small set of tools / step
 - File read / write / edit / delete
 - `exec` (sandbox bash for inspect, search, pnpm, skill scripts)
 - Preview check
-- Browser Test
 
 Skills (host `skills/`) are **not** extra tools: the system prompt lists name + description (L0); the agent reads `.baby/skills/<name>/SKILL.md` on demand and runs commands via `exec`.
 
@@ -111,11 +110,10 @@ In BabyLovable the Agent does more than write code. Tools form a full feedback l
 ```txt
 Edit source
   → checkPreview
-  → Browser Test
-  → Keep fixing from feedback
+  → Keep fixing from preview logs and HTTP status
 ```
 
-For example, after editing a page the Agent can first check whether Preview is available. If Preview fails to start, it can read the error and fix code; if Preview is available, it can open a browser, observe rendering, and iterate from test feedback.
+For example, after editing a page the Agent checks whether Preview is available. If Preview fails to start or returns an HTTP error, it reads the preview log and fixes the code.
 
 That shifts the Agent from “generate code” to “generate → run → check → fix.” That closed loop is central to a cloud Coding Agent.
 
@@ -183,7 +181,7 @@ Specifically:
 - Session output can be recovered after page refresh
 - Tool calls are decoupled from Agent orchestration
 - Preview converges declaratively via the sandbox scheduling layer
-- Agent can form a verification loop with Preview and Browser Test
+- Agent verifies edits with `checkPreview` and preview logs
 - CLI and Web share the same Agent for easier end-to-end regression
 
 The end result:

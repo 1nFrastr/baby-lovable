@@ -37,8 +37,7 @@ The focus of this project is not only to recreate a Lovable-style product, but t
 | **Recoverable session streams** | Agent output and session state survive page refreshes |
 | **Remote sandbox Preview** | Each session gets an independent sandbox with a managed dev server and live preview |
 | **Declarative sandbox scheduling** | When multiple requests fire at once, avoid duplicate sandbox creation and state clobbering |
-| **Realtime state sync** | Preview, Agent Run, and Browser Test status are pushed to the frontend via Realtime |
-| **Automated browser acceptance** | The Agent can open a browser and inspect the pages it generated |
+| **Realtime state sync** | Preview and Agent Run status are pushed to the frontend via Realtime |
 | **Multi-user isolation** | Supabase Auth and RLS isolate user data and session resources |
 
 ## Design highlights
@@ -86,7 +85,7 @@ See: [Declarative resource reconciliation design](./docs/declarative-reconciliat
 
 ### 3. Realtime state projection instead of frontend polling
 
-Preview, Agent Run, and Browser Test state change frequently.
+Preview and Agent Run state change frequently.
 
 BabyLovable does not make the frontend poll many endpoints and assemble state itself. Instead, the server maintains a unified `SessionRuntimeProjection`.
 
@@ -97,10 +96,6 @@ On page entry the frontend fetches initial state once, then only receives Realti
 This reduces polling pressure and avoids state forks across multiple tabs and refreshes.
 
 See: [Realtime state sync design](./docs/realtime-projection.md)
-
-### 4. Agent automated browser acceptance
-
-With Cloudflare Browser Rendering integrated, the Agent can open the Preview page, inspect rendering results, and keep fixing based on that feedback — a closed loop of generate → preview → accept.
 
 ## Architecture overview
 
@@ -116,8 +111,6 @@ Tool Calls
 Daytona Sandbox
   ↓
 Dev Server / PreviewURL
-  ↓
-Browser Test
 ```
 
 Runtime sync path:
@@ -149,7 +142,6 @@ Splitting these two concerns avoids leaning on polling, in-process state, or a s
 | Auth | Supabase Auth |
 | Realtime | Supabase Realtime |
 | Database | Supabase Postgres |
-| Browser Test | Cloudflare Browser Rendering |
 | UI Sync | SessionRuntimeProjection + Realtime |
 
 ## Local development

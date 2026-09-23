@@ -20,7 +20,6 @@ const ACTIVITY_VERBS: Record<string, [running: string, done: string]> = {
   installPackage: ["Installing", "Installed"],
   installDependencies: ["Installing dependencies", "Installed dependencies"],
   checkPreview: ["Checking preview", "Checked preview"],
-  testPreview: ["Testing preview", "Tested preview"],
   runCommand: ["Running", "Ran"],
   exec: ["Running", "Ran"],
 };
@@ -127,17 +126,6 @@ export function formatToolPartLabel(
     return verb;
   }
 
-  if (name === "testPreview") {
-    const actions =
-      input && typeof input === "object" && "actions" in input
-        ? (input as { actions?: unknown }).actions
-        : undefined;
-    if (Array.isArray(actions) && actions.length > 0) {
-      return `${verb} · ${actions.length} step${actions.length === 1 ? "" : "s"}`;
-    }
-    return verb;
-  }
-
   if (ACTIVITY_VERBS[name]) {
     return verb;
   }
@@ -167,20 +155,6 @@ export function formatToolPartOutput(
   }
 
   const output = part.output;
-
-  if (name === "testPreview" && output && typeof output === "object") {
-    const rec = output as {
-      ok?: boolean;
-      summary?: string;
-      error?: string;
-    };
-    const mark = rec.ok ? "✓" : "✗";
-    const summary = (rec.summary ?? rec.error ?? "").trim();
-    if (summary) {
-      return `${mark} ${summary.slice(0, 160)}`;
-    }
-    return mark;
-  }
 
   if (name === "exec" && output && typeof output === "object") {
     const rec = output as {

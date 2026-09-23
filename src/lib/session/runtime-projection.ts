@@ -1,4 +1,3 @@
-import type { AppTestLatestStatus, AppTestRunStatus } from "@/lib/browser-run/types";
 import { isDaytonaFreePlan } from "@/lib/features/daytona-free-plan";
 import type { SourceControlProjection } from "@/lib/git/types";
 import type { AllStatus, SandboxStatus } from "@/lib/sandbox/preview-types";
@@ -29,14 +28,6 @@ export interface SessionRuntimeProjection {
     error?: string;
     updatedAt: string;
   };
-  appTest: {
-    runId?: string;
-    status: AppTestRunStatus;
-    liveViewUrl?: string;
-    summary?: string;
-    ok?: boolean;
-    updatedAt: string;
-  };
   sourceControl: SourceControlProjection;
   /** Live product gates; overlaid from env on every read. */
   capabilities: SessionRuntimeCapabilities;
@@ -44,7 +35,6 @@ export interface SessionRuntimeProjection {
 
 export type RuntimeProjectionPatch = {
   preview?: Partial<SessionRuntimeProjection["preview"]>;
-  appTest?: Partial<SessionRuntimeProjection["appTest"]>;
   sourceControl?: Partial<SourceControlProjection>;
 };
 
@@ -88,20 +78,6 @@ export function previewFromAllStatus(
   };
 }
 
-export function appTestFromLatest(
-  latest: AppTestLatestStatus,
-  updatedAt: string = new Date().toISOString(),
-): SessionRuntimeProjection["appTest"] {
-  return {
-    runId: latest.runId,
-    status: latest.status,
-    liveViewUrl: latest.liveViewUrl,
-    summary: latest.summary,
-    ok: latest.ok,
-    updatedAt: latest.finishedAt ?? latest.startedAt ?? updatedAt,
-  };
-}
-
 export function emptyRuntimeProjection(
   sessionId: string,
   updatedAt: string = new Date().toISOString(),
@@ -116,7 +92,6 @@ export function emptyRuntimeProjection(
       appServerStatus: "stopped",
       updatedAt,
     },
-    appTest: { status: "idle", updatedAt },
     sourceControl: { status: "idle", updatedAt },
     capabilities: currentRuntimeCapabilities(mode),
   };
@@ -137,9 +112,6 @@ export function mergeRuntimeProjection(
     preview: patch.preview
       ? { ...current.preview, ...patch.preview }
       : current.preview,
-    appTest: patch.appTest
-      ? { ...current.appTest, ...patch.appTest }
-      : current.appTest,
     sourceControl: patch.sourceControl
       ? { ...sourceControl, ...patch.sourceControl }
       : sourceControl,
@@ -159,13 +131,6 @@ export function runtimeUiSignature(
       appServerStatus: projection.preview.appServerStatus,
       url: projection.preview.url ?? null,
       error: projection.preview.error ?? null,
-    },
-    appTest: {
-      runId: projection.appTest.runId ?? null,
-      status: projection.appTest.status,
-      liveViewUrl: projection.appTest.liveViewUrl ?? null,
-      summary: projection.appTest.summary ?? null,
-      ok: projection.appTest.ok ?? null,
     },
     sourceControl: {
       status: sourceControl.status,

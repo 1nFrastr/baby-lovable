@@ -1,5 +1,4 @@
 import {
-  appTestFromLatest,
   emptyRuntimeProjection,
   mergeRuntimeProjection,
   previewFromAllStatus,
@@ -106,19 +105,6 @@ async function assembleRuntimeProjection(
   } catch (error) {
     console.warn(
       `[runtime-projection] assemble preview failed for ${sessionId}:`,
-      error instanceof Error ? error.message : error,
-    );
-  }
-
-  try {
-    const { readLatestAppTestStatus } = await import(
-      "@/lib/browser-run/run-status"
-    );
-    const latest = await readLatestAppTestStatus(sessionId, session?.userId);
-    base.appTest = appTestFromLatest(latest, now);
-  } catch (error) {
-    console.warn(
-      `[runtime-projection] assemble appTest failed for ${sessionId}:`,
       error instanceof Error ? error.message : error,
     );
   }
