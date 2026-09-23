@@ -368,10 +368,9 @@ async function demoteStalePreviewReady(
   return upsertWithRetry(sessionId, {
     observed: "workspace-ready",
     // Allow actionStartDev (reconcile skips when devSessionName is set).
+    // Keep devCmdId so Vercel can Command.kill that process before the next
+    // start. Generation still resets the log panel; the new cmdId replaces it.
     devSessionName: null,
-    devCmdId: null,
-    // The next pnpm dev command is a new log identity. Publish it immediately
-    // so open consoles stop accepting chunks from the stale command.
     generation: current.generation + 1,
     lastError: `Preview probe HTTP ${http} — restarting pnpm dev`,
   });

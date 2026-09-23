@@ -1,8 +1,12 @@
 import type { Sandbox } from "@vercel/sandbox";
 
-import { resolvePackageManager } from "../package-manager";
 import { withVercelAllowedDevOrigin } from "./allowed-dev-origin";
-import { getVercelDevPort, VERCEL_WORKSPACE_ROOT } from "./config";
+import { getVercelDevPort } from "./config";
+import {
+  stopTrackedDevCommand,
+  vercelDevLaunch,
+  vercelDevPortFreeProgram,
+} from "./dev-process";
 import { asVercelProject, VercelProjectSandbox } from "./provider";
 import type { ProjectSandbox } from "../types";
 
@@ -14,15 +18,38 @@ export function formatVercelStartError(error: unknown): string {
     : "Vercel preview failed to start. Please try again later.";
 }
 
-async function killVercelDev(sdk: Sandbox): Promise<void> {
+async function persistedDevCmdId(sessionId: string): Promise<string | null> {
   try {
-    await sdk.runCommand({
-      cmd: "bash",
-      args: ["-lc", "pkill -f 'pnpm dev' || pkill -f 'next dev' || true"],
-      timeoutMs: 15_000,
-    });
+    const { getRuntimeSnapshot } = await import("../daytona/runtime-store");
+    const snap = await getRuntimeSnapshot(sessionId, null, { fresh: true });
+    return snap.devCmdId;
   } catch {
-    // best effort
+    return null;
+  }
+}
+
+async function killPersistedDevCommand(
+  sdk: Sandbox,
+  sessionId: string,
+): Promise<void> {
+  const cmdId = await persistedDevCmdId(sessionId);
+  console.warn(
+    `[vercel] session=${sessionId} preview stop cmdId=${cmdId ?? "none"}`,
+  );
+  await stopTrackedDevCommand(sdk, cmdId);
+}
+
+/** After Command.kill, refuse to start another listener while :port is taken. */
+async function assertDevPortFree(sdk: Sandbox, port: number): Promise<void> {
+  const probe = await sdk.runCommand({
+    cmd: "node",
+    args: ["-e", vercelDevPortFreeProgram(), "--", String(port), "5000"],
+    timeoutMs: 15_000,
+  });
+  if (probe.exitCode !== 0) {
+    throw new Error(
+      `Dev port ${port} is still in use after stopping the previous preview command.`,
+    );
   }
 }
 
@@ -46,16 +73,19 @@ export async function startVercelDevSession(
 ): Promise<{ sessionName: string; port: number; cmdId: string | null }> {
   const vercel = asVercelProject(project);
   const port = getVercelDevPort();
-  const pm = resolvePackageManager();
-  const command = pm.dev(port);
-  console.warn(`[vercel] session=${sessionId} preview ${command}`);
+  const launch = vercelDevLaunch(port);
+  console.warn(
+    `[vercel] session=${sessionId} preview ${launch.args.slice(3).join(" ")}`,
+  );
 
   await ensureVercelAllowedDevOrigins(project);
-  await killVercelDev(vercel.sdkSandbox);
+  await killPersistedDevCommand(vercel.sdkSandbox, sessionId);
+  await assertDevPortFree(vercel.sdkSandbox, port);
 
   const detached = await vercel.sdkSandbox.runCommand({
-    cmd: "bash",
-    args: ["-lc", `cd ${JSON.stringify(VERCEL_WORKSPACE_ROOT)} && ${command}`],
+    cmd: launch.cmd,
+    args: launch.args,
+    cwd: launch.cwd,
     detached: true,
   });
 
@@ -73,8 +103,14 @@ export async function stopVercelDevSession(
   if (!project) {
     return;
   }
-  console.warn(`[vercel] session=${sessionId} preview stop`);
-  await killVercelDev(asVercelProject(project).sdkSandbox);
+  try {
+    await killPersistedDevCommand(
+      asVercelProject(project).sdkSandbox,
+      sessionId,
+    );
+  } catch {
+    // Stop and delete must not stick on a command that is already gone.
+  }
 }
 
 /** SDK `onResume` — restart pnpm after a persistent sandbox wakes from stop. */
