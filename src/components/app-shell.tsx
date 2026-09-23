@@ -32,7 +32,6 @@ import {
 
 import { AuthUserBar } from "./auth-user-bar";
 import { Chat } from "./chat";
-import { MvpNoticeCarousel } from "./mvp-notice-carousel";
 import { PreviewPanel } from "./preview-panel";
 import { ResizeHandle } from "./resize-handle";
 import { SessionSidebar } from "./session-sidebar";
@@ -311,9 +310,7 @@ export function AppShell() {
           </div>
         </div>
 
-        <MvpNoticeCarousel className="hidden sm:block" />
-
-        <div className="ml-auto flex shrink-0 items-center gap-3 sm:ml-0">
+        <div className="ml-auto flex shrink-0 items-center gap-3">
           <AuthUserBar />
         </div>
       </header>
