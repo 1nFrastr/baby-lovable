@@ -4,12 +4,18 @@ import { cjk } from "@streamdown/cjk";
 import { math } from "@streamdown/math";
 import { isValidElement, type ReactNode } from "react";
 import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import type { Components, PluginConfig, StreamdownProps } from "streamdown";
 
 /**
  * Chat markdown keeps math + CJK. Skip @streamdown/code / mermaid — their
  * default chrome is a bordered card with header/actions; we render plain
  * fenced blocks instead.
+ *
+ * Passing `remarkPlugins` replaces Streamdown's defaults (including
+ * remark-gfm). List GFM explicitly or tables, strikethrough, and task
+ * lists render as literal text. remark-breaks stays so single newlines
+ * still become <br>.
  */
 export const streamdownPlugins = {
   math,
@@ -55,7 +61,7 @@ export const streamdownChatProps = {
   plugins: streamdownPlugins,
   controls: false,
   lineNumbers: false,
-  remarkPlugins: [remarkBreaks],
+  remarkPlugins: [remarkGfm, remarkBreaks],
   components: chatMarkdownComponents,
   className: "chat-md",
 } satisfies Pick<
