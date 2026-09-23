@@ -5,7 +5,7 @@
 FROM node:22.14.0-bookworm
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates ripgrep jq \
+  && apt-get install -y --no-install-recommends git ca-certificates curl xz-utils ripgrep jq \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g pnpm@10.12.1 \
   && pnpm --version \
@@ -29,5 +29,10 @@ RUN chmod +x /vercel/sandbox/.baby/bin/baby \
   && node -e "require('next/package.json')" \
   && bash /tmp/warm-next-dev.sh 3000 \
   && rm -f /tmp/warm-next-dev.sh
+
+COPY install-keenable.sh /tmp/install-keenable.sh
+RUN bash /tmp/install-keenable.sh \
+  && rm -f /tmp/install-keenable.sh \
+  && test -x /usr/local/bin/keenable
 
 WORKDIR /vercel/sandbox

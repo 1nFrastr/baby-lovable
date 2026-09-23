@@ -10,7 +10,7 @@ describe("skill catalog", () => {
   it("loads platform skills with name and description", () => {
     const catalog = loadSkillCatalog();
     const names = catalog.map((skill) => skill.name).sort();
-    expect(names).toEqual(["deps", "preview", "workspace-unix"]);
+    expect(names).toEqual(["deps", "preview", "web", "workspace-unix"]);
     for (const skill of catalog) {
       expect(skill.description.length).toBeGreaterThan(20);
     }
@@ -21,6 +21,8 @@ describe("skill catalog", () => {
     const paths = files.map((file) => file.sandboxPath);
     expect(paths).toContain(".baby/skills/preview/SKILL.md");
     expect(paths).toContain(".baby/skills/deps/scripts/add.sh");
+    expect(paths).toContain(".baby/skills/web/scripts/search.sh");
+    expect(paths).toContain(".baby/skills/web/scripts/fetch.sh");
   });
 
   it("formats L0 prompt without SKILL.md bodies", () => {

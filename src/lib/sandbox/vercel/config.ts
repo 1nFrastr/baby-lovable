@@ -114,6 +114,7 @@ export function getVercelNetworkPolicy():
       "registry.npmjs.com",
       "nodejs.org",
       "*.vercel.run",
+      "api.keenable.ai",
     ],
   };
 }
