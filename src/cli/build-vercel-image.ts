@@ -54,7 +54,7 @@ function parseArgs(argv: string[]): BuildArgs {
 function run(
   command: string,
   args: string[],
-  options: { stdin?: string; env?: NodeJS.ProcessEnv } = {},
+  options: { stdin?: string; env?: Record<string, string | undefined> } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
