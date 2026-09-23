@@ -178,8 +178,8 @@ Next, in order:
 - [x] Multimodal input (images and documents in chat; screenshot / design → edit)
 - [ ] Human-in-the-loop: pause the same turn when the user must intervene (clarify, choose, paste a secret, approve a plan / publish / destructive tool, or complete a login in a browser test), then resume. Plan mode, connectors, and ship reuse this.
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
-- [ ] Web search: look up current docs, APIs, and examples while building
-- [ ] Skills (session-level playbooks)
+- [x] Web search: look up current docs, APIs, and examples while building
+- [x] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries
 - [ ] External context: pull in Google Docs, Drive, Notion (and similar) via connectors / MCP
 - [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
