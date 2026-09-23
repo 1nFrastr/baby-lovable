@@ -18,7 +18,6 @@ import {
   useSessionsQuery,
   useSyncSessionSummary,
 } from "@/lib/session/queries";
-import type { AppTestLatestStatus } from "@/lib/browser-run/run-status";
 import type { PreviewElementPickPayload } from "@/lib/preview/bridge-protocol";
 import {
   type PreviewElementPick,
@@ -135,11 +134,6 @@ export function AppShell() {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   /** Covers create API + post-success navigation gap (mutation isPending ends first). */
   const [isCreateInFlight, setIsCreateInFlight] = useState(false);
-  const [chatAppTest, setChatAppTest] = useState<AppTestLatestStatus | null>(
-    null,
-  );
-  /** False until Chat reports extract (incl. null) so Live View can ignore hydrate. */
-  const [chatAppTestReady, setChatAppTestReady] = useState(false);
   /** Visual Picker: at most one chip in the composer (latest pick wins). */
   const [previewPicks, setPreviewPicks] = useState<PreviewElementPick[]>([]);
   /** Bumped when the composer gains focus — Preview exits inspect mode. */
@@ -169,18 +163,8 @@ export function AppShell() {
   useSyncSessionSummary(activeSession);
 
   useEffect(() => {
-    setChatAppTest(null);
-    setChatAppTestReady(false);
     setPreviewPicks([]);
   }, [activeSessionId]);
-
-  const handleAppTestStatus = useCallback(
-    (status: AppTestLatestStatus | null) => {
-      setChatAppTest(status);
-      setChatAppTestReady(true);
-    },
-    [],
-  );
 
   const handleElementPicked = useCallback((element: PreviewElementPickPayload) => {
     setPreviewPicks([{ ...element, id: nanoid() }]);
@@ -447,7 +431,6 @@ export function AppShell() {
                   }
                   runStatus={activeSession.runStatus}
                   onSessionRefresh={handleSessionRefresh}
-                  onAppTestStatus={handleAppTestStatus}
                   previewPicks={previewPicks}
                   onRemovePreviewPick={handleRemovePreviewPick}
                   onClearPreviewPicks={handleClearPreviewPicks}
@@ -471,8 +454,6 @@ export function AppShell() {
                         : "Failed to load session runtime"
                       : null
                   }
-                  chatAppTest={chatAppTest}
-                  chatAppTestReady={chatAppTestReady}
                   onElementPicked={handleElementPicked}
                   inspectExitKey={inspectExitKey}
                 />

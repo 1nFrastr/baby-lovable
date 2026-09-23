@@ -20,8 +20,7 @@ function isProjection(
   if (
     typeof obj.sessionId !== "string" ||
     typeof obj.version !== "number" ||
-    obj.preview == null ||
-    obj.appTest == null
+    obj.preview == null
   ) {
     return false;
   }
@@ -34,9 +33,11 @@ function isProjection(
   if (!obj.capabilities || typeof obj.capabilities !== "object") {
     obj.capabilities = { daytonaFreePlan: false };
   }
-  // Older rows mirrored chat lifecycle here. It is no longer part of the
-  // runtime projection or returned to clients.
-  delete (obj as unknown as Record<string, unknown>).run;
+  // Older rows mirrored chat lifecycle and browser tests here. They are no
+  // longer part of the runtime projection or returned to clients.
+  const record = obj as unknown as Record<string, unknown>;
+  delete record.run;
+  delete record.appTest;
   return true;
 }
 

@@ -1,13 +1,11 @@
 import path from "node:path";
 
 /**
- * Local artifact root for CLI traces and optional app-test reports.
+ * Local artifact root for CLI traces.
  * Durable session metadata is stored exclusively in Supabase.
  *
  * - Override with `BABY_LOVABLE_DATA_DIR` (absolute or cwd-relative).
  * - On Vercel/Lambda defaults to `/tmp/baby-lovable` (deploy dir is read-only).
- *   App-test disk writes are usually skipped there via
- *   `shouldPersistAppTestArtifacts()`.
  * - Locally defaults to `.baby-lovable` under `process.cwd()`.
  */
 export function getDataRoot(): string {

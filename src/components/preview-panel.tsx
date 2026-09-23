@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Download,
-  ExternalLink,
   House,
   MousePointer2,
   RefreshCcw,
@@ -45,20 +44,6 @@ import { WorkspaceFileExplorer } from "./workspace-file-explorer";
 /** Survives React StrictMode remount — one warm POST per session per page load. */
 const previewWarmRequested = new Set<string>();
 
-/** Mirrors AppTestLatestStatus — kept local so the client bundle does not pull Node fs. */
-interface AppTestLatestStatus {
-  status: "idle" | "running" | "done" | "error";
-  runId?: string;
-  liveViewUrl?: string;
-  ok?: boolean;
-  summary?: string;
-  artifactDir?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  error?: string;
-  usedScriptedActions?: boolean;
-}
-
 interface PreviewPanelProps {
   sessionId: string;
   runStatus?: SessionRunStatus;
@@ -66,18 +51,12 @@ interface PreviewPanelProps {
   runtimeProjection?: SessionRuntimeProjection | null;
   runtimeLoading?: boolean;
   runtimeError?: string | null;
-  /** Live View from streamed testPreview tool output (agent path). */
-  chatAppTest?: AppTestLatestStatus | null;
-  /** True after Chat has reported an extract for this session (including none). */
-  chatAppTestReady?: boolean;
   /** Visual Picker: DOM pick from Preview → composer chip. */
   onElementPicked?: (element: PreviewElementPickPayload) => void;
   /** Bumped by AppShell when the chat composer is focused — exit inspect. */
   inspectExitKey?: number;
 }
 
-/** Keep PiP visible briefly after the run ends so the final frame is usable. */
-const PIP_HOLD_AFTER_DONE_MS = 10_000;
 /** Retry once after ready so an early failed stylesheet request can recover. */
 const READY_EMBED_RELOAD_DELAY_MS = 1_000;
 
@@ -112,40 +91,6 @@ function withEmbedCacheBust(url: string, nonce: number): string {
   }
 }
 
-function mergeChatAndPolledAppTest(
-  polled: AppTestLatestStatus,
-  chat: AppTestLatestStatus | null,
-): AppTestLatestStatus {
-  if (!chat?.liveViewUrl && chat?.status !== "running") {
-    return polled;
-  }
-
-  const liveViewUrl = chat.liveViewUrl ?? polled.liveViewUrl;
-  // Prefer poll for mid-run Live View; chat only has the URL after the
-  // durable step returns. Don't let a late "done" chat result + stale
-  // "running" poll keep the Testing badge stuck forever — once chat is
-  // terminal and poll has no newer running signal with a URL, settle.
-  const chatTerminal = chat.status === "done" || chat.status === "error";
-  const pollRunning = polled.status === "running";
-  const status: AppTestLatestStatus["status"] =
-    chat.status === "running" || (pollRunning && !chatTerminal)
-      ? "running"
-      : chatTerminal
-        ? chat.status!
-        : (polled.status ?? chat.status ?? "idle");
-
-  return {
-    ...polled,
-    ...chat,
-    liveViewUrl,
-    status,
-    runId: chat.runId ?? polled.runId,
-    summary: chat.summary ?? polled.summary,
-    ok: chat.ok ?? polled.ok,
-    error: chat.error ?? polled.error,
-  };
-}
-
 function appServerFromProjection(
   preview: SessionRuntimeProjection["preview"],
 ): AppServerStatus {
@@ -177,26 +122,12 @@ function appServerFromProjection(
   }
 }
 
-function appTestFromProjection(
-  appTest: SessionRuntimeProjection["appTest"],
-): AppTestLatestStatus {
-  return {
-    status: appTest.status,
-    runId: appTest.runId,
-    liveViewUrl: appTest.liveViewUrl,
-    ok: appTest.ok,
-    summary: appTest.summary,
-  };
-}
-
 export function PreviewPanel({
   sessionId,
   runStatus = "idle",
   runtimeProjection = null,
   runtimeLoading = false,
   runtimeError = null,
-  chatAppTest = null,
-  chatAppTestReady = false,
   onElementPicked,
   inspectExitKey = 0,
 }: PreviewPanelProps) {
@@ -206,9 +137,6 @@ export function PreviewPanel({
   const preview: AppServerStatus = projection
     ? appServerFromProjection(projection.preview)
     : { status: "stopped" };
-  const runtimeAppTest = projection
-    ? appTestFromProjection(projection.appTest)
-    : { status: "idle" as const };
   const previewGeneration = projection?.preview.generation ?? 0;
   const readyPreviewUrl =
     preview.status === "ready" ? preview.url : undefined;
@@ -271,17 +199,6 @@ export function PreviewPanel({
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  /** PiP only opens for a live chat-driven run — never on hydrate/refresh. */
-  const [pipOpen, setPipOpen] = useState(false);
-  const [pipDismissed, setPipDismissed] = useState(false);
-  const [pipHoldActive, setPipHoldActive] = useState(false);
-  const pipHydratedRef = useRef(false);
-  const prevChatStatusRef = useRef<AppTestLatestStatus["status"] | null>(null);
-  const pendingPipOpenRef = useRef(false);
-  const lastPipRunIdRef = useRef<string | undefined>(undefined);
-  const pipHoldTimerRef = useRef(0);
-
-  const appTest = mergeChatAndPolledAppTest(runtimeAppTest, chatAppTest);
 
   // Hide the iframe while a process restart is in-flight so a dying / 502
   // document is not left on screen until the new Next boot is ready.
@@ -576,86 +493,6 @@ export function PreviewPanel({
     return () => window.clearTimeout(previewReloadSpinTimerRef.current);
   }, []);
 
-  // Open Live View only when the chat stream transitions into a running
-  // testPreview after Chat has hydrated history. Refresh / session switch
-  // must not pop the PiP for past or in-flight rehydrated runs.
-  useEffect(() => {
-    if (!chatAppTestReady) {
-      return;
-    }
-
-    const chatStatus = chatAppTest?.status ?? "idle";
-    const prevChatStatus = prevChatStatusRef.current;
-    const liveViewUrl = appTest.liveViewUrl ?? chatAppTest?.liveViewUrl;
-
-    if (!pipHydratedRef.current) {
-      pipHydratedRef.current = true;
-      prevChatStatusRef.current = chatStatus;
-      lastPipRunIdRef.current = appTest.runId ?? chatAppTest?.runId;
-      return;
-    }
-
-    const runId = appTest.runId ?? chatAppTest?.runId;
-    if (runId && runId !== lastPipRunIdRef.current) {
-      lastPipRunIdRef.current = runId;
-      queueMicrotask(() => setPipDismissed(false));
-    }
-
-    if (chatStatus === "running" && prevChatStatus !== "running") {
-      pendingPipOpenRef.current = true;
-      queueMicrotask(() => setPipDismissed(false));
-    }
-
-    if (
-      pendingPipOpenRef.current &&
-      chatStatus === "running" &&
-      liveViewUrl &&
-      !pipDismissed
-    ) {
-      pendingPipOpenRef.current = false;
-      queueMicrotask(() => setPipOpen(true));
-    }
-
-    if (
-      (chatStatus === "done" || chatStatus === "error") &&
-      prevChatStatus === "running" &&
-      pipOpen &&
-      !pipDismissed &&
-      liveViewUrl
-    ) {
-      window.clearTimeout(pipHoldTimerRef.current);
-      queueMicrotask(() => setPipHoldActive(true));
-      pipHoldTimerRef.current = window.setTimeout(() => {
-        setPipHoldActive(false);
-        setPipOpen(false);
-      }, PIP_HOLD_AFTER_DONE_MS);
-    }
-
-    if (chatStatus === "idle") {
-      pendingPipOpenRef.current = false;
-      window.clearTimeout(pipHoldTimerRef.current);
-      queueMicrotask(() => {
-        setPipHoldActive(false);
-        setPipOpen(false);
-      });
-    }
-
-    prevChatStatusRef.current = chatStatus;
-  }, [
-    chatAppTestReady,
-    chatAppTest,
-    appTest.liveViewUrl,
-    appTest.runId,
-    pipOpen,
-    pipDismissed,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      window.clearTimeout(pipHoldTimerRef.current);
-    };
-  }, []);
-
   const requestPreviewAction = useCallback(
     async (action: "warm" | "restart") => {
       setPreviewAction(action);
@@ -764,12 +601,6 @@ export function PreviewPanel({
     }
   };
 
-  const appTestBusy = appTest.status === "running";
-  const showPip =
-    Boolean(appTest.liveViewUrl) &&
-    pipOpen &&
-    (appTest.status === "running" || pipHoldActive) &&
-    !pipDismissed;
   // Do not navigate while the proxy or Next is still warming. An early iframe
   // can retain failed CSS requests even after the document and HMR become ready.
   const previewIframeSrc = previewEmbedUrl
@@ -882,18 +713,6 @@ export function PreviewPanel({
                 sourceControl={sourceControl}
                 visible
               />
-            ) : null}
-            {appTestBusy ? (
-              <span
-                className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                title="App test running"
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full bg-amber-500"
-                  aria-hidden
-                />
-                <span className="hidden @[360px]:inline">Testing</span>
-              </span>
             ) : null}
           </div>
           {showToolbarStatus ? (
@@ -1244,62 +1063,6 @@ export function PreviewPanel({
               )}
             </div>
           )}
-
-          {showPip && appTest.liveViewUrl ? (
-            <div className="absolute bottom-3 right-3 z-10 flex w-[320px] flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-              <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-2 py-1.5 dark:border-zinc-700">
-                <p className="truncate text-[11px] font-medium text-zinc-700 dark:text-zinc-200">
-                  App Test Live View
-                </p>
-                <div className="flex shrink-0 items-center gap-1">
-                  <a
-                    href={appTest.liveViewUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-zinc-100 dark:text-blue-400 dark:hover:bg-zinc-800"
-                  >
-                    <ExternalLink className="h-3 w-3" strokeWidth={2} />
-                    Open
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPipDismissed(true);
-                      setPipOpen(false);
-                      window.clearTimeout(pipHoldTimerRef.current);
-                      setPipHoldActive(false);
-                      pendingPipOpenRef.current = false;
-                    }}
-                    className="inline-flex items-center rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    aria-label="Close Live View"
-                  >
-                    <X className="h-3 w-3" strokeWidth={2} />
-                  </button>
-                </div>
-              </div>
-              <iframe
-                key={appTest.liveViewUrl}
-                src={appTest.liveViewUrl}
-                title="App test Live View"
-                className="h-[200px] w-full border-0 bg-zinc-950"
-                allow="clipboard-read; clipboard-write"
-              />
-            </div>
-          ) : null}
-
-          {appTest.status === "running" &&
-          appTest.liveViewUrl &&
-          pipDismissed ? (
-            <a
-              href={appTest.liveViewUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-            >
-              <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} />
-              Open Live View
-            </a>
-          ) : null}
         </div>
       </div>
 

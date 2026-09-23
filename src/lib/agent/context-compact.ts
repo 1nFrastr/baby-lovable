@@ -22,7 +22,6 @@ const LARGE_RESULT_TOOLS = new Set([
   "searchContent",
   "runCommand",
   "exec",
-  "testPreview",
 ]);
 
 /**

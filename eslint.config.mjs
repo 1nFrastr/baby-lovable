@@ -12,7 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Local CLI traces and app-test artifacts.
+    // Local CLI traces.
     ".baby-lovable/**",
     // Workflow DevKit build artifacts (generated route handlers).
     "src/app/.well-known/workflow/**",

@@ -1,6 +1,6 @@
 # Realtime state sync design
 
-Preview, Agent Run, and Browser Test state all change on the server. The frontend should not repeatedly poll multiple endpoints and assemble current state itself. A better approach: the server maintains one unified read model, and the frontend only subscribes to changes of that read model.
+Preview and Agent Run state all change on the server. The frontend should not repeatedly poll multiple endpoints and assemble current state itself. A better approach: the server maintains one unified read model, and the frontend only subscribes to changes of that read model.
 
 In one sentence:
 
@@ -12,11 +12,10 @@ In a session, many states change frequently:
 
 - Agent Run is queued, running, completed, or failed
 - Preview is creating, starting, restarting, or ready
-- Browser Test is running, passed, or failed
 
 If the frontend polls to assemble these states, several problems follow.
 
-**First, high request volume.** Every UI refresh temporarily queries multiple states (run, preview, app test) and assembles them on the server. With multiple tabs open, request volume grows further.
+**First, high request volume.** Every UI refresh temporarily queries multiple states (run, preview) and assembles them on the server. With multiple tabs open, request volume grows further.
 
 **Second, the frontend easily sees inconsistent state.** On refresh, multi-tab use, or out-of-order network packets, the frontend may overwrite new state with old state, so UI and server truth diverge.
 
@@ -41,7 +40,6 @@ Domain state is still updated by each domain module. For example:
 
 - Agent Run updates execution status
 - Daytona Runtime updates Preview status
-- Browser Test updates test status
 
 After those domain updates succeed, they call:
 
@@ -57,7 +55,6 @@ The frontend does not subscribe to many scattered events — it subscribes to on
 
 - `run`
 - `preview`
-- `appTest`
 - `sourceControl` (Freestyle repo preparation / turn sync status; the chat input still only looks at `run`)
 - `version`
 
@@ -133,7 +130,7 @@ What the frontend cares about: whether Preview is ready, PreviewURL, whether it 
 
 ## Why not let the client merge
 
-A seemingly simple approach is: the backend pushes partial events like `preview.updated`, `run.updated`, `appTest.updated`, and the frontend merges them. We do not do that, because it moves complexity to the client.
+A seemingly simple approach is: the backend pushes partial events like `preview.updated` and `run.updated`, and the frontend merges them. We do not do that, because it moves complexity to the client.
 
 The client would have to handle: out-of-order events, missing partial state, restoring initial state after refresh, multi-tab consistency, and dependencies between events. The frontend easily becomes an implicit state machine.
 
@@ -153,7 +150,7 @@ We do not add Ably, Redis Pub/Sub, or another messaging system as a second UI st
 
 ### Do not mix chat tokens into the runtime channel
 
-Agent streaming text still goes through Workflow SSE. Runtime projection only covers structured state such as Preview, Run, and Browser Test. Those two data types have different lifecycles and consumption patterns and should not share one channel.
+Agent streaming text still goes through Workflow SSE. Runtime projection only covers structured state such as Preview and Run. Those two data types have different lifecycles and consumption patterns and should not share one channel.
 
 ## Relationship to sandbox scheduling
 
@@ -201,7 +198,7 @@ The core of this realtime sync design is:
 
 Specifically:
 
-- Preview, Agent Run, and Browser Test are projected into one `SessionRuntimeProjection`
+- Preview and Agent Run are projected into one `SessionRuntimeProjection`
 - On page entry the frontend fetches initial state once, then receives updates via Realtime
 - Each update replaces the whole projection; the client does not partially merge
 - `version` rejects out-of-order or stale state packets
