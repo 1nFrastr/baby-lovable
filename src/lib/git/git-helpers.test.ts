@@ -4,12 +4,22 @@ import {
   FakeFreestyleAdapter,
   setFreestyleAdapterForTests,
 } from "./freestyle-client";
+import { isNonFastForwardError } from "./empty-remote-error";
 import { redactSecrets } from "./provision-repo";
 import { sourceControlFromRepository, emptyGitRepository } from "./types";
 import { buildTurnCommitMessage } from "./commit-message";
 import { FakeSandboxGitRunner } from "@/lib/sandbox/git-runner";
 
 describe("freestyle git helpers", () => {
+  it("detects git non-fast-forward push rejections", () => {
+    expect(
+      isNonFastForwardError(
+        new Error("! [rejected] HEAD -> main (fetch first)\nfailed to push some refs"),
+      ),
+    ).toBe(true);
+    expect(isNonFastForwardError(new Error("malformed zero-id ref"))).toBe(false);
+  });
+
   it("redacts tokens from error strings", () => {
     const raw =
       "push failed https://x-access-token:super-secret@git.freestyle.sh/r1 Bearer abc.def";

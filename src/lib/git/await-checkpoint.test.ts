@@ -56,7 +56,7 @@ describe("awaitPreviousCheckpoint barrier", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("blocks on conflict", async () => {
+  it("does not block writes on a recoverable Freestyle non-fast-forward", async () => {
     await ensureFreestyleRepository("sess_conflict");
     await markRepositoryReady("sess_conflict", "a".repeat(40));
     const { updateGitRepositoryWithRetry } = await import("./repository-store");
@@ -67,6 +67,6 @@ describe("awaitPreviousCheckpoint barrier", () => {
 
     await expect(
       awaitPreviousCheckpoint("sess_conflict", { timeoutMs: 1_000 }),
-    ).rejects.toThrow(/non-fast-forward|blocked/i);
+    ).resolves.toBeUndefined();
   });
 });

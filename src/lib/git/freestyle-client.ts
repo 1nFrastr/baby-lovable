@@ -51,6 +51,8 @@ export interface FreestyleAdapter {
     branch?: string;
     files: FreestyleCommitFile[];
   }): Promise<string>;
+  /** Latest commit SHA on a branch, or null when the branch has no commits. */
+  listLatestCommitSha(repoId: string, branch?: string): Promise<string | null>;
   enableGithubSync(
     repoId: string,
     githubRepoName: string,
@@ -149,16 +151,29 @@ class LiveFreestyleAdapter implements FreestyleAdapter {
       return sha;
     }
 
-    const listed = (await repo.commits.list({
-      branch,
-      limit: 1,
-      order: "desc",
-    })) as { commits?: Array<{ sha?: string }> };
-    const tip = listed.commits?.[0]?.sha;
+    const tip = await this.listLatestCommitSha(input.repoId, branch);
     if (!tip) {
       throw new Error("Freestyle commit did not return a SHA");
     }
     return tip;
+  }
+
+  async listLatestCommitSha(
+    repoId: string,
+    branch = "main",
+  ): Promise<string | null> {
+    const repo = this.client.git.repos.ref({ repoId });
+    try {
+      const listed = (await repo.commits.list({
+        branch,
+        limit: 1,
+        order: "desc",
+      })) as { commits?: Array<{ sha?: string }> };
+      const sha = listed.commits?.[0]?.sha;
+      return typeof sha === "string" && sha.length > 0 ? sha : null;
+    } catch {
+      return null;
+    }
   }
 
   async enableGithubSync(
@@ -245,6 +260,7 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
     files: FreestyleCommitFile[];
   } | null = null;
   commitSha = "e".repeat(40);
+  private readonly commitsByRepo = new Map<string, string>();
   enableGithubSyncCalls = 0;
   disableGithubSyncCalls = 0;
   /** When set, next enableGithubSync throws this message. */
@@ -278,6 +294,7 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
     this.deleteCalls += 1;
     this.repos.delete(repoId);
     this.githubSync.delete(repoId);
+    this.commitsByRepo.delete(repoId);
   }
 
   async createCommit(input: {
@@ -292,7 +309,16 @@ export class FakeFreestyleAdapter implements FreestyleAdapter {
       message: input.message,
       files: input.files,
     };
+    this.commitsByRepo.set(input.repoId, this.commitSha);
     return this.commitSha;
+  }
+
+  async listLatestCommitSha(
+    repoId: string,
+    _branch = "main",
+  ): Promise<string | null> {
+    void _branch;
+    return this.commitsByRepo.get(repoId) ?? null;
   }
 
   async downloadRepoZip(repoId: string, _rev?: string): Promise<Uint8Array> {

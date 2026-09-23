@@ -13,11 +13,7 @@ import {
 
 import { gitTurnCheckpointWorkflow } from "./git-turn-checkpoint";
 
-const TERMINAL_TASK_STATUSES = new Set([
-  "synced",
-  "no_changes",
-  "conflict",
-]);
+const TERMINAL_TASK_STATUSES = new Set(["synced", "no_changes"]);
 
 /**
  * CAS-claim + start checkpoint workflow. Parallel waiters share one run.
@@ -159,11 +155,12 @@ export async function waitForGitSyncTask(
     ) {
       return task;
     }
-    // Soft error with no live worker — kick once then keep waiting.
+    // Soft error / recoverable conflict with no live worker — kick once then keep waiting.
     if (
       (task.status === "pending" ||
         task.status === "syncing" ||
-        task.status === "error") &&
+        task.status === "error" ||
+        task.status === "conflict") &&
       !(await isWorkflowRunActive(task.workflowRunId))
     ) {
       await kickGitTurnCheckpointWorkflow(

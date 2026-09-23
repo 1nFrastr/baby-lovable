@@ -1,8 +1,11 @@
 import type { ProjectSandbox } from "@/lib/sandbox/types";
 
 import { commitWorkspaceViaFreestyleApi } from "./commit-workspace";
-import { isZeroIdRefError } from "./empty-remote-error";
-import { getFreestyleAdapter } from "./freestyle-client";
+import { isNonFastForwardError, isZeroIdRefError } from "./empty-remote-error";
+import {
+  getFreestyleAdapter,
+  type FreestyleGitCredentials,
+} from "./freestyle-client";
 import { redactSecrets } from "./provision-repo";
 import { readGitRepository, updateGitRepositoryWithRetry } from "./repository-store";
 import {
@@ -15,16 +18,6 @@ import type { GitTurnOutcome, SessionGitSyncTask } from "./types";
 
 const MAX_SYNC_ATTEMPTS = 5;
 const LEASE_TTL_MS = 60_000;
-
-function isNonFastForward(error: unknown): boolean {
-  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  return (
-    msg.includes("non-fast-forward") ||
-    msg.includes("failed to push some refs") ||
-    msg.includes("fetch first") ||
-    msg.includes("updates were rejected")
-  );
-}
 
 export async function enqueueTurnCheckpoint(input: {
   sessionId: string;
@@ -62,8 +55,8 @@ export async function runTurnCheckpoint(
   if (!repo?.repoId || !repo.remoteUrl || !repo.identityId) {
     throw new Error("Freestyle repository not provisioned");
   }
-  if (repo.syncStatus === "conflict" || repo.unrecoverable) {
-    throw new Error(repo.syncError ?? "source control conflict — writes blocked");
+  if (repo.unrecoverable) {
+    throw new Error(repo.syncError ?? "source control unrecoverable — writes blocked");
   }
 
   const git = project.git;
@@ -192,37 +185,25 @@ export async function runTurnCheckpoint(
     const credentials = await getFreestyleAdapter().issueWriteToken(
       repo.identityId,
     );
+    const branch = repo.defaultBranch || "main";
 
     try {
-      await git.push(credentials, repo.defaultBranch || "main");
+      await git.push(credentials, branch);
     } catch (pushError) {
-      if (isNonFastForward(pushError)) {
-        const conflict = await updateGitSyncTaskWithRetry(
-          sessionId,
-          runId,
-          () => ({
-            status: "conflict",
-            lastError: redactSecrets(
-              pushError instanceof Error
-                ? pushError.message
-                : String(pushError),
-            ),
-            leaseOwner: null,
-            leaseExpiresAt: null,
-          }),
-          userId,
+      if (isNonFastForwardError(pushError)) {
+        console.warn(
+          `[git] non-fast-forward session=${sessionId} run=${runId}; replaying sandbox tree onto Freestyle main`,
         );
-        await updateGitRepositoryWithRetry(
-          sessionId,
-          () => ({
-            syncStatus: "conflict",
-            syncError: conflict.lastError,
-          }),
-          userId,
-        );
-        return conflict;
-      }
-      if (
+        localSha = await recoverNonFastForwardPush({
+          project,
+          credentials,
+          branch,
+          commitMessage: task.commitMessage,
+          repoId: repo.repoId,
+          remoteUrl: repo.remoteUrl,
+          identityId: repo.identityId,
+        });
+      } else if (
         isZeroIdRefError(pushError) &&
         repo.repoId &&
         repo.remoteUrl &&
@@ -235,7 +216,7 @@ export async function runTurnCheckpoint(
           repoId: repo.repoId,
           remoteUrl: repo.remoteUrl,
           identityId: repo.identityId,
-          branch: repo.defaultBranch || "main",
+          branch,
           message: task.commitMessage,
         });
       } else {
@@ -304,12 +285,6 @@ export async function flushPendingCheckpoints(
 ): Promise<void> {
   const open = await listOpenGitSyncTasks(sessionId, userId);
   for (const task of open) {
-    if (task.status === "conflict") {
-      throw new Error(
-        `Cannot delete sandbox: source-control conflict on run ${task.runId}`,
-      );
-    }
-
     let result = null as Awaited<ReturnType<typeof runTurnCheckpoint>> | null;
 
     try {
@@ -347,4 +322,42 @@ export async function flushPendingCheckpoints(
       );
     }
   }
+}
+
+async function recoverNonFastForwardPush(input: {
+  project: ProjectSandbox;
+  credentials: FreestyleGitCredentials;
+  branch: string;
+  commitMessage: string;
+  repoId: string;
+  remoteUrl: string;
+  identityId: string;
+}): Promise<string> {
+  const git = input.project.git;
+  if (git?.replayLocalOntoRemote) {
+    try {
+      await git.replayLocalOntoRemote(input.credentials, input.branch);
+      const commit = await git.commit(input.commitMessage, false);
+      const sha =
+        (commit.committed ? commit.sha : null) ?? (await git.getHeadSha());
+      await git.push(input.credentials, input.branch);
+      if (!sha) {
+        throw new Error("replay onto remote succeeded but HEAD SHA is missing");
+      }
+      return sha;
+    } catch (error) {
+      console.warn(
+        `[git] replay onto remote failed, falling back to Freestyle Commits API:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  return commitWorkspaceViaFreestyleApi(input.project, {
+    repoId: input.repoId,
+    remoteUrl: input.remoteUrl,
+    identityId: input.identityId,
+    branch: input.branch,
+    message: input.commitMessage,
+  });
 }

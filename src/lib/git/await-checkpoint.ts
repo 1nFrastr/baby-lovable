@@ -52,10 +52,10 @@ export async function awaitPreviousCheckpoint(
     }
 
     const repo = await readGitRepository(sessionId, options.userId ?? null);
-    if (repo?.syncStatus === "conflict" || repo?.unrecoverable) {
+    if (repo?.unrecoverable) {
       throw new CheckpointBarrierError(
         repo.syncError ??
-          "Source control conflict — file writes are blocked until resolved",
+          "Source control is unrecoverable — file writes are blocked",
       );
     }
     if (repo?.provisionStatus === "error") {
@@ -80,7 +80,10 @@ export async function awaitPreviousCheckpoint(
     }
 
     const inFlight = open.filter(
-      (task) => task.status === "pending" || task.status === "syncing",
+      (task) =>
+        task.status === "pending" ||
+        task.status === "syncing" ||
+        task.status === "conflict",
     );
     const softErrors = open.filter(
       (task) => task.status === "error" && task.attemptCount < 5,
