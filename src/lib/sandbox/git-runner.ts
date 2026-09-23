@@ -38,6 +38,15 @@ export interface SandboxGitRunner {
   commit(message: string, allowEmpty?: boolean): Promise<GitCommitResult>;
   push(credentials: FreestyleGitCredentials, branch?: string): Promise<void>;
   pull(credentials: FreestyleGitCredentials, branch?: string): Promise<void>;
+  /**
+   * Fetch `origin/<branch>` and `reset --soft` onto it, keeping the current
+   * index/worktree. Used to recover non-fast-forward pushes without discarding
+   * sandbox edits. Optional — Daytona falls back to the Freestyle Commits API.
+   */
+  replayLocalOntoRemote?(
+    credentials: FreestyleGitCredentials,
+    branch?: string,
+  ): Promise<string | null>;
   clone(
     remoteUrl: string,
     credentials: FreestyleGitCredentials,
@@ -59,6 +68,8 @@ export class FakeSandboxGitRunner implements SandboxGitRunner {
   failPushOnce = false;
   failPushError: string | null = null;
   emptyRemote = false;
+  /** When set, replayLocalOntoRemote clears push failures so a retry can succeed. */
+  replayRecoversPush = false;
 
   async status(): Promise<GitStatusSnapshot> {
     this.calls.push("status");
@@ -138,6 +149,19 @@ export class FakeSandboxGitRunner implements SandboxGitRunner {
     if (this.emptyRemote) {
       throw new Error("couldn't find remote ref main");
     }
+  }
+
+  async replayLocalOntoRemote(
+    ..._args: [FreestyleGitCredentials?, string?]
+  ): Promise<string | null> {
+    void _args;
+    this.calls.push("replayLocalOntoRemote");
+    if (this.replayRecoversPush) {
+      this.failPush = false;
+      this.failPushOnce = false;
+      this.failPushError = null;
+    }
+    return this.headSha;
   }
 
   async clone(

@@ -44,7 +44,13 @@ export async function seedEmptyFreestyleRepo(repoId: string): Promise<string> {
     });
   }
 
-  return getFreestyleAdapter().createCommit({
+  const adapter = getFreestyleAdapter();
+  const existing = await adapter.listLatestCommitSha(repoId, "main");
+  if (existing) {
+    return existing;
+  }
+
+  return adapter.createCommit({
     repoId,
     message: "init: nextjs starter",
     branch: "main",

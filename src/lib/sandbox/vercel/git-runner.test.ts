@@ -61,6 +61,29 @@ describe("VercelShellGitRunner", () => {
     expect(calls.some((args) => args.includes("--ff-only"))).toBe(false);
   });
 
+  it("replays local commits onto origin with reset --soft", async () => {
+    const calls: string[][] = [];
+    const runner = new VercelShellGitRunner(async (args) => {
+      calls.push(args);
+      if (args.includes("get-url")) {
+        return ok("https://git.freestyle.sh/demo.git\n");
+      }
+      if (args.includes("rev-parse") && args.includes("HEAD")) {
+        return ok("b".repeat(40) + "\n");
+      }
+      return ok();
+    });
+    const sha = await runner.replayLocalOntoRemote({
+      username: "x-access-token",
+      password: "token",
+    });
+    expect(sha).toBe("b".repeat(40));
+    expect(calls.some((args) => args.includes("fetch"))).toBe(true);
+    expect(calls.some((args) => args.includes("reset") && args.includes("--soft"))).toBe(
+      true,
+    );
+  });
+
   it("skips commit when porcelain is empty", async () => {
     const runner = new VercelShellGitRunner(async (args) => {
       if (args.includes("add")) {

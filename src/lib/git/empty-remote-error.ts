@@ -12,6 +12,19 @@ export function isZeroIdRefError(error: unknown): boolean {
   );
 }
 
+/** Push rejected because Freestyle `main` moved (seed race, GitHub Sync, etc.). */
+export function isNonFastForwardError(error: unknown): boolean {
+  const msg = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase();
+  return (
+    msg.includes("non-fast-forward") ||
+    msg.includes("failed to push some refs") ||
+    msg.includes("fetch first") ||
+    msg.includes("updates were rejected")
+  );
+}
+
 /** Pull/push failures that mean Freestyle still has no refs. */
 export function isEmptyRemoteGitError(error: unknown): boolean {
   if (isZeroIdRefError(error)) {

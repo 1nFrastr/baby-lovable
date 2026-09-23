@@ -190,7 +190,7 @@ export async function updateGitSyncTaskWithRetry(
     : new Error("git sync task update retry exhausted");
 }
 
-const OPEN_STATUSES = new Set(["pending", "syncing", "error"]);
+const OPEN_STATUSES = new Set(["pending", "syncing", "error", "conflict"]);
 
 export async function listOpenGitSyncTasks(
   sessionId: string,

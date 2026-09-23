@@ -340,4 +340,103 @@ describe("git repository + turn sync", () => {
     expect(repo?.syncStatus).toBe("synced");
     expect(repo?.remoteHeadSha).toBe(adapter.commitSha);
   });
+
+  it("does not re-seed Freestyle when main already has a commit", async () => {
+    const repo = await ensureFreestyleRepository("sess_test");
+    expect(adapter.createCommitCalls).toBe(1);
+    const { seedEmptyFreestyleRepo } = await import("./seed-remote");
+    const sha = await seedEmptyFreestyleRepo(repo.repoId!);
+    expect(sha).toBe(adapter.commitSha);
+    expect(adapter.createCommitCalls).toBe(1);
+  });
+
+  it("replays onto Freestyle main instead of marking conflict on non-fast-forward", async () => {
+    await ensureFreestyleRepository("sess_test");
+    git.dirty = true;
+    git.failPushError =
+      " ! [rejected] HEAD -> main (fetch first)\nerror: failed to push some refs";
+    git.replayRecoversPush = true;
+
+    await enqueueTurnCheckpoint({
+      sessionId: "sess_test",
+      runId: "run_nff",
+      outcome: "completed",
+      commitMessage: "turn-nff: todo",
+    });
+
+    const result = await runTurnCheckpoint(
+      "sess_test",
+      "run_nff",
+      fakeProject(),
+    );
+
+    expect(result.status).toBe("synced");
+    expect(git.calls).toContain("replayLocalOntoRemote");
+    expect(adapter.createCommitCalls).toBe(1);
+
+    const repo = await readGitRepository("sess_test");
+    expect(repo?.syncStatus).toBe("synced");
+    expect(repo?.syncError).toBeNull();
+  });
+
+  it("falls back to Freestyle Commits API when git replay cannot recover non-fast-forward", async () => {
+    await ensureFreestyleRepository("sess_test");
+    git.dirty = true;
+    git.failPushError =
+      " ! [rejected] HEAD -> main (fetch first)\nerror: failed to push some refs";
+    git.replayLocalOntoRemote = async () => {
+      throw new Error("reset --soft failed");
+    };
+
+    await enqueueTurnCheckpoint({
+      sessionId: "sess_test",
+      runId: "run_nff_api",
+      outcome: "completed",
+      commitMessage: "turn-nff-api: todo",
+    });
+
+    const result = await runTurnCheckpoint(
+      "sess_test",
+      "run_nff_api",
+      fakeProject(),
+    );
+
+    expect(result.status).toBe("synced");
+    expect(adapter.createCommitCalls).toBeGreaterThanOrEqual(2);
+    expect(adapter.lastCommit?.message).toBe("turn-nff-api: todo");
+
+    const repo = await readGitRepository("sess_test");
+    expect(repo?.syncStatus).toBe("synced");
+    expect(repo?.remoteHeadSha).toBe(adapter.commitSha);
+  });
+
+  it("retries a previously conflicted task instead of blocking", async () => {
+    await ensureFreestyleRepository("sess_test");
+    git.dirty = true;
+    git.replayRecoversPush = true;
+    git.failPushError =
+      " ! [rejected] HEAD -> main (fetch first)\nerror: failed to push some refs";
+
+    const { updateGitRepositoryWithRetry } = await import("./repository-store");
+    await updateGitRepositoryWithRetry("sess_test", () => ({
+      syncStatus: "conflict",
+      syncError: "failed to push some refs",
+    }));
+
+    await enqueueTurnCheckpoint({
+      sessionId: "sess_test",
+      runId: "run_unstick",
+      outcome: "completed",
+      commitMessage: "turn-unstick",
+    });
+
+    const result = await runTurnCheckpoint(
+      "sess_test",
+      "run_unstick",
+      fakeProject(),
+    );
+    expect(result.status).toBe("synced");
+    const repo = await readGitRepository("sess_test");
+    expect(repo?.syncStatus).toBe("synced");
+  });
 });

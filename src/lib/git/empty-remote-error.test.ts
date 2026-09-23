@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isEmptyRemoteGitError,
+  isNonFastForwardError,
   isZeroIdRefError,
 } from "./empty-remote-error";
 
@@ -25,5 +26,16 @@ describe("empty-remote git errors", () => {
     expect(isEmptyRemoteGitError(new Error("authentication failed"))).toBe(
       false,
     );
+  });
+
+  it("matches Freestyle non-fast-forward rejections", () => {
+    expect(
+      isNonFastForwardError(
+        new Error(
+          "To https://git.freestyle.sh/repo\n ! [rejected] HEAD -> main (fetch first)\nerror: failed to push some refs",
+        ),
+      ),
+    ).toBe(true);
+    expect(isNonFastForwardError(new Error(PROD_PUSH_ERROR))).toBe(false);
   });
 });

@@ -172,6 +172,37 @@ export class VercelShellGitRunner implements SandboxGitRunner {
     }
   }
 
+  async replayLocalOntoRemote(
+    credentials: FreestyleGitCredentials,
+    branch = "main",
+  ): Promise<string | null> {
+    const origin = await this.originUrl();
+    if (!origin) {
+      throw new Error("git replay failed: no origin remote");
+    }
+    const url = authedRemote(origin, credentials);
+    const fetch = await this.git(
+      ["fetch", url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+      { timeoutSec: 180 },
+    );
+    if (fetch.exitCode !== 0) {
+      throw wrapGitError(
+        new Error(`${fetch.stdout}\n${fetch.stderr}`.trim() || "git fetch failed"),
+      );
+    }
+    // Keep the sandbox tree; move HEAD to the remote tip so the next commit
+    // is a fast-forward from Freestyle `main`.
+    const reset = await this.git(["reset", "--soft", `origin/${branch}`]);
+    if (reset.exitCode !== 0) {
+      throw wrapGitError(
+        new Error(
+          `${reset.stdout}\n${reset.stderr}`.trim() || "git reset --soft failed",
+        ),
+      );
+    }
+    return this.getHeadSha();
+  }
+
   async pull(
     credentials: FreestyleGitCredentials,
     branch = "main",

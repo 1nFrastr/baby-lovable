@@ -6,7 +6,7 @@ Every session uses Freestyle private-repo `main` as the durable source of truth 
 
 - One session → one Freestyle private repository (`session_git_repositories`)
 - The Agent only edits sandbox files and does not get Git tools; `.git` is protected by `protected-paths`
-- After each turn ends (success / failure) the platform automatically runs `status → add → commit → push`
+- After each turn ends (success / failure) the platform automatically runs `status → add → commit → push`. A non-fast-forward push (remote `main` moved, usually a seed race) is recovered by replaying the sandbox tree onto Freestyle `main` — it is not a terminal conflict that blocks chat.
 - Git operations go through the sandbox provider git runner (Daytona SDK `sandbox.git.*`, or argv `git` inside the Vercel adapter). Agent tools still cannot run `git`.
 - The chat input only looks at `run` status; `sourceControl` is projected separately for syncing / failed / conflict
 - Web UI (Daytona): preview-bar status chip + read-only **History** version list (`GET /api/sessions/:id/versions`); revert is not supported yet
