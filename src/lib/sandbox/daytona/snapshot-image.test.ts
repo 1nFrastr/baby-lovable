@@ -41,6 +41,8 @@ describe("buildStarterSnapshotImage", () => {
     expect(df).toContain(".baby/bin/baby");
     expect(df).toContain("chmod +x .baby/bin/baby");
     expect(df).toContain(`bash ${NEXT_DEV_WARM_SCRIPT}`);
+    expect(df).toContain("bash scripts/install-keenable.sh");
+    expect(df).toContain("/usr/local/bin/keenable");
   });
 
   it("includes the starter template as build context", () => {

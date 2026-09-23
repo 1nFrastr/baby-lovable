@@ -34,6 +34,10 @@ const TEE_RE = /(?:^|[;&|\n]|&&|\|\|)\s*tee\b/;
 const SKILL_SCRIPT_RE =
   /(?:^|[;&|\n]|&&|\|\|)\s*(?:(?:bash|sh)\s+)?\.baby\/skills\/[a-z0-9_-]+\/scripts\/[A-Za-z0-9._-]+(?:\s|$)/;
 
+/** Package installs restart preview. Other skill scripts (web search) do not. */
+const DEPS_SKILL_SCRIPT_RE =
+  /\.baby\/skills\/deps\/scripts\/[A-Za-z0-9._-]+(?:\s|$)/;
+
 const BABY_DISCOVERY_RE =
   /^(?:(?:bash|sh)\s+)?(?:\.baby\/bin\/)?baby(?:\s+(?:skills|skill\s+[a-z0-9_-]+))?\s*$/;
 
@@ -190,6 +194,16 @@ export function evaluateExecPolicy(command: string): ExecPolicyResult {
     kind: "inspect",
     timeoutDefault: EXEC_TIMEOUT_INSPECT_SEC,
   };
+}
+
+export function execRestartsPreview(
+  result: Extract<ExecPolicyResult, { ok: true }>,
+  command: string,
+): boolean {
+  if (result.kind === "pkg") {
+    return true;
+  }
+  return result.kind === "skill-script" && DEPS_SKILL_SCRIPT_RE.test(command);
 }
 
 export function capExecTimeout(timeoutSec: number): number {

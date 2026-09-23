@@ -7,6 +7,7 @@ import {
   VERCEL_IDLE_EXTEND_SLACK_MS,
   getVercelIdleMs,
   getVercelResources,
+  getVercelNetworkPolicy,
   getVercelSandboxImage,
   isVercelSandboxConfigured,
   vercelIdleExtendMs,
@@ -24,6 +25,7 @@ describe("vercel sandbox config", () => {
     delete process.env.VERCEL;
     delete process.env.VERCEL_SANDBOX_IMAGE;
     delete process.env.VERCEL_SANDBOX_VCPUS;
+    delete process.env.VERCEL_SANDBOX_ALLOW_HOSTS;
   });
 
   it("sanitizes session ids into sandbox names", () => {
@@ -83,6 +85,15 @@ describe("vercel sandbox config", () => {
     expect(getVercelSandboxImage()).toBe(VERCEL_DEFAULT_IMAGE);
     process.env.VERCEL_SANDBOX_IMAGE = "vercel/sandbox/universal";
     expect(getVercelSandboxImage()).toBe("vercel/sandbox/universal");
+  });
+
+  it("allows Keenable API egress by default", () => {
+    delete process.env.VERCEL_SANDBOX_ALLOW_HOSTS;
+    const policy = getVercelNetworkPolicy();
+    expect(policy).not.toBe("allow-all");
+    if (policy !== "allow-all") {
+      expect(policy.allow).toContain("api.keenable.ai");
+    }
   });
 
   it("requires token + team + project for local CLI credentials", () => {

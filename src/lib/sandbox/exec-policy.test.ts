@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluateExecPolicy } from "./exec-policy";
+import { evaluateExecPolicy, execRestartsPreview } from "./exec-policy";
 
 describe("evaluateExecPolicy", () => {
   it("allows inspect pipelines", () => {
@@ -47,10 +47,20 @@ describe("evaluateExecPolicy", () => {
     ).toMatchObject({ ok: true, kind: "pkg" });
   });
 
-  it("allows skill scripts", () => {
-    expect(
-      evaluateExecPolicy("bash .baby/skills/deps/scripts/add.sh lucide-react"),
-    ).toMatchObject({ ok: true, kind: "skill-script" });
+  it("allows skill scripts and restarts preview only for deps", () => {
+    const depsCmd = "bash .baby/skills/deps/scripts/add.sh lucide-react";
+    const deps = evaluateExecPolicy(depsCmd);
+    expect(deps).toMatchObject({ ok: true, kind: "skill-script" });
+    if (deps.ok) {
+      expect(execRestartsPreview(deps, depsCmd)).toBe(true);
+    }
+
+    const webCmd = 'bash .baby/skills/web/scripts/search.sh "rust async"';
+    const web = evaluateExecPolicy(webCmd);
+    expect(web).toMatchObject({ ok: true, kind: "skill-script" });
+    if (web.ok) {
+      expect(execRestartsPreview(web, webCmd)).toBe(false);
+    }
   });
 
   it("rejects preview lifecycle and background jobs", () => {

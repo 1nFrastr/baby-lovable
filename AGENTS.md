@@ -126,6 +126,8 @@ The agent uses a **small tool surface** plus sandbox bash (`exec`) and progressi
 
 Platform skills live in host `skills/` and are injected into the sandbox at `.baby/skills/` (not Freestyle user source). L0 is name + description only; the agent reads `.baby/skills/<name>/SKILL.md` then execs.
 
+`web` searches and fetches pages through the [Keenable CLI](https://docs.keenable.ai/cli) (`bash .baby/skills/web/scripts/search.sh` / `fetch.sh`). The CLI is baked into the sandbox image at `/usr/local/bin/keenable` (`src/lib/sandbox/scripts/install-keenable.sh`, currently v0.2.3) by `npm run build:vercel-image` and `npm run build:daytona-snapshot`. Optional host `KEENABLE_API_KEY` is injected only into that standalone command. Sandbox egress must allow `api.keenable.ai` (default Vercel and Daytona Pro lists include it; recreate an existing sandbox to pick up the host and the binary).
+
 **Verification loop the agent (and you) should follow:**
 
 1. Inspect with `exec` / `readFile`. Edit source with file tools. After preview is ready, small edits rely on HMR; `writeFile` / `editFile` may return `compileError` when the log already shows a failure.
@@ -182,6 +184,7 @@ See `.env.example`:
 - `VERCEL_SANDBOX_SNAPSHOT` — optional extra filesystem freeze from `npm run build:vercel-snapshot`
 - `FREESTYLE_API_KEY` — durable Git source of truth (required for Vercel; for Daytona unless `DAYTONA_FREE_PLAN=1`)
 - `DAYTONA_FREE_PLAN` — optional; `1`/`true`/`on` enables free-tier ephemeral **Daytona** only (no Freestyle SoT). Vercel sessions ignore this flag.
+- `KEENABLE_API_KEY` — optional; authenticates builder `web` skill search/fetch. Omit it to use Keenable's public rate limit.
 
 ## Supabase schema changes
 

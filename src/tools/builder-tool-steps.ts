@@ -1,10 +1,12 @@
 import { isCompactedFilePayload } from "@/lib/agent/context-compact";
 import { applyEdit } from "@/lib/agent/edit-apply";
+import { keenableExecEnv } from "@/lib/agent/skills/keenable-env";
 import { buildAllowedShellCommand, parseAllowedCommand } from "@/lib/sandbox/command-policy";
 import { clipHeadTail } from "@/lib/sandbox/exec-output";
 import {
   capExecTimeout,
   evaluateExecPolicy,
+  execRestartsPreview,
 } from "@/lib/sandbox/exec-policy";
 import { workspacePathViolation } from "@/lib/sandbox/protected-paths";
 
@@ -236,7 +238,7 @@ export async function execStep(
     };
   }
 
-  const mutating = policy.kind === "pkg" || policy.kind === "skill-script";
+  const mutating = execRestartsPreview(policy, command);
   if (mutating) {
     try {
       await awaitMutationGate(context);
@@ -271,7 +273,7 @@ export async function execStep(
   const result = await sandbox.process.executeCommand(
     wrapped,
     cwd,
-    undefined,
+    keenableExecEnv(command),
     timeout,
   );
 
