@@ -12,6 +12,7 @@ import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
 import { repairUiMessages } from "@/lib/chat/repair-messages";
 import {
   appendRecordedStep,
+  applyClosingModelText,
   createTurnAssistantMessage,
   type ToolCompletion,
 } from "@/lib/chat/turn-progress";
@@ -175,12 +176,22 @@ export async function builderChat(
     throw error;
   }
 
-  trace.finalizeTurn(result, startedAt, assistant);
+  const persistedAssistant = applyClosingModelText(assistant, result.messages);
+  if (persistedAssistant !== assistant) {
+    console.log(
+      formatTraceStdout(
+        sessionId,
+        "INFO",
+        "persisted assistant close replaced with the model transcript",
+      ),
+    );
+  }
+  trace.finalizeTurn(result, startedAt, persistedAssistant);
   await finishTurnStep(
     sessionId,
     turnId,
     checkpoint,
-    assistant,
+    persistedAssistant,
   );
 
   return { messages: result.messages };

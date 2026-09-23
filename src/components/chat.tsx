@@ -137,7 +137,8 @@ export function Chat({
   /**
    * When this page sends a turn, its one live useChat thread is the display.
    * A refreshed page has no local owner and is updated directly from the
-   * authoritative session snapshots.
+   * authoritative session snapshots. A lower conversationRevision never
+   * replaces messages this view has already seen.
    */
   const [localUserMessageId, setLocalUserMessageId] = useState<string | null>(
     null,
@@ -159,6 +160,7 @@ export function Chat({
   );
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const lastSyncedRevisionRef = useRef(conversationRevision);
+  const seenRevisionRef = useRef(conversationRevision);
 
   const serverTurnActive =
     (Boolean(activeTurnId) && isActiveRunStatus(runStatus)) ||
@@ -178,6 +180,11 @@ export function Chat({
   }, [messages, pendingUserMessageId]);
 
   useEffect(() => {
+    if (conversationRevision < seenRevisionRef.current) {
+      return;
+    }
+    seenRevisionRef.current = conversationRevision;
+
     if (localUserMessageId) {
       const terminalSnapshotReady =
         !serverTurnActive && serverHasLocalUser;
@@ -372,7 +379,11 @@ export function Chat({
         if (!response.ok) {
           throw new Error(data?.error ?? `Command failed (${response.status})`);
         }
-        if (data?.session?.messages) {
+        if (
+          data?.session?.messages &&
+          data.session.conversationRevision >= seenRevisionRef.current
+        ) {
+          seenRevisionRef.current = data.session.conversationRevision;
           lastSyncedRevisionRef.current = data.session.conversationRevision;
           setMessages(data.session.messages);
         }

@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  replaceEqualDeep,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 
+import { preferSessionDetail } from "@/lib/session/conversation-revision";
 import {
   isActiveRunStatus,
   type Session,
@@ -67,8 +69,9 @@ async function fetchSessions(): Promise<SessionsListData> {
 
 async function fetchSessionDetail(
   sessionId: string,
+  signal: AbortSignal,
 ): Promise<SessionDetailData> {
-  const response = await fetch(`/api/sessions/${sessionId}`);
+  const response = await fetch(`/api/sessions/${sessionId}`, { signal });
   if (response.status === 404) {
     throw new Error("Session not found");
   }
@@ -77,6 +80,17 @@ async function fetchSessionDetail(
   }
 
   return (await response.json()) as SessionDetailData;
+}
+
+function shareSessionDetail(oldData: unknown, newData: unknown): unknown {
+  const preferred = preferSessionDetail(
+    oldData as SessionDetailData | undefined,
+    newData as SessionDetailData,
+  );
+  if (oldData && preferred === oldData) {
+    return oldData;
+  }
+  return replaceEqualDeep(oldData, newData);
 }
 
 export function useSessionsQuery() {
@@ -89,7 +103,8 @@ export function useSessionsQuery() {
 export function useSessionQuery(sessionId: string | null) {
   return useQuery({
     queryKey: sessionKeys.detail(sessionId ?? ""),
-    queryFn: () => fetchSessionDetail(sessionId!),
+    queryFn: ({ signal }) => fetchSessionDetail(sessionId!, signal),
+    structuralSharing: shareSessionDetail,
     enabled: Boolean(sessionId),
     // Detail must always revalidate when revisiting — cached empty messages
     // after the first chat turn caused blank history on session switch-back.

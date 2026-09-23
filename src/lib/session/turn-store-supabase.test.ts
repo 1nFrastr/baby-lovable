@@ -597,6 +597,39 @@ describe("session turn store CAS", () => {
     });
   });
 
+  it("does not let an older shorter finish overwrite a richer snapshot", async () => {
+    await claimTurn();
+    const rich = await persistSessionStepSnapshotSupabase(
+      "sess_1",
+      "turn_1",
+      4,
+      {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: "**首页**\n- 底栏\n- 播放页\n窄屏(<md)自动隐藏侧栏",
+            state: "done",
+          },
+        ],
+      },
+    );
+    expect(rich.ok && rich.changed).toBe(true);
+
+    const finished = await finishSessionTurnSupabase("sess_1", "turn_1", 1, {
+      id: "assistant-1",
+      role: "assistant",
+      parts: [{ type: "text", text: "- 首页", state: "done" }],
+    });
+
+    expect(finished.ok && finished.session.runStatus).toBe("completed");
+    expect(finished.ok && finished.session.turnCheckpoint).toBe(4);
+    expect(loadMessages("sess_1").at(-1)?.parts[0]).toMatchObject({
+      text: "**首页**\n- 底栏\n- 播放页\n窄屏(<md)自动隐藏侧栏",
+    });
+  });
+
   it("finishes the turn by clearing the lease without duplicating the assistant", async () => {
     await claimTurn();
     const finished = await finishSessionTurnSupabase("sess_1", "turn_1", 2, {
