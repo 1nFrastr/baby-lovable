@@ -67,6 +67,22 @@ export class UnauthenticatedError extends Error {
   }
 }
 
+/** Auth API blips worth one extra `getUser()`; refresh-token races are not. */
+export function shouldRetryAuthUserLookup(
+  error: { status?: number; name?: string } | null | undefined,
+): boolean {
+  if (!error) {
+    return false;
+  }
+  if (error.name === "AuthRetryableFetchError") {
+    return true;
+  }
+  if (error.status === 429) {
+    return true;
+  }
+  return typeof error.status === "number" && error.status >= 500;
+}
+
 /**
  * Resolve the authenticated user for session-scoped API routes.
  *
@@ -79,9 +95,12 @@ export async function getSessionAuthContext(
   void request;
 
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const first = await supabase.auth.getUser();
+  const retried =
+    !first.data.user && shouldRetryAuthUserLookup(first.error)
+      ? await supabase.auth.getUser()
+      : first;
+  const user = retried.data.user;
 
   return {
     userId: user?.id ?? getDevUserId() ?? null,
