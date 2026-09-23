@@ -4,6 +4,7 @@ import { userMessagePreview } from "@/lib/chat/attachments";
 import {
   applyAssistantSnapshot,
   applyToolProgress,
+  completedAssistantWrite,
   createTurnAssistantMessage,
   finalizeTurnForCancellation,
   getTurnAssistant,
@@ -103,18 +104,6 @@ async function casSessionRow(options: {
   return data ? sessionFromRow(data as SessionRow) : null;
 }
 
-function terminalAssistantMessage(
-  messages: UIMessage[],
-  snapshot: UIMessage,
-): UIMessage | null {
-  if (!assistantHasPersistedContent(snapshot)) {
-    return null;
-  }
-  return getTurnAssistant(
-    applyAssistantSnapshot(messages, snapshot),
-    snapshot.id,
-  );
-}
 
 function sameMessages(left: UIMessage[], right: UIMessage[]): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -390,13 +379,18 @@ export async function finishSessionTurnSupabase(
       };
     }
 
-    const message = terminalAssistantMessage(current.messages, snapshot);
+    const resolved = completedAssistantWrite({
+      messages: current.messages,
+      snapshot,
+      checkpoint,
+      storedCheckpoint: current.turnCheckpoint,
+    });
     const updated = await terminalSessionTurn(
       current,
       turnId,
       snapshot.id,
-      message,
-      checkpoint,
+      resolved.message,
+      resolved.checkpoint,
       "completed",
     );
     if (updated) {

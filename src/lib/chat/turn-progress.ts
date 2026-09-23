@@ -1,6 +1,9 @@
-import { isToolUIPart, type UIMessage } from "ai";
+import { isToolUIPart, type ModelMessage, type UIMessage } from "ai";
 
-import { finalizeInterruptedAssistant } from "./interrupt-assistant";
+import {
+  assistantHasPersistedContent,
+  finalizeInterruptedAssistant,
+} from "./interrupt-assistant";
 import { truncateReasoningText } from "./reasoning-text";
 
 export interface OrderedToolCall {
@@ -241,6 +244,110 @@ export function applyAssistantSnapshot(
     role: "assistant",
     parts,
   });
+}
+
+export function assistantTextContent(message: UIMessage): string {
+  return message.parts
+    .map((part) => (part.type === "text" && "text" in part ? part.text : ""))
+    .join("");
+}
+
+function textOfModelMessage(message: ModelMessage): string {
+  if (message.role !== "assistant") {
+    return "";
+  }
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  return message.content
+    .map((part) =>
+      part.type === "text" && "text" in part ? part.text : "",
+    )
+    .join("");
+}
+
+/**
+ * The workflow return's last assistant message is the closing text.
+ * Step callbacks can record only a prefix of that close. Put the longer
+ * closing text on the last text part. A shorter model close is left alone:
+ * tool-call steps keep narration that the model transcript drops.
+ */
+export function applyClosingModelText(
+  assistant: UIMessage,
+  modelMessages: readonly ModelMessage[],
+): UIMessage {
+  const closing = [...modelMessages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const finalText = closing ? textOfModelMessage(closing) : "";
+  if (!finalText || assistantTextContent(assistant).includes(finalText)) {
+    return assistant;
+  }
+
+  let lastTextIndex = -1;
+  for (let index = assistant.parts.length - 1; index >= 0; index -= 1) {
+    const part = assistant.parts[index];
+    if (part?.type === "text" && "text" in part && part.text) {
+      lastTextIndex = index;
+      break;
+    }
+  }
+
+  if (lastTextIndex < 0) {
+    return {
+      ...assistant,
+      parts: [...assistant.parts, { type: "text", text: finalText, state: "done" }],
+    };
+  }
+
+  const current = assistant.parts[lastTextIndex];
+  if (!current || current.type !== "text" || finalText.length <= current.text.length) {
+    return assistant;
+  }
+
+  const parts = [...assistant.parts];
+  parts[lastTextIndex] = { ...current, text: finalText, state: "done" };
+  return { ...assistant, parts };
+}
+
+/**
+ * Terminal write for a completed turn. An older checkpoint cannot replace
+ * the stored assistant, and a shorter body cannot replace a longer one.
+ */
+export function completedAssistantWrite(input: {
+  messages: UIMessage[];
+  snapshot: UIMessage;
+  checkpoint: number;
+  storedCheckpoint: number;
+}): { message: UIMessage | null; checkpoint: number } {
+  const stored = getTurnAssistant(input.messages, input.snapshot.id);
+  const checkpoint = Math.max(input.checkpoint, input.storedCheckpoint);
+
+  if (input.checkpoint < input.storedCheckpoint) {
+    return {
+      message: assistantHasPersistedContent(stored) ? stored : null,
+      checkpoint: input.storedCheckpoint,
+    };
+  }
+
+  if (!assistantHasPersistedContent(input.snapshot)) {
+    return {
+      message: assistantHasPersistedContent(stored) ? stored : null,
+      checkpoint,
+    };
+  }
+
+  const merged = getTurnAssistant(
+    applyAssistantSnapshot(input.messages, input.snapshot),
+    input.snapshot.id,
+  );
+  if (
+    assistantTextContent(stored).length > assistantTextContent(merged).length
+  ) {
+    return { message: stored, checkpoint };
+  }
+
+  return { message: merged, checkpoint };
 }
 
 /**

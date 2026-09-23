@@ -2,10 +2,15 @@ import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { sanitizeJsonbText } from "@/lib/json/sanitize-jsonb";
+import type { ModelMessage } from "ai";
+
 import {
   appendRecordedStep,
   applyAssistantSnapshot,
+  applyClosingModelText,
   applyToolProgress,
+  assistantTextContent,
+  completedAssistantWrite,
   createTurnAssistantMessage,
   finalizeTurnForCancellation,
   joinReasoningText,
@@ -240,6 +245,160 @@ describe("applyAssistantSnapshot", () => {
         parts: [{ type: "text", text: "missing tool" }],
       }),
     ).toThrow("omitted completed tool");
+  });
+});
+
+describe("applyClosingModelText", () => {
+  const fullClose =
+    "**首页**\n- 底栏\n- 播放页\n窄屏(<md)自动隐藏侧栏";
+
+  it("replaces a shorter last text part with the model closing text", () => {
+    const assistant = appendRecordedStep(
+      createTurnAssistantMessage("assistant-1"),
+      {
+        content: [
+          { type: "text", text: "- 首页\n侧边栏：窄屏..." },
+        ],
+      },
+      new Map(),
+    );
+
+    const merged = applyClosingModelText(assistant, [
+      { role: "user", content: "build" },
+      { role: "assistant", content: [{ type: "text", text: fullClose }] },
+    ]);
+
+    expect(assistantTextContent(merged)).toBe(fullClose);
+    expect(merged.parts.at(-1)).toMatchObject({ state: "done" });
+  });
+
+  it("keeps a longer fold when the last model assistant has no text", () => {
+    const assistant = appendRecordedStep(
+      createTurnAssistantMessage("assistant-1"),
+      {
+        content: [{ type: "text", text: "I updated the homepage." }],
+      },
+      new Map(),
+    );
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "previous turn close that is much longer than the fold" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "writeFile",
+            input: {},
+          },
+        ],
+      },
+    ];
+
+    expect(applyClosingModelText(assistant, messages)).toBe(assistant);
+  });
+
+  it("does not duplicate a closing text the fold already contains", () => {
+    const assistant = appendRecordedStep(
+      createTurnAssistantMessage("assistant-1"),
+      { content: [{ type: "text", text: fullClose }] },
+      new Map(),
+    );
+
+    expect(
+      applyClosingModelText(assistant, [
+        { role: "assistant", content: fullClose },
+      ]),
+    ).toBe(assistant);
+  });
+
+  it("appends the closing text when the fold has no text part", () => {
+    const assistant = appendRecordedStep(
+      createTurnAssistantMessage("assistant-1"),
+      {
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "readFile",
+            input: { path: "a.ts" },
+          },
+        ],
+      },
+      new Map(),
+    );
+
+    const merged = applyClosingModelText(assistant, [
+      { role: "assistant", content: "Done." },
+    ]);
+
+    expect(merged.parts.at(-1)).toMatchObject({
+      type: "text",
+      text: "Done.",
+    });
+  });
+});
+
+describe("completedAssistantWrite", () => {
+  const longText =
+    "**首页**\n- 底栏\n- 播放页\n窄屏(<md)自动隐藏侧栏";
+
+  function storedThread(text: string) {
+    return thread({
+      id: "assistant-1",
+      role: "assistant",
+      parts: [{ type: "text", text, state: "done" }],
+    });
+  }
+
+  it("keeps the stored body when finish has an older checkpoint", () => {
+    const resolved = completedAssistantWrite({
+      messages: storedThread(longText),
+      snapshot: {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "- 首页", state: "done" }],
+      },
+      checkpoint: 1,
+      storedCheckpoint: 4,
+    });
+
+    expect(resolved.checkpoint).toBe(4);
+    expect(assistantTextContent(resolved.message!)).toBe(longText);
+  });
+
+  it("keeps the longer body when finish repeats the checkpoint with shorter text", () => {
+    const resolved = completedAssistantWrite({
+      messages: storedThread(longText),
+      snapshot: {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "- 首页", state: "done" }],
+      },
+      checkpoint: 4,
+      storedCheckpoint: 4,
+    });
+
+    expect(resolved.checkpoint).toBe(4);
+    expect(assistantTextContent(resolved.message!)).toBe(longText);
+  });
+
+  it("accepts a longer closing text at the same checkpoint", () => {
+    const resolved = completedAssistantWrite({
+      messages: storedThread("- 首页"),
+      snapshot: {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [{ type: "text", text: longText, state: "done" }],
+      },
+      checkpoint: 4,
+      storedCheckpoint: 4,
+    });
+
+    expect(assistantTextContent(resolved.message!)).toBe(longText);
   });
 });
 
