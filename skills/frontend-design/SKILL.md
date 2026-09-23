@@ -1,30 +1,36 @@
 ---
 name: frontend-design
-description: Distinctive UI visuals — palette, type, layout, motion. Use when building or restyling pages so they do not look like generic AI templates.
+description: Distinctive UI visuals for new or restyled pages. Use before writing or heavily editing UI so the result matches the brief and avoids generic AI template looks.
 ---
 
 # Frontend design
 
-Pick one clear aesthetic for the brief (industry + audience), then commit. Do not remix the same purple SaaS / cream-serif / neon-dark kit on every project.
+**Before writing UI code**, fix a one-line plan (can be private to the turn):
+
+1. **Subject** — what this is for (audience + craft), not a generic “SaaS”
+2. **Look** — one aesthetic sentence tied to that subject (materials, era, mood)
+3. **Tokens** — 4–6 CSS vars (`--bg`, `--fg`, `--accent`, `--muted`, display/body fonts)
+4. **Hero** — the single dominant visual idea
+
+If the plan would fit any other brief, revise it. Then build to the plan; do not invent a second aesthetic mid-page.
 
 ## First viewport
 
-One composition: brand (hero-level), one headline, one short line, one CTA group, one dominant visual. No stats strips, card grids, or promo chips in the hero. Full-bleed imagery beats inset media cards.
+One composition: brand at hero strength, one headline, one short line, one CTA group, one dominant visual. No stats strips, card grids, promo chips, or floating badges on the hero. Full-bleed imagery beats inset media cards.
 
-## Tokens
+## Craft rules
 
-Define a small CSS variable set early (`--bg`, `--fg`, `--accent`, `--muted`, fonts). Prefer expressive fonts over Inter/Roboto/system. Atmosphere via gradient, texture, or real imagery — not a flat single fill alone.
+- Expressive fonts over Inter / Roboto / Arial / system stacks
+- Atmosphere from real imagery, texture, or a deliberate gradient — not a flat fill alone
+- Spend boldness once; keep surroundings quiet. Cards only when they contain a real interaction
+- Copy in the subject’s voice; no lorem, fake metrics, or “feature filler”
 
-## Avoid
+## Avoid (slop tells)
 
-- Purple-on-white / indigo glow defaults; warm cream + terracotta serif; broadsheet hairline columns
-- Card-everything layouts; hero overlays (badges, floating chips); pill clusters; emoji decoration
-- Fade-up on every section; identical soft shadows and one radius on all boxes
+- Purple→indigo kits; cream + terracotta serif; neon-on-near-black; broadsheet hairlines
+- Card-everything; identical radius + soft shadow; pill clusters; emoji chrome
+- EVERY SECTION fade-up; ALL-CAPS eyebrows on every block; accenting one random headline word
 
-## Motion
+## Motion & ship
 
-2–3 intentional moments (page-load or interaction feedback). Honor `prefers-reduced-motion`. Motion answers hierarchy, not noise.
-
-## Ship bar
-
-Responsive mobile + desktop, readable contrast, real or plausible copy for the subject — not "lorem" or feature-filler.
+2–3 intentional moments only. Honor `prefers-reduced-motion`. Mobile + desktop, readable contrast. Pair with `storefront` / `personal-site` when the product shape is clear.
