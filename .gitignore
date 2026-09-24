@@ -46,3 +46,6 @@ next-env.d.ts
 # baby-lovable runtime data
 /.baby-lovable/
 /.workflow-data/
+
+# JetBrains IDE
+.idea/
