@@ -53,6 +53,7 @@ import {
   CHAT_ATTACHMENT_MAX_BYTES,
   CHAT_ATTACHMENT_MAX_FILES,
   CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
+  latestUserMessage,
   uploadSessionAttachments,
 } from "@/lib/chat/attachments";
 import { finalizeInterruptedMessages } from "@/lib/chat/interrupt-assistant";
@@ -110,6 +111,16 @@ export function Chat({
       new WorkflowChatTransport({
         api: `/api/sessions/${sessionId}/chat`,
         maxConsecutiveErrors: 3,
+        // History lives in the session store. The route only reads the newest
+        // user message, so the POST body is that message alone.
+        prepareSendMessagesRequest: ({ messages }) => {
+          const message = latestUserMessage(messages);
+          return {
+            body: {
+              messages: message ? [message] : [],
+            },
+          };
+        },
         // Automatic reconnect is only for this mounted request and resumes
         // from its received chunk index. Fresh page mounts never call resume.
         onChatEnd: () => {

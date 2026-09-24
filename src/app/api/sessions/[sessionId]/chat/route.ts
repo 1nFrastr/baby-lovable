@@ -84,6 +84,7 @@ export async function POST(
 
   try {
     const body = (await request.json()) as { messages?: UIMessage[] };
+    // Callers send only the new user message. Older turns are loaded from the store.
     const rawUserMessage = latestUserMessage(body.messages ?? []);
     if (!rawUserMessage) {
       return NextResponse.json(
