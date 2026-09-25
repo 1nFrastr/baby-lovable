@@ -6,7 +6,7 @@ import {
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
 import { ensureRuntimeProjection } from "@/lib/session/runtime-projection-store";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 
 async function resolveAuth(request: Request) {
   try {
@@ -31,7 +31,7 @@ export async function GET(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -39,7 +39,6 @@ export async function GET(
     const projection = await ensureRuntimeProjection(
       sessionId,
       session.userId,
-      session,
     );
 
     return NextResponse.json({ projection });

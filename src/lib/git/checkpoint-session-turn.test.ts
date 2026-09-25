@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/session/store", () => ({
-  getSession: vi.fn(),
+  getSessionMeta: vi.fn(),
 }));
 
 vi.mock("@/lib/git/turn-sync", () => ({
@@ -12,7 +12,7 @@ vi.mock("@/workflow/git-turn-checkpoint-kick", () => ({
   kickGitTurnCheckpointWorkflow: vi.fn(),
 }));
 
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 import { enqueueTurnCheckpoint } from "@/lib/git/turn-sync";
 import { kickGitTurnCheckpointWorkflow } from "@/workflow/git-turn-checkpoint-kick";
 import { checkpointSessionTurn } from "./checkpoint-session-turn";
@@ -25,18 +25,17 @@ describe("checkpointSessionTurn", () => {
 
   it("no-ops when Daytona free plan is enabled for a Daytona session", async () => {
     process.env.DAYTONA_FREE_PLAN = "1";
-    vi.mocked(getSession).mockResolvedValue({
+    vi.mocked(getSessionMeta).mockResolvedValue({
       id: "sess_free",
       sandboxMode: "daytona",
       title: "New Project",
       userId: "user_1",
-      messages: [],
     } as never);
 
     const result = await checkpointSessionTurn({
       sessionId: "sess_free",
       messages: [],
-      outcome: "success",
+      outcome: "completed",
     });
 
     expect(result).toEqual({ ran: false });
@@ -46,20 +45,19 @@ describe("checkpointSessionTurn", () => {
 
   it("still checkpoints Vercel sessions when Daytona free plan is on", async () => {
     process.env.DAYTONA_FREE_PLAN = "1";
-    vi.mocked(getSession).mockResolvedValue({
+    vi.mocked(getSessionMeta).mockResolvedValue({
       id: "sess_vercel",
       sandboxMode: "vercel",
       title: "Vercel Project",
       userId: "user_1",
       lastRunId: "run_1",
-      messages: [],
     } as never);
     vi.mocked(kickGitTurnCheckpointWorkflow).mockResolvedValue("wrun_1");
 
     const result = await checkpointSessionTurn({
       sessionId: "sess_vercel",
       messages: [],
-      outcome: "success",
+      outcome: "completed",
     });
 
     expect(result.ran).toBe(true);

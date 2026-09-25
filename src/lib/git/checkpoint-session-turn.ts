@@ -19,8 +19,8 @@ export async function checkpointSessionTurn(input: {
   userId?: string | null;
   sessionTitle?: string;
 }): Promise<{ ran: boolean; runId?: string; workflowRunId?: string | null }> {
-  const { getSession } = await import("@/lib/session/store");
-  const session = await getSession(input.sessionId);
+  const { getSessionMeta } = await import("@/lib/session/store");
+  const session = await getSessionMeta(input.sessionId);
   if (!session) {
     throw new Error(`Session not found: ${input.sessionId}`);
   }

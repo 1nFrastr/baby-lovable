@@ -20,7 +20,7 @@ import {
   exportWorkspaceArchive,
   type ExportArchiveResult,
 } from "@/lib/sandbox/daytona/export-archive";
-import { createSession, getSession } from "@/lib/session/store";
+import { createSession, getSessionMeta } from "@/lib/session/store";
 
 interface CliOpts {
   sessionId?: string;
@@ -90,7 +90,7 @@ async function saveZip(
 
 async function resolveSession(opts: CliOpts) {
   if (opts.sessionId) {
-    const existing = await getSession(opts.sessionId);
+    const existing = await getSessionMeta(opts.sessionId);
     if (!existing) {
       throw new Error(`Session not found: ${opts.sessionId}`);
     }

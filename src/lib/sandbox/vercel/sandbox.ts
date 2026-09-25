@@ -2,7 +2,7 @@ import type { ProjectSandbox } from "../types";
 import { canFastAttachSandbox } from "../daytona/sandbox";
 import { ensureDesiredState, markSandboxExternallyDeleted } from "../daytona/runtime-reconciler";
 import { getRuntimeSnapshot } from "../daytona/runtime-store";
-import { getSession } from "@/lib/session/store";
+import { getSessionOwner } from "@/lib/session/store";
 import { vercelDriver } from "./driver";
 import {
   clearVercelAttachCache,
@@ -29,8 +29,8 @@ async function reconnectProject(
 async function attachVercelSandboxForFsOnce(
   sessionId: string,
 ): Promise<ProjectSandbox> {
-  const session = await getSession(sessionId);
-  if (!session || session.sandboxMode !== "vercel") {
+  const owner = await getSessionOwner(sessionId);
+  if (!owner || owner.sandboxMode !== "vercel") {
     throw new Error(`Session ${sessionId} is not a Vercel sandbox session`);
   }
 
@@ -88,8 +88,8 @@ export async function getExistingVercelSandbox(
   options?: { wake?: boolean },
 ): Promise<ProjectSandbox | null> {
   const wake = options?.wake ?? false;
-  const session = await getSession(sessionId);
-  if (!session || session.sandboxMode !== "vercel") {
+  const owner = await getSessionOwner(sessionId);
+  if (!owner || owner.sandboxMode !== "vercel") {
     return null;
   }
   const snapshot = await getRuntimeSnapshot(sessionId);

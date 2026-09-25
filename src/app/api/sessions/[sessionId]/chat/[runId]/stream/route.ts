@@ -11,7 +11,8 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { getSession } from "@/lib/session/store";
+import { loadLastAssistantMessageId } from "@/lib/session/session-messages";
+import { getSessionMeta } from "@/lib/session/store";
 
 export async function GET(
   request: NextRequest,
@@ -29,7 +30,7 @@ export async function GET(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
 
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -51,9 +52,7 @@ export async function GET(
     const tailIndex = await rawReadable.getTailIndex();
     const assistantMessageId =
       session.activeAssistantMessageId ??
-      [...session.messages]
-        .reverse()
-        .find((message) => message.role === "assistant")?.id;
+      (await loadLastAssistantMessageId(sessionId));
     let stream = rawReadable
       .pipeThrough(createModelCallToUIChunkTransform())
       .pipeThrough(capReasoningStream());

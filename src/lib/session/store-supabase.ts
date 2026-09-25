@@ -16,6 +16,7 @@ import type { SessionRow } from "./session-row";
 import type {
   CreateSessionInput,
   Session,
+  SessionMeta,
   SessionSummary,
   UpdateSessionInput,
 } from "./types";
@@ -37,19 +38,15 @@ function createSessionId(): string {
   return `sess_${timestamp}${random}`;
 }
 
-export function rowToSession(
-  row: SessionRow & { messages?: UIMessage[] },
-  messages: UIMessage[] = row.messages ?? [],
-): Session {
+export function rowToSessionMeta(row: SessionRow): SessionMeta {
   assertSandboxMode(row.sandbox_mode, row.id);
-  const session: Session = {
+  const session: SessionMeta = {
     schemaVersion: row.schema_version,
     id: row.id,
     userId: row.user_id,
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messages,
     runStatus: row.run_status,
     conversationRevision: row.conversation_revision ?? 0,
     turnCheckpoint: row.turn_checkpoint ?? -1,
@@ -71,6 +68,36 @@ export function rowToSession(
   }
 
   return session;
+}
+
+export function rowToSession(
+  row: SessionRow & { messages?: UIMessage[] },
+  messages: UIMessage[] = row.messages ?? [],
+): Session {
+  return {
+    ...rowToSessionMeta(row),
+    messages,
+  };
+}
+
+async function loadSessionRow(sessionId: string): Promise<SessionRow | null> {
+  const supabase = getSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to read session: ${error.message}`);
+  }
+
+  if (!data || data.deleted_at) {
+    return null;
+  }
+
+  return data as SessionRow;
 }
 
 function toSummary(row: SessionRow): SessionSummary {
@@ -154,27 +181,31 @@ export async function createSessionSupabase(
   return session;
 }
 
+/** Session row without chat history — skips `session_messages` hydrate. */
+export async function getSessionMetaSupabase(
+  sessionId: string,
+  auth: SessionAuthContext = { userId: null },
+): Promise<SessionMeta | null> {
+  const row = await loadSessionRow(sessionId);
+  if (!row) {
+    return null;
+  }
+
+  const session = rowToSessionMeta(row);
+  assertSessionOwner(session.userId, auth);
+  return session;
+}
+
 export async function getSessionSupabase(
   sessionId: string,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session | null> {
-  const supabase = getSupabaseAdminClient();
-
-  const { data, error } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("id", sessionId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to read session: ${error.message}`);
-  }
-
-  if (!data || data.deleted_at) {
+  const row = await loadSessionRow(sessionId);
+  if (!row) {
     return null;
   }
 
-  const hydrated = await hydrateSessionRow(data as SessionRow);
+  const hydrated = await hydrateSessionRow(row);
   const session = rowToSession(hydrated);
   assertSessionOwner(session.userId, auth);
   return session;

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "@/lib/session/types";
 
 const getSession = vi.fn();
+const getSessionMeta = vi.fn();
 const replaceMessages = vi.fn();
 const updateSession = vi.fn();
 const beginSessionTurnCancellation = vi.fn();
@@ -13,6 +14,7 @@ const getRun = vi.fn();
 
 vi.mock("@/lib/session/store", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
+  getSessionMeta: (...args: unknown[]) => getSessionMeta(...args),
   replaceMessages: (...args: unknown[]) => replaceMessages(...args),
   updateSession: (...args: unknown[]) => updateSession(...args),
 }));
@@ -92,7 +94,7 @@ describe("cancelSessionRun", () => {
   });
 
   it("cancels the matching workflow before sealing the turn", async () => {
-    getSession.mockResolvedValue(session());
+    getSessionMeta.mockResolvedValue(session());
     const { cancelSessionRun } = await import("./cancel-session-run");
 
     const result = await cancelSessionRun(
@@ -121,7 +123,7 @@ describe("cancelSessionRun", () => {
   });
 
   it("keeps the turn cancelling when workflow cancellation fails", async () => {
-    getSession.mockResolvedValue(session());
+    getSessionMeta.mockResolvedValue(session());
     cancelWorkflow.mockRejectedValue(new Error("runtime unavailable"));
     getRun
       .mockResolvedValueOnce({
@@ -147,7 +149,7 @@ describe("cancelSessionRun", () => {
   });
 
   it("rejects a stale expected turn token", async () => {
-    getSession.mockResolvedValue(session());
+    getSessionMeta.mockResolvedValue(session());
     const { cancelSessionRun } = await import("./cancel-session-run");
 
     const result = await cancelSessionRun(
@@ -165,7 +167,7 @@ describe("cancelSessionRun", () => {
   });
 
   it("is idempotent after the turn is already cancelled", async () => {
-    getSession.mockResolvedValue(
+    getSessionMeta.mockResolvedValue(
       session({
         runStatus: "cancelled",
         lastRunId: undefined,

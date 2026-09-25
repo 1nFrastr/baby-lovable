@@ -11,7 +11,6 @@ import {
   readRuntimeProjectionSupabase,
   writeRuntimeProjectionSupabase,
 } from "./runtime-projection-store-supabase";
-import type { Session } from "./types";
 
 export type { SessionRuntimeProjection };
 
@@ -22,9 +21,9 @@ async function resolveUserId(
   if (userId) {
     return userId;
   }
-  const { getSession } = await import("./store");
-  const session = await getSession(sessionId);
-  return session?.userId ?? null;
+  const { getSessionOwner } = await import("./store");
+  const owner = await getSessionOwner(sessionId);
+  return owner?.userId ?? null;
 }
 
 export async function readRuntimeProjectionStore(
@@ -53,16 +52,11 @@ export async function writeRuntimeProjectionStore(
  * Assemble projection once from domain stores and persist.
  * Subsequent reads hit the projection store directly. Chat turn lifecycle
  * lives only on the authoritative session row.
- *
- * Pass `sessionHint` from callers that already loaded the session to avoid
- * a second DB round-trip on GET /runtime.
  */
 export async function ensureRuntimeProjection(
   sessionId: string,
   userId: string | null = null,
-  sessionHint: Session | null = null,
 ): Promise<SessionRuntimeProjection> {
-  void sessionHint;
   const ownerId = await resolveUserId(sessionId, userId);
   const existing = await readRuntimeProjectionStore(sessionId, ownerId);
   if (existing) {
@@ -84,9 +78,9 @@ async function assembleRuntimeProjection(
   sessionId: string,
 ): Promise<SessionRuntimeProjection> {
   const now = new Date().toISOString();
-  const { getSession } = await import("./store");
-  const session = await getSession(sessionId);
-  const base = emptyRuntimeProjection(sessionId, now, session?.sandboxMode);
+  const { getSessionOwner } = await import("./store");
+  const owner = await getSessionOwner(sessionId);
+  const base = emptyRuntimeProjection(sessionId, now, owner?.sandboxMode);
 
   try {
     // Side-effect free: never call peekAllStatus (it may kick background observe).
@@ -112,7 +106,7 @@ async function assembleRuntimeProjection(
   try {
     const { readGitRepository } = await import("@/lib/git/repository-store");
     const { sourceControlFromRepository } = await import("@/lib/git/types");
-    const repo = await readGitRepository(sessionId, session?.userId);
+    const repo = await readGitRepository(sessionId, owner?.userId);
     base.sourceControl = sourceControlFromRepository(repo, now);
   } catch (error) {
     console.warn(

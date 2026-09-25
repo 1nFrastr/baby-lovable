@@ -14,7 +14,7 @@ import {
 } from "./fs-attach-cache";
 import { ensureDesiredState, markSandboxExternallyDeleted } from "./runtime-reconciler";
 import { getRuntimeSnapshot } from "./runtime-store";
-import { getSession } from "@/lib/session/store";
+import { getSessionOwner } from "@/lib/session/store";
 import { reconnectSandbox, sandboxRecordExists, wrapSandbox } from "./vm";
 
 export { clearDaytonaAttachCache } from "./fs-attach-cache";
@@ -120,8 +120,8 @@ function logStaleAttach(
 async function attachDaytonaSandboxForFsOnce(
   sessionId: string,
 ): Promise<DaytonaProjectSandbox> {
-  const session = await getSession(sessionId);
-  if (!session || session.sandboxMode !== "daytona") {
+  const owner = await getSessionOwner(sessionId);
+  if (!owner || owner.sandboxMode !== "daytona") {
     throw new Error(`Session ${sessionId} is not a Daytona sandbox session`);
   }
 
@@ -203,8 +203,8 @@ export async function getExistingDaytonaSandbox(
   options?: { wake?: boolean },
 ): Promise<DaytonaProjectSandbox | null> {
   const wake = options?.wake ?? false;
-  const session = await getSession(sessionId);
-  if (!session || session.sandboxMode !== "daytona") {
+  const owner = await getSessionOwner(sessionId);
+  if (!owner || owner.sandboxMode !== "daytona") {
     return null;
   }
 

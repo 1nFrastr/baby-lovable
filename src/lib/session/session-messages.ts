@@ -32,6 +32,29 @@ export async function loadSessionMessages(
   return (data ?? []).map((row) => row.message as UIMessage);
 }
 
+/** Latest assistant message id without loading the full transcript. */
+export async function loadLastAssistantMessageId(
+  sessionId: string,
+): Promise<string | undefined> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("session_messages")
+    .select("message_id")
+    .eq("session_id", sessionId)
+    .eq("role", "assistant")
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Failed to load last assistant message id: ${error.message}`,
+    );
+  }
+
+  return data?.message_id ?? undefined;
+}
+
 export async function sessionMessageExists(
   sessionId: string,
   messageId: string,

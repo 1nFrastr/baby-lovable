@@ -3,7 +3,7 @@ import { getFreestyleAdapter } from "@/lib/git/freestyle-client";
 import { shouldUseFreestyle } from "@/lib/git/freestyle-config";
 import { readGitRepository } from "@/lib/git/repository-store";
 import type { SandboxMode } from "@/lib/sandbox/types";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 
 export type ExportArchiveSource = "freestyle-zip";
 
@@ -80,7 +80,7 @@ export async function exportWorkspaceArchive(
   sessionId: string,
   options: { userId?: string | null } = {},
 ): Promise<ExportArchiveResult> {
-  const session = await getSession(sessionId);
+  const session = await getSessionMeta(sessionId);
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
   }

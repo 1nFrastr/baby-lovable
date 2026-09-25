@@ -9,6 +9,7 @@ import {
 } from "./auth-context";
 import {
   createSessionSupabase,
+  getSessionMetaSupabase,
   getSessionOwnerSupabase,
   getSessionSupabase,
   listSessionsSupabase,
@@ -19,6 +20,7 @@ import {
 import type {
   CreateSessionInput,
   Session,
+  SessionMeta,
   SessionSummary,
   UpdateSessionInput,
 } from "./types";
@@ -30,12 +32,23 @@ export async function createSession(
   return createSessionSupabase(input, auth);
 }
 
+/** Full session including hydrated chat history. */
 export async function getSession(
   sessionId: string,
   auth: SessionAuthContext = { userId: null },
 ): Promise<Session | null> {
   return getSessionSupabase(sessionId, auth);
 }
+
+/** Session row without chat history — use when messages are unused. */
+export async function getSessionMeta(
+  sessionId: string,
+  auth: SessionAuthContext = { userId: null },
+): Promise<SessionMeta | null> {
+  return getSessionMetaSupabase(sessionId, auth);
+}
+
+export type { SessionMeta };
 
 const sessionOwnerCache = new Map<string, SessionOwner>();
 

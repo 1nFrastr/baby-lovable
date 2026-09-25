@@ -23,7 +23,7 @@ export type SessionRunStatus =
   | "failed"
   | "cancelled";
 
-export interface Session {
+export interface SessionMeta {
   /** Schema version — bump when the persisted row shape changes. */
   schemaVersion: number;
   id: string;
@@ -32,7 +32,6 @@ export interface Session {
   title: string;
   createdAt: string;
   updatedAt: string;
-  messages: UIMessage[];
   /** Active workflow run id (for cancellation and same-connection recovery). */
   lastRunId?: string;
   /** Server-owned lifecycle state. */
@@ -50,6 +49,11 @@ export interface Session {
   sandboxMode: SandboxMode;
   /** Soft-delete timestamp — reserved for Supabase row lifecycle. */
   deletedAt?: string | null;
+}
+
+/** Full session including hydrated chat history. */
+export interface Session extends SessionMeta {
+  messages: UIMessage[];
 }
 
 export interface SessionSummary {

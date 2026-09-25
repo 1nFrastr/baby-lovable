@@ -79,8 +79,8 @@ export function modelMessagesToAssistantUIMessage(
 export async function getSessionStep(sessionId: string) {
   "use step";
 
-  const { getSession } = await import("@/lib/session/store");
-  const session = await getSession(sessionId);
+  const { getSessionMeta } = await import("@/lib/session/store");
+  const session = await getSessionMeta(sessionId);
 
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);

@@ -13,7 +13,7 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 
 export const maxDuration = 60;
 
@@ -37,7 +37,7 @@ export async function POST(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return jsonError("Session not found", 404);
     }

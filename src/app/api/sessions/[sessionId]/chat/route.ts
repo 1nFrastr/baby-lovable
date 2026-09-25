@@ -28,13 +28,13 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 import {
   attachSessionRun,
   claimSessionTurn,
   failSessionTurn,
 } from "@/lib/session/turn-store";
-import { isActiveRunStatus } from "@/lib/session/types";
+import { isActiveRunStatus, type Session } from "@/lib/session/types";
 import { builderChat } from "@/workflow/builder-chat";
 
 /** Preview warm under after() must outlive the chat response headers. */
@@ -100,7 +100,7 @@ export async function POST(
       return NextResponse.json({ error: attachments.error }, { status: 400 });
     }
 
-    const existing = await getSession(sessionId, auth);
+    const existing = await getSessionMeta(sessionId, auth);
     if (!existing) {
       return NextResponse.json(
         { error: "Session not found" },
@@ -121,16 +121,14 @@ export async function POST(
     }
     const userMessage = persisted.message;
 
-    let claimedSession = null as Awaited<
-      ReturnType<typeof getSession>
-    >;
+    let claimedSession: Session | null = null;
 
     for (
       let attempt = 0;
       attempt < MAX_CLAIM_ATTEMPTS;
       attempt += 1
     ) {
-      const current = await getSession(sessionId, auth);
+      const current = await getSessionMeta(sessionId, auth);
       if (!current) {
         return NextResponse.json(
           { error: "Session not found" },

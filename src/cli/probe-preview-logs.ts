@@ -18,7 +18,7 @@ import { Daytona } from "@daytona/sdk";
 import { streamDevCommandLogs } from "@/lib/sandbox/daytona/dev-log-stream";
 import { resolveDevCmdId } from "@/lib/sandbox/daytona/resolve-dev-cmd-id";
 import { getRuntimeSnapshot } from "@/lib/sandbox/daytona/runtime-store";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 
 function log(tag: string, msg: string) {
   const ts = new Date().toISOString().slice(11, 23);
@@ -163,7 +163,7 @@ async function probeStandalone(followMs: number, keep: boolean) {
 }
 
 async function probeSession(sessionId: string, followMs: number) {
-  const session = await getSession(sessionId);
+  const session = await getSessionMeta(sessionId);
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
   }

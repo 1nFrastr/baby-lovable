@@ -13,7 +13,7 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 
 function githubSyncErrorResponse(error: GithubSyncError) {
   return NextResponse.json(
@@ -51,7 +51,7 @@ export async function GET(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -101,7 +101,7 @@ export async function POST(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -170,7 +170,7 @@ export async function DELETE(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }

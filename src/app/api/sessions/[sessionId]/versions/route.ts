@@ -11,7 +11,7 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 
 function toVersionItem(task: SessionGitSyncTask): VersionHistoryItem {
   const sha = task.remoteSha ?? task.localCommitSha;
@@ -48,7 +48,7 @@ export async function GET(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }

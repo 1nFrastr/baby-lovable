@@ -3,7 +3,12 @@ import type { UIMessage } from "ai";
 
 import { checkpointSessionTurn } from "@/lib/git/checkpoint-session-turn";
 import type { SessionAuthContext } from "@/lib/session/auth-context";
-import { getSession, replaceMessages, updateSession } from "@/lib/session/store";
+import {
+  getSession,
+  getSessionMeta,
+  replaceMessages,
+  updateSession,
+} from "@/lib/session/store";
 import {
   beginSessionTurnCancellation,
   finalizeSessionTurnCancellation,
@@ -116,7 +121,7 @@ export async function cancelSessionRun(
 ): Promise<
   CancelSessionRunResult | { ok: false; error: string; status: number }
 > {
-  const initial = await getSession(sessionId, auth);
+  const initial = await getSessionMeta(sessionId, auth);
   if (!initial) {
     return { ok: false, error: "Session not found", status: 404 };
   }

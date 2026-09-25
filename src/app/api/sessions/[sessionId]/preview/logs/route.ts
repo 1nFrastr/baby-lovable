@@ -3,7 +3,7 @@ import {
   SessionAccessDeniedError,
   UnauthenticatedError,
 } from "@/lib/session/auth-context";
-import { getSession } from "@/lib/session/store";
+import { getSessionMeta } from "@/lib/session/store";
 import { getSandboxDriverForSession } from "@/lib/sandbox/providers";
 import {
   getRuntimeSnapshot,
@@ -97,7 +97,7 @@ export async function GET(
   }
 
   try {
-    const session = await getSession(sessionId, auth);
+    const session = await getSessionMeta(sessionId, auth);
     if (!session) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
