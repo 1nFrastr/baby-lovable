@@ -176,20 +176,20 @@ Next, in order:
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
 - [x] Multimodal input (images and documents in chat; screenshot / design → edit)
-- [ ] Intent routing (fast model): before the main builder turn, classify what the user wants (tweak vs greenfield vs clarify / out-of-scope) and the product complexity (toy page → multi-page app → app with backend). Drive skill choice, step budget, and whether to enter Plan mode — do not run the full builder for every prompt. Implementation reference: [OpenAI Codex](https://github.com/openai/codex) (routing / plan / model-tier patterns)
+- [ ] Intent routing (fast model): classify intent + product complexity up front; set skill choice, step budget, and Plan mode
 - [ ] Human-in-the-loop: pause the same turn when the user must intervene (clarify, choose, paste a secret, approve a plan / publish / destructive tool, or complete a login in a browser test), then resume. Plan mode, connectors, and ship reuse this.
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
 - [x] Web search: look up current docs, APIs, and examples while building
 - [x] Skills (session-level playbooks)
 - [ ] Memory: durable session / user memory beyond compaction summaries
 - [ ] External context: pull in Google Docs, Drive, Notion (and similar) via connectors / MCP
-- [ ] MCP as the connector bus (deploy, images, BaaS, docs) instead of one-off tools
+- [ ] MCP (progressive disclosure): L0 catalog of servers/tools in context; load schemas and connect on demand (deploy, images, BaaS, docs) — same pattern as skills
 - Later: subagents (explore / implement / verify) — highest cost on WorkflowAgent
 
 **2. Host UI/UX** — Functional workspace exists; the host app itself is not yet a design system.
 
 - [ ] Lovable-class host UI: interaction, layout, and a shared design system (tokens + components) for the editor chrome, not the generated apps
-- [ ] Slash command system (web composer): today only `/summarize` in the host UI. Expand the registry (new host-side commands, args, discoverability) and harden the composer menu (prefix match, unknown-command UX) without turning `/…` into free-form chat. Implementation reference: [OpenAI Codex](https://github.com/openai/codex) slash popup + dispatch — borrow registry, gating, and queue-during-task patterns for the web composer only (not CLI parity, not a TUI port)
+- [ ] Slash commands (web): useful host actions beyond `/summarize` — e.g. `/plan`, `/model`, `/status`, `/help` — plus composer discoverability (menu, args, prefix match)
 
 **3. Visual Edit** — Preview iframe bridge exists (location / back-forward / Visual Picker).
 
@@ -228,3 +228,5 @@ Next, in order:
 - [ ] First-run setup page after install: required vs optional capabilities, deep links to each vendor, paste keys, then start
 - [ ] Completeness check: which integrations are ready, which are skipped, what is blocked until a key exists
 - Later: optional computer-use to drive vendor consoles — not the default path
+
+References: [OpenAI Codex](https://github.com/openai/codex) (one source among others for intent routing, slash commands, progressive tool disclosure)
