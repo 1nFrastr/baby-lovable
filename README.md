@@ -176,7 +176,7 @@ Next, in order:
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
 - [x] Multimodal input (images and documents in chat; screenshot / design → edit)
-- [ ] Intent routing (fast model): before the main builder turn, classify what the user wants (tweak vs greenfield vs clarify / out-of-scope) and the product complexity (toy page → multi-page app → app with backend). Drive skill choice, step budget, and whether to enter Plan mode — do not run the full builder for every prompt. Implementation reference: [OpenAI Codex](https://github.com/openai/codex) (routing / plan / model-tier patterns in the open CLI)
+- [ ] Intent routing (fast model): before the main builder turn, classify what the user wants (tweak vs greenfield vs clarify / out-of-scope) and the product complexity (toy page → multi-page app → app with backend). Drive skill choice, step budget, and whether to enter Plan mode — do not run the full builder for every prompt. Implementation reference: [OpenAI Codex](https://github.com/openai/codex) (routing / plan / model-tier patterns)
 - [ ] Human-in-the-loop: pause the same turn when the user must intervene (clarify, choose, paste a secret, approve a plan / publish / destructive tool, or complete a login in a browser test), then resume. Plan mode, connectors, and ship reuse this.
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
 - [x] Web search: look up current docs, APIs, and examples while building
@@ -189,7 +189,7 @@ Next, in order:
 **2. Host UI/UX** — Functional workspace exists; the host app itself is not yet a design system.
 
 - [ ] Lovable-class host UI: interaction, layout, and a shared design system (tokens + components) for the editor chrome, not the generated apps
-- [ ] Slash command system: today only `/summarize` (web + CLI) and CLI `/exit` / `/quit`. Expand the shared registry (new host-side commands, args, discoverability), keep web ↔ CLI parity where it makes sense, and harden the composer menu (prefix match, unknown-command UX) without turning `/…` into free-form chat. Implementation reference: [OpenAI Codex](https://github.com/openai/codex) slash popup + dispatch (`codex-rs/tui` composer / `slash_command` / `slash_dispatch`) — borrow registry, gating, and queue-during-task patterns, not a port of the Rust TUI
+- [ ] Slash command system (web composer): today only `/summarize` in the host UI. Expand the registry (new host-side commands, args, discoverability) and harden the composer menu (prefix match, unknown-command UX) without turning `/…` into free-form chat. Implementation reference: [OpenAI Codex](https://github.com/openai/codex) slash popup + dispatch — borrow registry, gating, and queue-during-task patterns for the web composer only (not CLI parity, not a TUI port)
 
 **3. Visual Edit** — Preview iframe bridge exists (location / back-forward / Visual Picker).
 
