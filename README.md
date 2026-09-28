@@ -176,6 +176,7 @@ Next, in order:
 **1. Agent capabilities** — Still a single builder with a fixed tool set.
 
 - [x] Multimodal input (images and documents in chat; screenshot / design → edit)
+- [ ] Intent routing (fast model): before the main builder turn, classify what the user wants (tweak vs greenfield vs clarify / out-of-scope) and the product complexity (toy page → multi-page app → app with backend). Drive skill choice, step budget, and whether to enter Plan mode — do not run the full builder for every prompt
 - [ ] Human-in-the-loop: pause the same turn when the user must intervene (clarify, choose, paste a secret, approve a plan / publish / destructive tool, or complete a login in a browser test), then resume. Plan mode, connectors, and ship reuse this.
 - [ ] Plan mode and todos: plan before implementing, keep a visible task list across steps
 - [x] Web search: look up current docs, APIs, and examples while building
@@ -188,6 +189,7 @@ Next, in order:
 **2. Host UI/UX** — Functional workspace exists; the host app itself is not yet a design system.
 
 - [ ] Lovable-class host UI: interaction, layout, and a shared design system (tokens + components) for the editor chrome, not the generated apps
+- [ ] Slash command system: today only `/summarize` (web + CLI) and CLI `/exit` / `/quit`. Expand the shared registry (new host-side commands, args, discoverability), keep web ↔ CLI parity where it makes sense, and harden the composer menu (prefix match, unknown-command UX) without turning `/…` into free-form chat
 
 **3. Visual Edit** — Preview iframe bridge exists (location / back-forward / Visual Picker).
 
