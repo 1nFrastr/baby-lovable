@@ -1,7 +1,7 @@
 /**
- * After an agent turn, remount the preview iframe unless the user has been
- * interacting with it — in that case show a manual refresh prompt so we do
- * not wipe in-progress clicks, forms, or inspect-mode picking.
+ * After an agent turn, Next.js HMR already updates the live iframe. Do not
+ * remount. Only offer a manual refresh when the user has been interacting, so
+ * they can take a full reload on their own terms (forms, inspect, focus).
  */
 export function shouldPromptPreviewRefresh(options: {
   iframeLoaded: boolean;
@@ -17,13 +17,4 @@ export function shouldPromptPreviewRefresh(options: {
     options.inspectMode ||
     options.iframeFocused
   );
-}
-
-export function shouldAutoRefreshPreview(options: {
-  iframeLoaded: boolean;
-  userInteractedSinceLoad: boolean;
-  inspectMode: boolean;
-  iframeFocused: boolean;
-}): boolean {
-  return options.iframeLoaded && !shouldPromptPreviewRefresh(options);
 }

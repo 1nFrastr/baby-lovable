@@ -20,10 +20,7 @@ import {
   PREVIEW_BRIDGE_SOURCE,
   type PreviewElementPickPayload,
 } from "@/lib/preview/bridge-protocol";
-import {
-  shouldAutoRefreshPreview,
-  shouldPromptPreviewRefresh,
-} from "@/lib/preview/refresh-policy";
+import { shouldPromptPreviewRefresh } from "@/lib/preview/refresh-policy";
 import type { PreviewViewportMode } from "@/lib/preview/viewport";
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import {
@@ -393,9 +390,9 @@ export function PreviewPanel({
     setEmbedRemountNonce((nonce) => nonce + 1);
   }, []);
 
-  // After each agent turn: sync Files explorer. Remount the iframe when the
-  // user has not been using it; otherwise offer a refresh prompt so we do not
-  // interrupt forms, clicks, or inspect-mode picking.
+  // After each agent turn: sync Files explorer. Leave the iframe mounted —
+  // Next.js HMR already applied the edit. Only prompt if the user has been
+  // interacting, so they can opt in to a full remount without losing work.
   useEffect(() => {
     const previous = prevAgentRunStatusRef.current;
     prevAgentRunStatusRef.current = runStatus;
@@ -414,22 +411,19 @@ export function PreviewPanel({
       if (!readyPreviewUrl || !iframeLoadedRef.current) {
         return;
       }
-      const refreshOptions = {
-        iframeLoaded: true,
-        userInteractedSinceLoad: iframeInteractedSinceLoadRef.current,
-        inspectMode: inspectModeRef.current,
-        iframeFocused:
-          document.activeElement === previewIframeRef.current,
-      };
-      if (shouldPromptPreviewRefresh(refreshOptions)) {
+      if (
+        shouldPromptPreviewRefresh({
+          iframeLoaded: true,
+          userInteractedSinceLoad: iframeInteractedSinceLoadRef.current,
+          inspectMode: inspectModeRef.current,
+          iframeFocused:
+            document.activeElement === previewIframeRef.current,
+        })
+      ) {
         setPreviewRefreshPending(true);
-        return;
-      }
-      if (shouldAutoRefreshPreview(refreshOptions)) {
-        applyPreviewRefresh();
       }
     });
-  }, [applyPreviewRefresh, runStatus, readyPreviewUrl]);
+  }, [runStatus, readyPreviewUrl]);
 
   // Sandbox recreate bumps generation — re-list after Freestyle restore, not starter.
   useEffect(() => {
