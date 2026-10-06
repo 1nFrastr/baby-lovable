@@ -7,11 +7,11 @@ import {
 } from "@/lib/preview/bridge-protocol";
 
 describe("bridge-protocol guards", () => {
-  it("accepts baby-lovable-preview messages", () => {
+  it("accepts activity messages", () => {
     expect(
       isPreviewBridgeMessage({
         source: PREVIEW_BRIDGE_SOURCE,
-        type: "element-picked",
+        type: "activity",
       }),
     ).toBe(true);
     expect(isPreviewBridgeMessage({ source: "other", type: "location" })).toBe(

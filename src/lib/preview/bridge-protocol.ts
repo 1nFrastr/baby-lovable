@@ -41,6 +41,12 @@ export interface PreviewBridgeInspectStateMessage {
   enabled: boolean;
 }
 
+/** Child → parent: user interacted with the preview document. */
+export interface PreviewBridgeActivityMessage {
+  source: typeof PREVIEW_BRIDGE_SOURCE;
+  type: "activity";
+}
+
 /** Child → parent: user clicked a DOM node while inspect is on. */
 export interface PreviewElementPickPayload {
   tagName: string;
@@ -72,6 +78,7 @@ export interface PreviewBridgeElementPickedMessage {
 export type PreviewBridgeChildMessage =
   | PreviewBridgeLocationMessage
   | PreviewBridgeInspectStateMessage
+  | PreviewBridgeActivityMessage
   | PreviewBridgeElementPickedMessage;
 
 export type PreviewBridgeParentMessage =

@@ -462,6 +462,19 @@ if (typeof window !== "undefined" && isInIframe()) {
     }
   };
 
+  let lastActivityAt = 0;
+  const postActivity = () => {
+    const now = Date.now();
+    if (now - lastActivityAt < 400) {
+      return;
+    }
+    lastActivityAt = now;
+    window.parent.postMessage({ source: SOURCE, type: "activity" }, "*");
+  };
+
+  window.addEventListener("pointerdown", postActivity, true);
+  window.addEventListener("keydown", postActivity, true);
+  window.addEventListener("input", postActivity, true);
   window.addEventListener("pointermove", onPointerMove, true);
   window.addEventListener("click", onClickCapture, true);
   window.addEventListener("keydown", onKeyDown, true);

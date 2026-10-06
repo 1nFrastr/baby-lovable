@@ -20,6 +20,10 @@ import {
   PREVIEW_BRIDGE_SOURCE,
   type PreviewElementPickPayload,
 } from "@/lib/preview/bridge-protocol";
+import {
+  shouldAutoRefreshPreview,
+  shouldPromptPreviewRefresh,
+} from "@/lib/preview/refresh-policy";
 import type { PreviewViewportMode } from "@/lib/preview/viewport";
 import type { AppServerStatus } from "@/lib/sandbox/preview-types";
 import {
@@ -178,6 +182,8 @@ export function PreviewPanel({
   const prevAgentRunStatusRef = useRef<SessionRunStatus | null>(null);
   const iframeLoadedRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  /** True after pointer/keyboard/scroll inside the iframe since last remount. */
+  const iframeInteractedSinceLoadRef = useRef(false);
   const prevPreviewGenerationRef = useRef(previewGeneration);
 
   const [iframeLocation, setIframeLocation] =
@@ -242,6 +248,7 @@ export function PreviewPanel({
 
   // Remount clears SPA history inside the iframe — reset chrome until bridge reports.
   useEffect(() => {
+    iframeInteractedSinceLoadRef.current = false;
     setIframeLocation(null);
   }, [previewIframeKey]);
 
@@ -260,6 +267,11 @@ export function PreviewPanel({
         return;
       }
       if (!isPreviewBridgeMessage(event.data)) {
+        return;
+      }
+
+      if (event.data.type === "activity") {
+        iframeInteractedSinceLoadRef.current = true;
         return;
       }
 
@@ -374,8 +386,16 @@ export function PreviewPanel({
     postInspectMode(true);
   }, [iframeLoaded, previewIframeKey, postInspectMode]);
 
-  // After each agent turn: sync Files explorer, but do not remount the iframe
-  // (that interrupts in-iframe interaction). Offer a soft refresh prompt instead.
+  const applyPreviewRefresh = useCallback(() => {
+    window.clearTimeout(previewReloadSpinTimerRef.current);
+    setPreviewRefreshPending(false);
+    setPreviewReloadSpinning(true);
+    setEmbedRemountNonce((nonce) => nonce + 1);
+  }, []);
+
+  // After each agent turn: sync Files explorer. Remount the iframe when the
+  // user has not been using it; otherwise offer a refresh prompt so we do not
+  // interrupt forms, clicks, or inspect-mode picking.
   useEffect(() => {
     const previous = prevAgentRunStatusRef.current;
     prevAgentRunStatusRef.current = runStatus;
@@ -391,11 +411,25 @@ export function PreviewPanel({
     queueMicrotask(() => {
       setFilesRefreshKey((key) => key + 1);
       setVersionsRefreshKey((key) => key + 1);
-      if (readyPreviewUrl && iframeLoadedRef.current) {
+      if (!readyPreviewUrl || !iframeLoadedRef.current) {
+        return;
+      }
+      const refreshOptions = {
+        iframeLoaded: true,
+        userInteractedSinceLoad: iframeInteractedSinceLoadRef.current,
+        inspectMode: inspectModeRef.current,
+        iframeFocused:
+          document.activeElement === previewIframeRef.current,
+      };
+      if (shouldPromptPreviewRefresh(refreshOptions)) {
         setPreviewRefreshPending(true);
+        return;
+      }
+      if (shouldAutoRefreshPreview(refreshOptions)) {
+        applyPreviewRefresh();
       }
     });
-  }, [runStatus, readyPreviewUrl]);
+  }, [applyPreviewRefresh, runStatus, readyPreviewUrl]);
 
   // Sandbox recreate bumps generation — re-list after Freestyle restore, not starter.
   useEffect(() => {
@@ -431,13 +465,6 @@ export function PreviewPanel({
       setPanelTab("preview");
     }
   }, [showSourceControlUi, panelTab]);
-
-  const applyPreviewRefresh = useCallback(() => {
-    window.clearTimeout(previewReloadSpinTimerRef.current);
-    setPreviewRefreshPending(false);
-    setPreviewReloadSpinning(true);
-    setEmbedRemountNonce((nonce) => nonce + 1);
-  }, []);
 
   const navigatePreview = useCallback(
     (action: "back" | "forward" | "reload" | "home") => {
