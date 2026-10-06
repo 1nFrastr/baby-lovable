@@ -635,11 +635,15 @@ export function Chat({
     stopping,
   ]);
 
+  const localTurnPending =
+    localUserMessageId != null &&
+    (status === "submitted" || status === "streaming");
   const activityLabel = resolveChatActivityLabel({
     live:
       (serverTurnActive ||
         Boolean(pendingUserMessageId) ||
-        uploadingAttachments) &&
+        uploadingAttachments ||
+        localTurnPending) &&
       !stopping,
     lastMessage: chatMessages[chatMessages.length - 1],
   });

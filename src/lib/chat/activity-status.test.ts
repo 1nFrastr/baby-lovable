@@ -116,12 +116,57 @@ describe("resolveChatActivityLabel", () => {
     ).toBeNull();
   });
 
+  it("keeps planning until a visible successor row exists", () => {
+    expect(
+      resolveChatActivityLabel({
+        live: true,
+        lastMessage: assistant("a1", [{ type: "step-start" }]),
+      }),
+    ).toBe(CHAT_PLANNING_LABEL);
+
+    expect(
+      resolveChatActivityLabel({
+        live: true,
+        lastMessage: assistant("a1", [
+          { type: "step-start" },
+          { type: "text", text: "", state: "streaming" },
+        ]),
+      }),
+    ).toBe(CHAT_PLANNING_LABEL);
+
+    expect(
+      resolveChatActivityLabel({
+        live: true,
+        lastMessage: assistant("a1", [
+          {
+            type: "tool-readFile",
+            toolCallId: "call_1",
+            state: "output-available",
+            input: { path: "src/app/page.tsx" },
+            output: { content: "…" },
+          },
+          { type: "step-start" },
+        ]),
+      }),
+    ).toBe(CHAT_PLANNING_LABEL);
+  });
+
   it("hides planning while text or reasoning is the latest activity", () => {
     expect(
       resolveChatActivityLabel({
         live: true,
         lastMessage: assistant("a1", [
           { type: "text", text: "Working on it", state: "streaming" },
+        ]),
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveChatActivityLabel({
+        live: true,
+        lastMessage: assistant("a1", [
+          { type: "step-start" },
+          { type: "reasoning", text: "", state: "streaming" },
         ]),
       }),
     ).toBeNull();
