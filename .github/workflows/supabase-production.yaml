@@ -38,4 +38,5 @@ jobs:
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
 
       - name: Push pending migrations
-        run: supabase db push --yes
+        # CLI v3+ defaults to the local stack; --remote targets the linked project.
+        run: supabase db push --yes --remote

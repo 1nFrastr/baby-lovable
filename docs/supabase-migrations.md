@@ -36,7 +36,7 @@ Workflow: [`.github/workflows/supabase-production.yaml`](../.github/workflows/su
 | `push` to `main` | Merge that touches `supabase/migrations/**` (or this workflow file) |
 | `workflow_dispatch` | Manual run from the Actions tab — not from local CLI |
 
-The job links the production project and runs `supabase db push --yes`. It is idempotent: already-applied versions are skipped.
+The job links the production project and runs `supabase db push --yes --remote` (CLI v3+ defaults to local without `--remote`). It is idempotent: already-applied versions are skipped.
 
 PRs also start a throwaway local stack and apply the same files ([`.github/workflows/supabase-ci.yaml`](../.github/workflows/supabase-ci.yaml)). That check does not touch production.
 
