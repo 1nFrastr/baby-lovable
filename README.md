@@ -196,12 +196,19 @@ Next, in order:
 - [x] Visual picker: click a DOM node in Preview → chip in the composer (pick-to-chat)
 - Later: screenshot of the node, DOM → source mapping, inline style edits
 
-**4. Build & Ship** — Today: Next.js starter only; Preview dies with the sandbox.
+**4. Build & Ship** — Today: Next.js starter + Backend panel (BYO Supabase / Stripe / Publish).
 
-- [ ] Publish: one-click deploy from Freestyle `main` to a durable public URL
-- [ ] Generated-app backend: Auth, DB, Storage, Edge Functions
-- [ ] Payments (Stripe) so generated apps can charge money
-- [ ] Security gate before publish: secrets in git, `npm audit`, dangerous APIs (not a standalone scanner product)
+- [x] Vercel Connect connection layer: per-app Supabase authorization, Stripe user-key grants or dedicated managed-key bindings, server-derived identities, and safe status
+- [x] Backend panel: connect the generated app's own services and refresh preview settings; Connect credential rotation requires refresh and republish
+- [ ] Customer self-service managed Stripe key issuance: dedicated managed connectors currently require operator setup/assignment
+- [x] Host-managed `backend` tool: schema inspection, versioned SQL migrations, Auth callbacks, storage buckets, JWT-protected functions, and Stripe notification setup
+- [x] Generated-app env injection: encrypted credentials, managed `.env.local` block, Git exclusion checks, and explicit activation failures
+- [x] Vercel-only Publish: owner-scoped Connect authorization, explicit Team selection, immutable Freestyle source, durable deployment reconciliation, stable production URL, and redacted build logs (live OAuth acceptance requires enabled Vercel API permissions; see [setup](docs/vercel-publish.md))
+- [ ] Dedicated-project acceptance: real Supabase Auth/RLS/storage/functions and Stripe test-payment fulfillment (connection and compile checks alone are insufficient)
+- [ ] Complete publish security gate: source secret scanning, `npm audit`, dangerous APIs (tracked private env files are blocked today)
+- [ ] Deeper Supabase Studio-style schema browser inside the panel
+
+See [generated-app backends](docs/generated-app-backends.md) for setup, module boundaries, supported operations, verification, and remaining rollout constraints.
 - Later: mobile (Expo / RN) as a second runtime — new snapshot, no iframe picker; do not start until Web can ship and take payment
 
 **5. Time travel** — Freestyle per-turn checkpoints already exist; History cannot restore yet.

@@ -67,6 +67,8 @@ export function getDaytonaDomainAllowList(): string | undefined {
     "registry.npmjs.com",
     "nodejs.org",
     "api.keenable.ai",
+    "*.supabase.co",
+    "api.stripe.com",
   ].join(",");
 }
 

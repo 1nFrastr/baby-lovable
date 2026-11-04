@@ -1,5 +1,7 @@
 import type { Sandbox } from "@vercel/sandbox";
 
+import { syncIntegrationEnvToWorkspace } from "@/lib/integrations/runtime-env";
+
 import { withVercelAllowedDevOrigin } from "./allowed-dev-origin";
 import { getVercelDevPort } from "./config";
 import {
@@ -79,6 +81,14 @@ export async function startVercelDevSession(
   );
 
   await ensureVercelAllowedDevOrigins(project);
+
+  const synced = await syncIntegrationEnvToWorkspace(sessionId, project);
+  if (synced.wrote) {
+    console.warn(
+      `[vercel] session=${sessionId} updated integration environment (${synced.keys.join(",")})`,
+    );
+  }
+
   await killPersistedDevCommand(vercel.sdkSandbox, sessionId);
   await assertDevPortFree(vercel.sdkSandbox, port);
 
@@ -86,6 +96,7 @@ export async function startVercelDevSession(
     cmd: launch.cmd,
     args: launch.args,
     cwd: launch.cwd,
+    env: { NEXT_PUBLIC_BABY_LOVABLE_EMBEDDED_PREVIEW: "1" },
     detached: true,
   });
 

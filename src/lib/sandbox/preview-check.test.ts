@@ -41,7 +41,7 @@ describe("peekCompileErrorIfPreviewReady", () => {
     getPreviewBackend.mockResolvedValue(
       mockBackend({
         getAppServerStatus: vi.fn(async () => ({
-          status: "ready",
+          status: "ready" as const,
           url: "http://localhost:3001",
           port: 3001,
         })),
@@ -59,7 +59,7 @@ describe("peekCompileErrorIfPreviewReady", () => {
     const getBuildError = vi.fn(async () => "should not read");
     getPreviewBackend.mockResolvedValue(
       mockBackend({
-        getAppServerStatus: vi.fn(async () => ({ status: "installing" })),
+        getAppServerStatus: vi.fn(async () => ({ status: "installing" as const })),
         getBuildError,
       }),
     );

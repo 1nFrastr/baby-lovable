@@ -93,6 +93,8 @@ describe("vercel sandbox config", () => {
     expect(policy).not.toBe("allow-all");
     if (policy !== "allow-all") {
       expect(policy.allow).toContain("api.keenable.ai");
+      expect(policy.allow).toContain("*.supabase.co");
+      expect(policy.allow).toContain("api.stripe.com");
     }
   });
 

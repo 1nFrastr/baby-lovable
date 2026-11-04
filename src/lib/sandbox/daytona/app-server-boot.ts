@@ -1,4 +1,6 @@
 /** App-server boot: start / stop (no runtime pnpm / node_modules install). */
+import { syncIntegrationEnvToWorkspace } from "@/lib/integrations/runtime-env";
+
 import { logDaytonaBootstrap } from "./bootstrap-log";
 import { DAYTONA_WORKSPACE_ROOT, getDaytonaDevPort } from "./config";
 import { resolvePackageManager } from "../package-manager";
@@ -32,6 +34,15 @@ export async function startDevSession(
 
   logDaytonaBootstrap(sessionId, "preview", `dev ${pm.dev(port)} on ${sdk.id}`);
 
+  const synced = await syncIntegrationEnvToWorkspace(sessionId, sandbox);
+  if (synced.wrote) {
+    logDaytonaBootstrap(
+      sessionId,
+      "preview",
+      `updated integration environment (${synced.keys.join(",")})`,
+    );
+  }
+
   try {
     await sdk.process.deleteSession(sessionName);
   } catch {
@@ -42,7 +53,7 @@ export async function startDevSession(
   const cmd = await sdk.process.executeSessionCommand(
     sessionName,
     {
-      command: `cd ${JSON.stringify(DAYTONA_WORKSPACE_ROOT)} && ${pm.dev(port)}`,
+      command: `cd ${JSON.stringify(DAYTONA_WORKSPACE_ROOT)} && NEXT_PUBLIC_BABY_LOVABLE_EMBEDDED_PREVIEW=1 ${pm.dev(port)}`,
       runAsync: true,
     },
     30,

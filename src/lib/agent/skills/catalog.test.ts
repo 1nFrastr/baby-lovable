@@ -11,6 +11,7 @@ describe("skill catalog", () => {
     const catalog = loadSkillCatalog();
     const names = catalog.map((skill) => skill.name).sort();
     expect(names).toEqual([
+      "deploy",
       "deps",
       "frontend-design",
       "particles-3d",
@@ -18,6 +19,8 @@ describe("skill catalog", () => {
       "preview",
       "remotion",
       "storefront",
+      "stripe",
+      "supabase",
       "web",
       "workspace-unix",
     ]);
@@ -34,6 +37,9 @@ describe("skill catalog", () => {
     expect(paths).toContain(".baby/skills/remotion/SKILL.md");
     expect(paths).toContain(".baby/skills/particles-3d/SKILL.md");
     expect(paths).toContain(".baby/skills/storefront/SKILL.md");
+    expect(paths).toContain(".baby/skills/supabase/SKILL.md");
+    expect(paths).toContain(".baby/skills/stripe/SKILL.md");
+    expect(paths).toContain(".baby/skills/deploy/SKILL.md");
     expect(paths).toContain(".baby/skills/personal-site/SKILL.md");
     expect(paths).toContain(".baby/skills/deps/scripts/add.sh");
     expect(paths).toContain(".baby/skills/web/scripts/search.sh");

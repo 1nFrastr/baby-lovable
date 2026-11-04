@@ -16,7 +16,7 @@ Typical surfaces: home merchandising → collection/grid → product detail (PDP
 ## Commerce UX
 
 - Cart shows line items, quantity, subtotal; empty cart invites continue shopping
-- Checkout as a short linear form (contact → shipping → pay placeholder). Mock pay is fine; do not invent real payment credentials or scrape gateways
+- Checkout as a short linear form (contact → shipping → pay placeholder). Mock pay is fine for demos; for real charges read `.baby/skills/stripe/SKILL.md` after the user links Stripe in the Backend panel — do not invent payment credentials or scrape gateways
 - Persist cart in `localStorage` or simple client state for demos; keep types for Product / CartLine
 
 ## Visual

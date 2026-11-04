@@ -32,7 +32,8 @@ describe("VercelShellGitRunner", () => {
     });
     try {
       await runner.pull({
-        username: "x-access-token",
+        tokenId: "test-token",
+      username: "x-access-token",
         password: "super-secret",
       });
       throw new Error("expected pull to fail");
@@ -53,6 +54,7 @@ describe("VercelShellGitRunner", () => {
       return ok();
     });
     await runner.pull({
+      tokenId: "test-token",
       username: "x-access-token",
       password: "token",
     });
@@ -74,6 +76,7 @@ describe("VercelShellGitRunner", () => {
       return ok();
     });
     const sha = await runner.replayLocalOntoRemote({
+      tokenId: "test-token",
       username: "x-access-token",
       password: "token",
     });

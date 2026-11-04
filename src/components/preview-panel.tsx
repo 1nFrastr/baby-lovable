@@ -33,6 +33,7 @@ import {
 } from "@/lib/session/types";
 
 import { DevServerLogsPanel } from "./dev-server-logs-panel";
+import { BackendPanel } from "./backend-panel";
 import { GithubSyncPanel } from "./github-sync-panel";
 import {
   PreviewViewportFrame,
@@ -61,7 +62,7 @@ interface PreviewPanelProps {
 /** Retry once after ready so an early failed stylesheet request can recover. */
 const READY_EMBED_RELOAD_DELAY_MS = 1_000;
 
-type PreviewPanelTab = "preview" | "files" | "history";
+type PreviewPanelTab = "preview" | "files" | "history" | "backend";
 
 interface PreviewBridgeLocation {
   href: string;
@@ -170,6 +171,10 @@ export function PreviewPanel({
   /** Bumped on turn end / sourceControl change — refetch version list. */
   const [versionsRefreshKey, setVersionsRefreshKey] = useState(0);
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [backendMountSessionId, setBackendMountSessionId] = useState<string | null>(null);
+  const [backendRefreshKey, setBackendRefreshKey] = useState(0);
+  const [backendBusy, setBackendBusy] = useState(false);
+  const backendMounted = backendMountSessionId === sessionId;
   const filesMounted = filesMountSessionId === sessionId;
   const historyMounted = historyMountSessionId === sessionId;
   const sourceControl = projection?.sourceControl ?? null;
@@ -241,6 +246,14 @@ export function PreviewPanel({
     setPreviewRefreshPending(false);
     setIframeLocation(null);
     setFilesBusy(false);
+    setBackendBusy(false);
+    if (new URLSearchParams(window.location.search).has("backend")) {
+      setBackendMountSessionId(sessionId);
+      setPanelTab("backend");
+      setConsoleExpanded(false);
+    } else {
+      setPanelTab((current) => current === "backend" ? "preview" : current);
+    }
   }, [sessionId]);
 
   // Remount clears SPA history inside the iframe — reset chrome until bridge reports.
@@ -408,6 +421,7 @@ export function PreviewPanel({
     queueMicrotask(() => {
       setFilesRefreshKey((key) => key + 1);
       setVersionsRefreshKey((key) => key + 1);
+      setBackendRefreshKey((key) => key + 1);
       if (!readyPreviewUrl || !iframeLoadedRef.current) {
         return;
       }
@@ -702,6 +716,7 @@ export function PreviewPanel({
                   ...(showSourceControlUi
                     ? ([{ id: "history", label: "History" }] as const)
                     : []),
+                  { id: "backend", label: "Backend" },
                 ] as const
               ).map((tab) => (
                 <button
@@ -715,6 +730,9 @@ export function PreviewPanel({
                       setConsoleExpanded(false);
                     } else if (tab.id === "history") {
                       setHistoryMountSessionId(sessionId);
+                      setConsoleExpanded(false);
+                    } else if (tab.id === "backend") {
+                      setBackendMountSessionId(sessionId);
                       setConsoleExpanded(false);
                     }
                     setPanelTab(tab.id);
@@ -779,6 +797,18 @@ export function PreviewPanel({
                 className={`h-3.5 w-3.5 ${historyBusy ? "animate-spin" : ""}`}
                 strokeWidth={2}
               />
+            </button>
+          ) : panelTab === "backend" ? (
+            <button
+              type="button"
+              onClick={() => setBackendRefreshKey((key) => key + 1)}
+              disabled={backendBusy}
+              className={toolbarIconButtonClass}
+              title="Refresh backend"
+              aria-label="Refresh backend"
+              aria-busy={backendBusy || undefined}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${backendBusy ? "animate-spin" : ""}`} strokeWidth={2} />
             </button>
           ) : (
             <>
@@ -961,6 +991,21 @@ export function PreviewPanel({
               sessionId={sessionId}
               refreshKey={versionsRefreshKey}
               onBusyChange={setHistoryBusy}
+            />
+          ) : null}
+        </div>
+
+        <div
+          className={`absolute inset-0 bg-white dark:bg-zinc-950 ${panelTab === "backend" ? "" : "hidden"}`}
+          aria-hidden={panelTab !== "backend"}
+        >
+          {backendMounted ? (
+            <BackendPanel
+              key={sessionId}
+              sessionId={sessionId}
+              refreshKey={backendRefreshKey}
+              active={panelTab === "backend"}
+              onBusyChange={setBackendBusy}
             />
           ) : null}
         </div>

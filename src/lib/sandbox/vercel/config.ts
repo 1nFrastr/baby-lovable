@@ -115,6 +115,8 @@ export function getVercelNetworkPolicy():
       "nodejs.org",
       "*.vercel.run",
       "api.keenable.ai",
+      "*.supabase.co",
+      "api.stripe.com",
     ],
   };
 }

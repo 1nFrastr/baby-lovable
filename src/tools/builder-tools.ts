@@ -2,6 +2,8 @@ import { tool, type ModelMessage } from "ai";
 import { z } from "zod";
 
 import { withFileMutationLock } from "@/lib/agent/file-mutation-lock";
+import { backendInputSchema } from "@/lib/integrations/backend-schema";
+import { backendStep } from "./backend-tool-step";
 import type { OrderedToolCall } from "@/lib/chat/turn-progress";
 import {
   persistToolProgressStep,
@@ -37,6 +39,7 @@ export function createToolsContext(
     exec: context,
     checkPreview: context,
     deleteFile: context,
+    backend: context,
   };
 }
 
@@ -162,6 +165,12 @@ function withTurnProgress<TInput, TOutput>(
 }
 
 export const builderTools = {
+  backend: tool({
+    description: "Manage this generated app's connected Supabase and Stripe through the host. Read the matching skill first. Inspect status/schema, apply versioned SQL migrations, configure sign-in callbacks, create file buckets, deploy JWT-protected functions, or configure Stripe payment notifications. Credentials never enter tool results. Only mutate resources required by the user's request; preserve migration/function source in src/backend/** before applying. Never modify the builder host database.",
+    inputSchema: backendInputSchema,
+    contextSchema: toolContextSchema,
+    execute: withTurnProgress("backend", backendStep),
+  }),
   readFile: tool({
     description:
       "Read a text file from the project workspace. Cannot read .next, node_modules, or .git.",

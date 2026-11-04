@@ -20,6 +20,8 @@ describe("getDaytonaDomainAllowList", () => {
     expect(list).toContain("git.freestyle.sh");
     expect(list).toContain("registry.npmjs.org");
     expect(list).toContain("api.keenable.ai");
+    expect(list).toContain("*.supabase.co");
+    expect(list).toContain("api.stripe.com");
   });
 
   it("honors DAYTONA_DOMAIN_ALLOW_LIST on pro", () => {

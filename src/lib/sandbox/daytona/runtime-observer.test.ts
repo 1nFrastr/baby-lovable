@@ -53,6 +53,8 @@ function snap(
 ): DaytonaRuntimeSnapshot {
   return {
     sessionId: "sess_obs",
+    provider: "daytona",
+    providerMeta: {},
     desired: "preview-ready",
     observed: "starting-devserver",
     sandboxId: "sbx_1",

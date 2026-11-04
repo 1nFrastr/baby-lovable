@@ -25,7 +25,7 @@ const {
     createSandbox: vi.fn(),
     deleteSandboxById: vi.fn(),
     reconnectSandbox: vi.fn(),
-    sandboxRecordExists: vi.fn(async () => true),
+    sandboxRecordExists: vi.fn<(id: string) => Promise<boolean>>(async () => true),
     wrapSandbox: vi.fn(),
     startDevSession: vi.fn(),
     stopDevSession: vi.fn(),
